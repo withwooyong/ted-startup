@@ -7,6 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-17] Phase 3 Build Sprint 3 — 백테스팅 엔진 + 텔레그램 알림 + 통합 테스트
+
+### Added
+- BacktestEngineService: 과거 3년 시그널 수익률 계산 + SignalType별 적중률/평균수익률 집계
+- RunBacktestUseCase 포트 + POST /api/backtest/run API (API Key 보호, 기본 3년, 최대 5년)
+- TelegramClient: RestClient 기반 Telegram Bot API 연동 (환경변수 비활성화 지원)
+- TelegramNotificationService: 4가지 알림 시나리오 (일일 요약/A등급 긴급/배치 실패/주간 리포트)
+- NotificationScheduler: 08:30 일일 요약 (월~금), 토요일 10:00 주간 리포트
+- MarketDataBatchConfig notifyStep: 배치 완료 후 A등급 시그널 긴급 알림 자동 발송
+- SignalRepository.findBySignalDateBetweenWithStock: JOIN FETCH 벌크 조회
+- Testcontainers PostgreSQL 16 통합 테스트 인프라 (싱글톤 컨테이너 패턴)
+- SignalDetectionServiceTest: 시그널 탐지 로직 5개 테스트 (급감/임계값/추세전환/숏스퀴즈/중복방지)
+- BacktestEngineServiceTest: 수익률 계산 + 적중률 집계 + 데이터 부족 처리 4개 테스트
+- BacktestApiIntegrationTest: API 인증/실행 5개 테스트
+- SignalApiIntegrationTest: 시그널 조회/필터/인증 3개 테스트
+- application.yml: telegram.bot-token, telegram.chat-id 환경변수 설정
+
+### Changed
+- API Key 비교: String.equals → MessageDigest.isEqual 상수 시간 비교 (타이밍 공격 방지, 3개 컨트롤러)
+- API Key 미인증 시 403 → 401 UNAUTHORIZED 반환 (3개 컨트롤러)
+- @Value 필드 주입 → 생성자 주입 전환 (BacktestController, BatchController, SignalDetectionController)
+- BacktestEngineService: save() 루프 → saveAll() 일괄 저장
+- MarketDataBatchConfig: SignalRepository 직접 주입 제거 → TelegramNotificationService.sendUrgentAlerts() 위임 (Hexagonal 경계 준수)
+- MarketDataScheduler: 배치 실패 시 e.getMessage() 노출 → 클래스명만 텔레그램 발송
+- BacktestController: @Validated 추가 + from/to 날짜 범위 검증 (최대 5년)
+- TelegramNotificationService.sendBatchFailure: LocalDate → LocalDateTime (시간 정밀도)
+
+---
+
 ## [2026-04-16] Phase 3 Build Sprint 2 — 시그널 엔진 + 대시보드
 
 ### Added
