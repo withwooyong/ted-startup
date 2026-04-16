@@ -16,6 +16,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 - 프론트엔드 대시보드: 메트릭 카드 + 필터 탭 + 시그널 리스트 (`7902cfd`)
 - 프론트엔드 종목 상세: 주가/대차잔고 듀얼 축 차트 (Recharts) (`7902cfd`)
 - SignalCard 컴포넌트, TypeScript 타입 정의, API 클라이언트 (`7902cfd`)
+- BacktestResult Entity + Repository + BacktestQueryService (`63407cd`)
+- GET /api/backtest 백테스팅 결과 조회 API (`63407cd`)
+- 프론트엔드 /backtest 페이지: 성과 테이블 + 보유기간별 수익률 Bar 차트 (`63407cd`)
 
 ### Changed
 - 관리자 API 인증: IP allowlist → API Key 헤더(X-API-Key) 전환 (`e6754cb`)
