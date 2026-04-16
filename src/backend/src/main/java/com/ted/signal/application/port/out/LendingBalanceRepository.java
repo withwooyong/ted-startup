@@ -17,6 +17,9 @@ public interface LendingBalanceRepository extends JpaRepository<LendingBalance, 
 
     Optional<LendingBalance> findByStockIdAndTradingDate(Long stockId, LocalDate date);
 
+    @Query("SELECT lb FROM LendingBalance lb JOIN FETCH lb.stock WHERE lb.tradingDate = :date")
+    List<LendingBalance> findAllByTradingDate(@Param("date") LocalDate date);
+
     boolean existsByStockIdAndTradingDate(Long stockId, LocalDate date);
 
     @Query("""
