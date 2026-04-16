@@ -1,0 +1,35 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "90"
+  },
+  "permissions": {
+    "allow": [
+      "Read(./src/**)",
+      "Write(./src/**)",
+      "Edit(./src/**)",
+      "Read(./pipeline/**)",
+      "Write(./pipeline/**)",
+      "Edit(./pipeline/**)",
+      "Read(./agents/**)",
+      "Read(./docs/**)",
+      "Write(./docs/**)",
+      "Read(./conventions/**)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(./gradlew:*)",
+      "Bash(git:*)",
+      "Bash(docker:*)",
+      "Bash(mkdir:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)"
+    ]
+  }
+}
