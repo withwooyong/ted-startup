@@ -7,6 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-16] Phase 3 Build Sprint 2 — 시그널 엔진 + 대시보드
+
+### Added
+- SignalDetectionService: 3대 시그널 탐지 엔진 (급감/추세전환/숏스퀴즈) (`7902cfd`)
+- POST /api/signals/detect 수동 시그널 탐지 API (`7902cfd`)
+- Spring Batch detectStep 추가 (collectStep → detectStep 순차) (`7902cfd`)
+- 프론트엔드 대시보드: 메트릭 카드 + 필터 탭 + 시그널 리스트 (`7902cfd`)
+- 프론트엔드 종목 상세: 주가/대차잔고 듀얼 축 차트 (Recharts) (`7902cfd`)
+- SignalCard 컴포넌트, TypeScript 타입 정의, API 클라이언트 (`7902cfd`)
+
+### Changed
+- 관리자 API 인증: IP allowlist → API Key 헤더(X-API-Key) 전환 (`e6754cb`)
+- detail.volumeChangeRate 매핑 오류 수정 (`e6754cb`)
+- scoreVolumeChange 음수 방지 Math.max(0, ...) 추가 (`e6754cb`)
+- params.code 안전한 타입 처리 (Array.isArray 체크) (`e6754cb`)
+- 프론트엔드 API 클라이언트 단일화 (중복 fetch 제거) (`e6754cb`)
+- 미사용 변수 signalDates 제거 (`e6754cb`)
+
+---
+
 ## [2026-04-16] Phase 3 Build Sprint 1 — 데이터 파이프라인 구축
 
 ### Added
