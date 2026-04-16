@@ -28,4 +28,14 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
             Long stockId, LocalDate from, LocalDate to);
 
     boolean existsByStockIdAndSignalDateAndSignalType(Long stockId, LocalDate date, SignalType type);
+
+    @Query("""
+            SELECT s FROM Signal s
+            JOIN FETCH s.stock
+            WHERE s.signalDate BETWEEN :from AND :to
+            ORDER BY s.signalDate ASC
+            """)
+    List<Signal> findBySignalDateBetweenWithStock(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 }

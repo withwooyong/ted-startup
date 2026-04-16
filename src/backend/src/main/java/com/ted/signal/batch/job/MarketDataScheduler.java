@@ -1,5 +1,6 @@
 package com.ted.signal.batch.job;
 
+import com.ted.signal.application.service.TelegramNotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -19,6 +20,7 @@ public class MarketDataScheduler {
 
     private final JobLauncher jobLauncher;
     private final Job marketDataCollectionJob;
+    private final TelegramNotificationService notificationService;
 
     /**
      * 매일 06:00 배치 실행 (한국 시간, 월~금)
@@ -33,6 +35,8 @@ public class MarketDataScheduler {
             jobLauncher.run(marketDataCollectionJob, params);
         } catch (Exception e) {
             log.error("스케줄 배치 실행 실패", e);
+            notificationService.sendBatchFailure("marketDataCollectionJob",
+                    e.getClass().getSimpleName() + " — 상세 내용은 서버 로그 참조");
         }
     }
 }
