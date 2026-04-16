@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { getStockDetail } from '@/lib/api/client';
 import {
   StockDetail,
   SIGNAL_TYPE_LABELS,
@@ -20,7 +21,6 @@ import {
   ReferenceDot,
 } from 'recharts';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 const PERIODS = [
   { label: '1M', months: 1 },
   { label: '3M', months: 3 },
@@ -31,7 +31,8 @@ const PERIODS = [
 export default function StockDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const code = params.code as string;
+  const rawCode = params.code;
+  const code = Array.isArray(rawCode) ? rawCode[0] : rawCode ?? '';
   const [data, setData] = useState<StockDetail | null>(null);
   const [period, setPeriod] = useState(3);
   const [loading, setLoading] = useState(true);
@@ -44,12 +45,7 @@ export default function StockDetailPage() {
     fromDate.setMonth(fromDate.getMonth() - period);
     const from = fromDate.toISOString().split('T')[0];
 
-    fetch(`${API_BASE}/stocks/${code}?from=${from}&to=${to}`)
-      .then(res => {
-        if (res.status === 404) throw new Error('해당 종목을 찾을 수 없어요');
-        if (!res.ok) throw new Error('데이터를 불러오지 못했어요');
-        return res.json();
-      })
+    getStockDetail(code, from, to)
       .then((d: StockDetail) => {
         setData(d);
         setLoading(false);
@@ -92,8 +88,6 @@ export default function StockDetailPage() {
     price: p.price,
     balance: p.lendingBalance,
   }));
-
-  const signalDates = new Set(data.signals.map(s => s.date.slice(5)));
 
   return (
     <main className="max-w-6xl mx-auto px-5 py-7">

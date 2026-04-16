@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import SignalCard from '@/components/features/SignalCard';
+import { getSignals } from '@/lib/api/client';
 import { SignalResult } from '@/types/signal';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 const FILTERS = [
   { key: 'all', label: '전체' },
   { key: 'RAPID_DECLINE', label: '급감' },
@@ -23,11 +23,7 @@ export default function DashboardPage() {
     setLoading(true);
     setError(null);
 
-    fetch(`${API_BASE}/signals`)
-      .then(res => {
-        if (!res.ok) throw new Error('데이터를 불러오지 못했어요');
-        return res.json();
-      })
+    getSignals()
       .then((data: SignalResult[]) => {
         setSignals(data);
         setLoading(false);

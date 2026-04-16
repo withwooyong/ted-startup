@@ -164,7 +164,7 @@ public class SignalDetectionService implements DetectSignalsUseCase {
         var detail = Map.<String, Object>of(
                 "balanceChangeRate", lb.getChangeRate() != null ? lb.getChangeRate() : BigDecimal.ZERO,
                 "balanceScore", balanceScore,
-                "volumeChangeRate", sp.getChangeRate() != null ? sp.getChangeRate() : BigDecimal.ZERO,
+                "volumeChangeRate", volumeScore, // 거래량 스코어 (별도 변동률 계산은 scoreVolumeChange 내부)
                 "volumeScore", volumeScore,
                 "priceChangeRate", sp.getChangeRate() != null ? sp.getChangeRate() : BigDecimal.ZERO,
                 "priceScore", priceScore,
@@ -220,7 +220,7 @@ public class SignalDetectionService implements DetectSignalsUseCase {
         if (avgVolume == 0) return 0;
 
         double ratio = today.getVolume() / avgVolume;
-        return (int) Math.min(25, (ratio - 1) * 12.5);
+        return (int) Math.max(0, Math.min(25, (ratio - 1) * 12.5));
     }
 
     /** 주가 상승률 → 스코어 (max 25) */
