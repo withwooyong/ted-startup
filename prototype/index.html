@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIGNAL — 공매도 커버링 시그널</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <style>
+    :root {
+      --bg-base: #0B0E11;
+      --bg-surface: #131720;
+      --bg-elevated: #1A1F2E;
+      --bg-hover: #1E2538;
+      --border: rgba(255,255,255,0.06);
+      --border-active: rgba(99,149,255,0.3);
+      --text-primary: #E8ECF1;
+      --text-secondary: #6B7A90;
+      --text-muted: #3D4A5C;
+      --accent: #6395FF;
+      --accent-glow: rgba(99,149,255,0.15);
+      --accent-soft: rgba(99,149,255,0.08);
+      --red: #FF4D6A;
+      --red-glow: rgba(255,77,106,0.12);
+      --green: #00D68F;
+      --green-glow: rgba(0,214,143,0.12);
+      --orange: #FF8B3E;
+      --orange-glow: rgba(255,139,62,0.12);
+      --yellow: #FFCC00;
+      --grade-a: #FF4D6A;
+      --grade-b: #FF8B3E;
+      --grade-c: #FFCC00;
+      --grade-d: #4A5568;
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Pretendard Variable', -apple-system, sans-serif;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* — Ambient background — */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -40%; left: -20%;
+      width: 80%; height: 80%;
+      background: radial-gradient(ellipse, rgba(99,149,255,0.04) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -30%; right: -10%;
+      width: 60%; height: 60%;
+      background: radial-gradient(ellipse, rgba(255,77,106,0.03) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; position: relative; z-index: 1; }
+
+    /* — Typography — */
+    .font-display { font-family: 'Outfit', sans-serif; }
+    .font-mono { font-family: 'DM Mono', monospace; }
+
+    /* — Header — */
+    header {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(11,14,17,0.85);
+      backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--border);
+    }
+    .header-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 56px;
+    }
+    .logo {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700; font-size: 1.1rem;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--accent) 0%, #a78bfa 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      cursor: pointer;
+    }
+    .logo span { font-weight: 400; opacity: 0.5; margin-left: 6px; font-size: 0.75rem; -webkit-text-fill-color: var(--text-muted); }
+
+    nav { display: flex; gap: 2px; }
+    .nav-btn {
+      padding: 6px 14px; border-radius: 8px; font-size: 0.8rem; font-weight: 500;
+      color: var(--text-secondary); cursor: pointer; border: none; background: none;
+      transition: all 0.2s;
+    }
+    .nav-btn:hover { color: var(--text-primary); background: var(--accent-soft); }
+    .nav-btn.active { color: var(--accent); background: var(--accent-soft); }
+
+    .theme-btn {
+      width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-secondary); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+      font-size: 1rem;
+    }
+    .theme-btn:hover { border-color: var(--border-active); color: var(--accent); }
+
+    /* — Pages — */
+    .page { display: none; padding: 28px 0 40px; }
+    .page.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* — Metric Cards — */
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+    @media (max-width: 640px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+    .metric-card {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 18px 20px;
+      transition: all 0.2s;
+    }
+    .metric-card:hover { border-color: var(--border-active); }
+    .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; font-family:'Outfit',sans-serif; font-weight:500; }
+    .metric-value { font-family: 'Outfit', sans-serif; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em; }
+    .metric-value.red { color: var(--red); }
+    .metric-value.blue { color: var(--accent); }
+    .metric-value.orange { color: var(--orange); }
+
+    /* — Filter Bar — */
+    .filter-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 20px; gap: 12px; flex-wrap: wrap;
+    }
+    .filter-tabs { display: flex; gap: 4px; background: var(--bg-surface); border-radius: 10px; padding: 3px; border: 1px solid var(--border); }
+    .filter-tab {
+      padding: 7px 16px; border-radius: 8px; font-size: 0.78rem; font-weight: 500;
+      color: var(--text-secondary); cursor: pointer; border: none; background: none;
+      transition: all 0.2s; white-space: nowrap;
+    }
+    .filter-tab:hover { color: var(--text-primary); }
+    .filter-tab.active { color: #fff; background: var(--accent); box-shadow: 0 2px 8px rgba(99,149,255,0.3); }
+    .filter-count { font-size: 0.65rem; opacity: 0.6; margin-left: 4px; font-family:'DM Mono',monospace; }
+    .sort-select {
+      padding: 7px 12px; border-radius: 8px; font-size: 0.75rem;
+      background: var(--bg-surface); border: 1px solid var(--border);
+      color: var(--text-secondary); cursor: pointer; outline: none;
+    }
+    .sort-select:focus { border-color: var(--border-active); }
+
+    /* — Signal Cards — */
+    .signal-list { display: flex; flex-direction: column; gap: 8px; }
+    .signal-card {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px 20px;
+      cursor: pointer; transition: all 0.2s;
+      display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 16px;
+    }
+    .signal-card:hover {
+      border-color: var(--border-active);
+      background: var(--bg-hover);
+      transform: translateX(4px);
+    }
+    .signal-icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem;
+    }
+    .signal-icon.squeeze { background: var(--red-glow); }
+    .signal-icon.decline { background: var(--orange-glow); }
+    .signal-icon.reversal { background: var(--accent-glow); }
+    .signal-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+    .signal-tag {
+      font-size: 0.65rem; padding: 2px 8px; border-radius: 4px;
+      font-family: 'DM Mono', monospace; font-weight: 500;
+    }
+    .tag-red { background: var(--red-glow); color: var(--red); }
+    .tag-green { background: var(--green-glow); color: var(--green); }
+    .tag-muted { background: rgba(255,255,255,0.04); color: var(--text-secondary); }
+    .signal-score {
+      text-align: right;
+    }
+    .score-number {
+      font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700;
+      letter-spacing: -0.03em; line-height: 1;
+    }
+    .grade-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 6px;
+      font-size: 0.65rem; font-weight: 700; font-family: 'Outfit', sans-serif;
+      margin-top: 4px;
+    }
+    .grade-A { background: var(--red-glow); color: var(--red); }
+    .grade-B { background: var(--orange-glow); color: var(--orange); }
+    .grade-C { background: rgba(255,204,0,0.12); color: var(--yellow); }
+    .grade-D { background: rgba(255,255,255,0.04); color: var(--text-muted); }
+
+    /* — Pulse animation for A-grade — */
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,77,106,0); }
+      50% { box-shadow: 0 0 0 4px rgba(255,77,106,0.15); }
+    }
+    .signal-card.grade-a-card { animation: pulse-glow 3s ease-in-out infinite; }
+
+    /* — Detail Page — */
+    .back-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.8rem; color: var(--text-secondary); cursor: pointer;
+      border: none; background: none; margin-bottom: 20px; transition: color 0.2s;
+    }
+    .back-btn:hover { color: var(--accent); }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+    @media (max-width: 640px) { .detail-grid { grid-template-columns: 1fr; } }
+    .detail-card {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 22px;
+    }
+    .detail-label { font-size: 0.7rem; color: var(--text-muted); font-family:'Outfit',sans-serif; text-transform:uppercase; letter-spacing:0.06em; }
+    .detail-value { font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 700; letter-spacing: -0.03em; margin-top: 2px; }
+    .detail-sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 8px; display: flex; gap: 16px; }
+    .detail-sub span { display: flex; align-items: center; gap: 4px; }
+    .chart-card {
+      background: var(--bg-surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 20px; margin-bottom: 16px;
+    }
+    .period-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+    .period-tab {
+      padding: 6px 14px; border-radius: 8px; font-size: 0.75rem; font-weight: 500;
+      color: var(--text-secondary); cursor: pointer; border: none;
+      background: none; transition: all 0.15s;
+    }
+    .period-tab:hover { color: var(--text-primary); }
+    .period-tab.active { color: #fff; background: var(--accent); }
+
+    /* — Score Breakdown — */
+    .breakdown-item { margin-bottom: 14px; }
+    .breakdown-header { display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 6px; }
+    .breakdown-label { color: var(--text-secondary); }
+    .breakdown-score { font-family:'DM Mono',monospace; font-weight:500; color:var(--text-primary); }
+    .breakdown-bar { height: 6px; background: rgba(255,255,255,0.04); border-radius: 3px; overflow: hidden; }
+    .breakdown-fill { height: 100%; border-radius: 3px; transition: width 0.8s cubic-bezier(0.16,1,0.3,1); }
+    .fill-blue { background: linear-gradient(90deg, var(--accent), #a78bfa); }
+    .breakdown-total {
+      margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+
+    /* — Backtest — */
+    .backtest-header { margin-bottom: 24px; }
+    .backtest-header h2 { font-family:'Outfit',sans-serif; font-size:1.4rem; font-weight:700; letter-spacing:-0.02em; }
+    .backtest-header p { font-size:0.8rem; color:var(--text-muted); margin-top:4px; font-family:'DM Mono',monospace; }
+    .data-table {
+      width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    }
+    .data-table th {
+      text-align: left; padding: 12px 16px; font-size: 0.7rem; font-weight: 600;
+      color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+      font-family: 'Outfit', sans-serif;
+      border-bottom: 1px solid var(--border);
+    }
+    .data-table th:not(:first-child) { text-align: right; }
+    .data-table td { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+    .data-table td:not(:first-child) { text-align: right; font-family: 'DM Mono', monospace; font-size: 0.8rem; }
+    .data-table tr:hover { background: var(--bg-hover); }
+    .data-table tr.highlight { background: var(--accent-soft); }
+    .data-table tr.highlight td:first-child { color: var(--accent); font-weight: 600; }
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-yellow { color: var(--yellow); }
+    .text-accent { color: var(--accent); }
+    .font-semibold { font-weight: 600; }
+
+    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+    @media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } }
+    .chart-section h3 {
+      font-size: 0.78rem; font-weight: 600; color: var(--text-secondary);
+      margin-bottom: 14px; font-family: 'Outfit', sans-serif;
+    }
+
+    /* — Footer — */
+    footer {
+      border-top: 1px solid var(--border);
+      background: rgba(11,14,17,0.9);
+      position: relative; z-index: 1;
+    }
+    .footer-inner { padding: 14px 0; }
+    .disclaimer {
+      font-size: 0.7rem; color: var(--text-muted); line-height: 1.6;
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+    .disclaimer-icon { color: var(--yellow); font-size: 0.85rem; flex-shrink: 0; margin-top: 1px; }
+
+    /* — Light mode — */
+    .light-mode {
+      --bg-base: #F5F6F8;
+      --bg-surface: #FFFFFF;
+      --bg-elevated: #FFFFFF;
+      --bg-hover: #F0F2F5;
+      --border: rgba(0,0,0,0.06);
+      --border-active: rgba(99,149,255,0.4);
+      --text-primary: #1A1F28;
+      --text-secondary: #6B7684;
+      --text-muted: #A0AAB8;
+      --accent-soft: rgba(99,149,255,0.06);
+      --accent-glow: rgba(99,149,255,0.1);
+      --red-glow: rgba(255,77,106,0.08);
+      --green-glow: rgba(0,214,143,0.08);
+      --orange-glow: rgba(255,139,62,0.08);
+    }
+    .light-mode body::before, .light-mode body::after { display: none; }
+
+    /* — Scrollbar — */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+    /* — Mobile nav — */
+    @media (max-width: 640px) {
+      nav { gap: 0; }
+      .nav-btn { padding: 6px 10px; font-size: 0.75rem; }
+      .signal-card { grid-template-columns: 36px 1fr auto; gap: 10px; padding: 14px 16px; }
+      .score-number { font-size: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ========== HEADER ========== -->
+  <header>
+    <div class="container">
+      <div class="header-inner">
+        <div style="display:flex;align-items:center;gap:24px;">
+          <div class="logo" onclick="showPage('dashboard')">SIGNAL<span>v1.0</span></div>
+          <nav>
+            <button class="nav-btn active" id="nav-dashboard" onclick="showPage('dashboard')">대시보드</button>
+            <button class="nav-btn" id="nav-detail" onclick="showPage('detail')" style="display:none">종목 상세</button>
+            <button class="nav-btn" id="nav-backtest" onclick="showPage('backtest')">백테스팅</button>
+          </nav>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="font-mono" style="font-size:0.7rem;color:var(--text-muted);">2026.04.16</span>
+          <button class="theme-btn" onclick="toggleTheme()" aria-label="테마 전환" id="themeBtn">☽</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ===== DASHBOARD ===== -->
+    <div id="page-dashboard" class="page active">
+
+      <!-- Metrics -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Total Signals</div>
+          <div class="metric-value">10</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Rapid Decline</div>
+          <div class="metric-value red">4</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Trend Reversal</div>
+          <div class="metric-value blue">4</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Short Squeeze</div>
+          <div class="metric-value orange">2</div>
+        </div>
+      </div>
+
+      <!-- Filter -->
+      <div class="filter-bar">
+        <div class="filter-tabs">
+          <button class="filter-tab active" onclick="filterSignals('all',this)">전체<span class="filter-count">10</span></button>
+          <button class="filter-tab" onclick="filterSignals('rapid_decline',this)">급감<span class="filter-count">4</span></button>
+          <button class="filter-tab" onclick="filterSignals('trend_reversal',this)">추세전환<span class="filter-count">4</span></button>
+          <button class="filter-tab" onclick="filterSignals('short_squeeze',this)">숏스퀴즈<span class="filter-count">2</span></button>
+        </div>
+        <select class="sort-select" onchange="sortSignals(this.value)">
+          <option value="score">스코어순</option>
+          <option value="change">감소율순</option>
+        </select>
+      </div>
+
+      <!-- Signal List -->
+      <div class="signal-list" id="signal-list"></div>
+    </div>
+
+    <!-- ===== DETAIL ===== -->
+    <div id="page-detail" class="page">
+      <button class="back-btn" onclick="showPage('dashboard')">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+        대시보드
+      </button>
+
+      <div class="detail-grid">
+        <div class="detail-card">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <span id="d-name" style="font-family:'Outfit',sans-serif;font-size:1.3rem;font-weight:700;">카카오</span>
+            <span id="d-code" class="font-mono" style="font-size:0.8rem;color:var(--text-muted);">035720</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">
+            <div>
+              <div class="detail-label">현재가</div>
+              <div id="d-price" style="font-family:'Outfit',sans-serif;font-size:1.3rem;font-weight:600;margin-top:2px;">52,300</div>
+            </div>
+            <div>
+              <div class="detail-label">전일비</div>
+              <div id="d-change" style="font-family:'DM Mono',monospace;font-size:1.3rem;font-weight:500;margin-top:2px;color:var(--red);">+3.2%</div>
+            </div>
+            <div>
+              <div class="detail-label">거래량</div>
+              <div id="d-vol" style="font-family:'DM Mono',monospace;font-size:1.3rem;font-weight:500;margin-top:2px;">12.5M</div>
+            </div>
+          </div>
+        </div>
+        <div class="detail-card" style="display:flex;flex-direction:column;justify-content:space-between;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <div>
+              <div class="detail-label">Short Squeeze Score</div>
+              <div id="d-score" style="font-family:'Outfit',sans-serif;font-size:2.8rem;font-weight:800;letter-spacing:-0.04em;line-height:1;margin-top:4px;">91</div>
+            </div>
+            <span id="d-badge" class="grade-badge grade-A" style="font-size:0.8rem;padding:4px 12px;">A</span>
+          </div>
+          <div class="detail-sub">
+            <span><span style="color:var(--text-muted)">대차잔고</span> <span id="d-bal" style="color:var(--red);font-family:'DM Mono',monospace;">-18.5%</span></span>
+            <span><span style="color:var(--text-muted)">연속감소</span> <span id="d-days" class="font-mono">3일</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="chart-card">
+        <div class="period-tabs">
+          <button class="period-tab active" onclick="changePeriod(30,this)">1M</button>
+          <button class="period-tab" onclick="changePeriod(90,this)">3M</button>
+          <button class="period-tab" onclick="changePeriod(180,this)">6M</button>
+          <button class="period-tab" onclick="changePeriod(365,this)">1Y</button>
+        </div>
+        <canvas id="dualChart" height="280"></canvas>
+      </div>
+
+      <!-- Score Breakdown -->
+      <div class="chart-card">
+        <h3 style="font-family:'Outfit',sans-serif;font-size:0.85rem;font-weight:600;margin-bottom:18px;color:var(--text-secondary);">Score Breakdown</h3>
+        <div id="score-breakdown"></div>
+        <div class="breakdown-total">
+          <span style="font-family:'Outfit',sans-serif;font-weight:600;color:var(--text-secondary);">Total</span>
+          <span id="d-total" style="font-family:'Outfit',sans-serif;font-size:1.6rem;font-weight:800;color:var(--red);">91<span style="font-size:0.85rem;font-weight:400;color:var(--text-muted);">/100</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== BACKTEST ===== -->
+    <div id="page-backtest" class="page">
+      <div class="backtest-header">
+        <h2 class="font-display">Backtest Results</h2>
+        <p>2023.04.16 — 2026.04.16 · 3년</p>
+      </div>
+
+      <div class="chart-card" style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>시그널</th>
+              <th>발생</th>
+              <th>적중률(5d)</th>
+              <th class="hidden-mobile">적중률(10d)</th>
+              <th class="hidden-mobile">적중률(20d)</th>
+              <th>수익률(5d)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-weight:500;">대차 급감</td>
+              <td class="font-mono">342</td>
+              <td class="text-green font-semibold">63.5%</td>
+              <td class="text-yellow hidden-mobile">59.1%</td>
+              <td class="text-yellow hidden-mobile">55.3%</td>
+              <td class="text-red font-semibold">+2.8%</td>
+            </tr>
+            <tr>
+              <td style="font-weight:500;">추세 전환</td>
+              <td class="font-mono">218</td>
+              <td class="text-yellow font-semibold">58.2%</td>
+              <td class="text-yellow hidden-mobile">56.4%</td>
+              <td class="text-yellow hidden-mobile">53.7%</td>
+              <td class="text-red font-semibold">+1.9%</td>
+            </tr>
+            <tr>
+              <td style="font-weight:500;">숏스퀴즈</td>
+              <td class="font-mono">89</td>
+              <td class="text-green font-semibold">71.9%</td>
+              <td class="text-green hidden-mobile">67.4%</td>
+              <td class="text-green hidden-mobile">61.8%</td>
+              <td class="text-red font-semibold">+4.5%</td>
+            </tr>
+            <tr class="highlight">
+              <td>A등급</td>
+              <td class="font-mono">24</td>
+              <td class="text-green font-semibold">79.2%</td>
+              <td class="text-green hidden-mobile">75.0%</td>
+              <td class="text-green hidden-mobile">70.8%</td>
+              <td class="text-red font-semibold">+7.1%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card chart-section">
+          <h3 class="font-display">보유기간별 평균 수익률</h3>
+          <canvas id="returnChart" height="240"></canvas>
+        </div>
+        <div class="chart-card chart-section">
+          <h3 class="font-display">월별 적중률 추이</h3>
+          <canvas id="monthlyChart" height="240"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========== FOOTER ========== -->
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <div class="disclaimer">
+          <span class="disclaimer-icon">⚠</span>
+          <span>본 시스템은 투자 자문이 아닌 정보 제공 목적의 참고 도구입니다. 모든 투자 판단과 그에 따른 결과의 책임은 투자자 본인에게 있습니다. 과거 성과가 미래 수익을 보장하지 않습니다.</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // ========== DATA ==========
+    const signals = [
+      { name:'카카오', code:'035720', type:'short_squeeze', score:91, grade:'A', balanceChange:-18.5, volumeChange:250, days:3, price:'52,300', change:'+3.2%', volume:'12.5M' },
+      { name:'삼성전자', code:'005930', type:'rapid_decline', score:85, grade:'A', balanceChange:-15.3, volumeChange:180, days:5, price:'72,400', change:'+1.8%', volume:'28.3M' },
+      { name:'SK하이닉스', code:'000660', type:'rapid_decline', score:78, grade:'B', balanceChange:-12.1, volumeChange:95, days:2, price:'198,500', change:'+2.1%', volume:'8.7M' },
+      { name:'LG에너지솔루션', code:'373220', type:'trend_reversal', score:72, grade:'B', balanceChange:-8.7, volumeChange:60, days:0, price:'385,000', change:'+1.5%', volume:'2.1M' },
+      { name:'셀트리온', code:'068270', type:'short_squeeze', score:68, grade:'B', balanceChange:-11.2, volumeChange:120, days:4, price:'178,300', change:'+2.8%', volume:'5.4M' },
+      { name:'현대차', code:'005380', type:'trend_reversal', score:65, grade:'B', balanceChange:-6.3, volumeChange:45, days:0, price:'245,000', change:'+0.8%', volume:'3.2M' },
+      { name:'NAVER', code:'035420', type:'rapid_decline', score:58, grade:'C', balanceChange:-9.8, volumeChange:70, days:1, price:'215,500', change:'-0.5%', volume:'4.8M' },
+      { name:'포스코홀딩스', code:'005490', type:'trend_reversal', score:52, grade:'C', balanceChange:-5.1, volumeChange:30, days:0, price:'312,000', change:'+0.3%', volume:'1.9M' },
+      { name:'기아', code:'000270', type:'rapid_decline', score:45, grade:'C', balanceChange:-7.4, volumeChange:55, days:1, price:'98,700', change:'-1.2%', volume:'6.1M' },
+      { name:'삼성SDI', code:'006400', type:'trend_reversal', score:38, grade:'D', balanceChange:-3.2, volumeChange:15, days:0, price:'425,000', change:'-0.2%', volume:'1.2M' },
+    ];
+
+    const typeLabels = { rapid_decline:'급감', trend_reversal:'추세전환', short_squeeze:'숏스퀴즈' };
+    const typeIcons = { rapid_decline:'↘', trend_reversal:'↗', short_squeeze:'⚡' };
+    const typeClasses = { rapid_decline:'decline', trend_reversal:'reversal', short_squeeze:'squeeze' };
+
+    // ========== THEME ==========
+    let isLight = false;
+    function toggleTheme() {
+      isLight = !isLight;
+      document.documentElement.classList.toggle('light-mode', isLight);
+      document.getElementById('themeBtn').textContent = isLight ? '☀' : '☽';
+      rebuildCharts();
+    }
+
+    // ========== NAVIGATION ==========
+    function showPage(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(n => n.classList.remove('active'));
+      document.getElementById('page-' + page).classList.add('active');
+      const nav = document.getElementById('nav-' + page);
+      if (nav) nav.classList.add('active');
+      document.getElementById('nav-detail').style.display = page === 'detail' ? '' : 'none';
+      if (page === 'backtest') initBacktestCharts();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ========== SIGNAL LIST ==========
+    let currentFilter = 'all';
+    function renderSignals(sortBy = 'score') {
+      const list = document.getElementById('signal-list');
+      let filtered = currentFilter === 'all' ? [...signals] : signals.filter(s => s.type === currentFilter);
+      if (sortBy === 'score') filtered.sort((a, b) => b.score - a.score);
+      else filtered.sort((a, b) => a.balanceChange - b.balanceChange);
+
+      list.innerHTML = filtered.map(s => `
+        <div class="signal-card ${s.grade === 'A' ? 'grade-a-card' : ''}" onclick="showDetail('${s.code}')" role="article" aria-label="${s.name} ${typeLabels[s.type]} 스코어 ${s.score}점">
+          <div class="signal-icon ${typeClasses[s.type]}">
+            <span style="font-size:1.2rem;">${typeIcons[s.type]}</span>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-weight:600;">${s.name}</span>
+              <span class="font-mono" style="font-size:0.72rem;color:var(--text-muted);">${s.code}</span>
+            </div>
+            <div class="signal-meta">
+              <span class="signal-tag tag-red">${s.balanceChange}%</span>
+              <span class="signal-tag tag-green">VOL +${s.volumeChange}%</span>
+              ${s.days > 0 ? `<span class="signal-tag tag-muted">${s.days}일 연속</span>` : ''}
+            </div>
+          </div>
+          <div class="signal-score">
+            <div class="score-number">${s.score}</div>
+            <span class="grade-badge grade-${s.grade}">${s.grade} · ${typeLabels[s.type]}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function filterSignals(type, el) {
+      currentFilter = type;
+      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+      el.classList.add('active');
+      renderSignals();
+    }
+    function sortSignals(val) { renderSignals(val); }
+
+    // ========== DETAIL ==========
+    let dualChart = null;
+    function showDetail(code) {
+      const s = signals.find(x => x.code === code); if (!s) return;
+      document.getElementById('d-name').textContent = s.name;
+      document.getElementById('d-code').textContent = s.code;
+      document.getElementById('d-price').textContent = s.price;
+      const changeEl = document.getElementById('d-change');
+      changeEl.textContent = s.change;
+      changeEl.style.color = s.change.startsWith('+') ? 'var(--red)' : s.change.startsWith('-') ? 'var(--accent)' : 'var(--text-secondary)';
+      document.getElementById('d-vol').textContent = s.volume;
+      document.getElementById('d-score').textContent = s.score;
+      document.getElementById('d-bal').textContent = s.balanceChange + '%';
+      document.getElementById('d-days').textContent = s.days + '일';
+      const badge = document.getElementById('d-badge');
+      badge.textContent = s.grade;
+      badge.className = `grade-badge grade-${s.grade}`;
+      const total = document.getElementById('d-total');
+      total.innerHTML = `${s.score}<span style="font-size:0.85rem;font-weight:400;color:var(--text-muted);">/100</span>`;
+
+      // Breakdown
+      const f0 = Math.min(30, Math.round(Math.abs(s.balanceChange) * 1.6));
+      const f1 = Math.min(25, Math.round(s.volumeChange / 10));
+      const f2 = Math.min(25, Math.round(parseFloat(s.change) * 5 + 10));
+      const f3 = Math.max(0, Math.min(20, s.score - f0 - f1 - f2));
+      const factors = [
+        { name:'대차잔고 감소율', val:s.balanceChange+'%', max:30, score:f0 },
+        { name:'거래량 급증', val:'+'+s.volumeChange+'%', max:25, score:f1 },
+        { name:'주가 상승률', val:s.change, max:25, score:f2 },
+        { name:'공매도 비율 대비 잔고', val:'—', max:20, score:f3 },
+      ];
+      document.getElementById('score-breakdown').innerHTML = factors.map(f => `
+        <div class="breakdown-item">
+          <div class="breakdown-header">
+            <span class="breakdown-label">${f.name} <span style="color:var(--text-muted);font-family:'DM Mono',monospace;font-size:0.75rem;">${f.val}</span></span>
+            <span class="breakdown-score">${f.score}/${f.max}</span>
+          </div>
+          <div class="breakdown-bar"><div class="breakdown-fill fill-blue" style="width:${(f.score/f.max)*100}%"></div></div>
+        </div>
+      `).join('');
+
+      showPage('detail');
+      initDualChart(30);
+    }
+
+    function generateChartData(days) {
+      const data = { labels:[], prices:[], balances:[], signals:[] };
+      let price = 48000 + Math.random() * 8000;
+      let balance = 5000000 + Math.random() * 2000000;
+      const today = new Date(2026, 3, 16);
+      for (let i = days; i >= 0; i--) {
+        const d = new Date(today); d.setDate(d.getDate() - i);
+        if (d.getDay() === 0 || d.getDay() === 6) continue;
+        data.labels.push(`${d.getMonth()+1}/${d.getDate()}`);
+        price += (Math.random() - 0.45) * 1200; price = Math.max(30000, price);
+        balance += (Math.random() - 0.55) * 150000; balance = Math.max(1000000, balance);
+        data.prices.push(Math.round(price));
+        data.balances.push(Math.round(balance));
+        if (i > 5 && Math.random() < 0.04) data.signals.push(data.labels.length - 1);
+      }
+      data.signals.push(data.labels.length - 1);
+      return data;
+    }
+
+    function chartColors() {
+      return {
+        grid: isLight ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.04)',
+        text: isLight ? '#6B7684' : '#4A5568',
+        tooltip: isLight ? '#1A1F28' : '#1A1F28',
+      };
+    }
+
+    function initDualChart(days) {
+      const ctx = document.getElementById('dualChart').getContext('2d');
+      if (dualChart) dualChart.destroy();
+      const d = generateChartData(days);
+      const c = chartColors();
+      const signalData = new Array(d.prices.length).fill(null);
+      d.signals.forEach(i => { signalData[i] = d.prices[i]; });
+
+      dualChart = new Chart(ctx, {
+        type:'line',
+        data: {
+          labels: d.labels,
+          datasets: [
+            { label:'주가', data:d.prices, borderColor:'#6395FF', backgroundColor:'rgba(99,149,255,0.06)', borderWidth:2, pointRadius:0, yAxisID:'y', fill:true, tension:0.4 },
+            { label:'대차잔고', data:d.balances, borderColor:'#FF8B3E', borderWidth:1.5, borderDash:[5,3], pointRadius:0, yAxisID:'y1', fill:false, tension:0.4 },
+            { label:'시그널', data:signalData, borderColor:'transparent', backgroundColor:'#FF4D6A', pointRadius:7, pointHoverRadius:9, pointStyle:'circle', showLine:false, yAxisID:'y' },
+          ]
+        },
+        options: {
+          responsive:true, interaction:{mode:'index',intersect:false},
+          plugins: {
+            legend:{labels:{color:c.text,usePointStyle:true,padding:16,font:{family:'Outfit',size:11}}},
+            tooltip:{backgroundColor:c.tooltip,titleColor:'#E8ECF1',bodyColor:'#E8ECF1',cornerRadius:10,padding:12,bodyFont:{family:'DM Mono'},titleFont:{family:'Outfit'}}
+          },
+          scales: {
+            x:{grid:{color:c.grid},ticks:{color:c.text,maxTicksLimit:8,font:{size:10}}},
+            y:{position:'left',grid:{color:c.grid},ticks:{color:c.text,font:{family:'DM Mono',size:10},callback:v=>(v/1000).toFixed(0)+'K'}},
+            y1:{position:'right',grid:{display:false},ticks:{color:'#FF8B3E',font:{family:'DM Mono',size:10},callback:v=>(v/1000000).toFixed(1)+'M'}},
+          }
+        }
+      });
+    }
+
+    function changePeriod(days, el) {
+      el.parentElement.querySelectorAll('.period-tab').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+      initDualChart(days);
+    }
+
+    // ========== BACKTEST CHARTS ==========
+    let returnChartI = null, monthlyChartI = null;
+    function initBacktestCharts() {
+      const c = chartColors();
+
+      const ctx1 = document.getElementById('returnChart').getContext('2d');
+      if (returnChartI) returnChartI.destroy();
+      returnChartI = new Chart(ctx1, {
+        type:'bar',
+        data:{
+          labels:['대차 급감','추세 전환','숏스퀴즈','A등급'],
+          datasets:[
+            {label:'5일',data:[2.8,1.9,4.5,7.1],backgroundColor:'#6395FF',borderRadius:6,barPercentage:0.7},
+            {label:'10일',data:[3.5,2.4,5.8,9.3],backgroundColor:'#a78bfa',borderRadius:6,barPercentage:0.7},
+            {label:'20일',data:[2.1,1.5,4.2,8.7],backgroundColor:'rgba(99,149,255,0.2)',borderRadius:6,barPercentage:0.7},
+          ]
+        },
+        options:{
+          responsive:true,
+          plugins:{legend:{labels:{color:c.text,usePointStyle:true,padding:12,font:{family:'Outfit',size:11}}},tooltip:{backgroundColor:'#1A1F28',titleColor:'#E8ECF1',bodyColor:'#E8ECF1',cornerRadius:10,bodyFont:{family:'DM Mono'},callbacks:{label:x=>x.dataset.label+': +'+x.raw+'%'}}},
+          scales:{x:{grid:{display:false},ticks:{color:c.text,font:{family:'Pretendard Variable',size:11}}},y:{grid:{color:c.grid},ticks:{color:c.text,font:{family:'DM Mono',size:10},callback:v=>'+'+v+'%'}}}
+        }
+      });
+
+      const ctx2 = document.getElementById('monthlyChart').getContext('2d');
+      if (monthlyChartI) monthlyChartI.destroy();
+      const months=[],hr={r:[],t:[],s:[]};
+      for(let i=35;i>=0;i--){const d=new Date(2026,3-i,1);months.push(`${String(d.getFullYear()).slice(2)}/${String(d.getMonth()+1).padStart(2,'0')}`);hr.r.push(+(55+Math.random()*20).toFixed(1));hr.t.push(+(50+Math.random()*18).toFixed(1));hr.s.push(+(60+Math.random()*25).toFixed(1));}
+      monthlyChartI = new Chart(ctx2, {
+        type:'line',
+        data:{
+          labels:months,
+          datasets:[
+            {label:'급감',data:hr.r,borderColor:'#FF4D6A',borderWidth:1.5,pointRadius:0,tension:0.4},
+            {label:'추세전환',data:hr.t,borderColor:'#6395FF',borderWidth:1.5,pointRadius:0,tension:0.4},
+            {label:'숏스퀴즈',data:hr.s,borderColor:'#FF8B3E',borderWidth:1.5,pointRadius:0,tension:0.4},
+          ]
+        },
+        options:{
+          responsive:true,
+          plugins:{legend:{labels:{color:c.text,usePointStyle:true,padding:12,font:{family:'Outfit',size:11}}},tooltip:{backgroundColor:'#1A1F28',titleColor:'#E8ECF1',bodyColor:'#E8ECF1',cornerRadius:10,bodyFont:{family:'DM Mono'},callbacks:{label:x=>x.dataset.label+': '+x.raw+'%'}}},
+          scales:{x:{grid:{display:false},ticks:{color:c.text,maxTicksLimit:12,font:{size:9}}},y:{min:40,max:90,grid:{color:c.grid},ticks:{color:c.text,font:{family:'DM Mono',size:10},callback:v=>v+'%'}}}
+        }
+      });
+    }
+
+    function rebuildCharts() {
+      if (dualChart) initDualChart(30);
+      if (document.getElementById('page-backtest').classList.contains('active')) initBacktestCharts();
+    }
+
+    // ========== INIT ==========
+    renderSignals();
+  </script>
+</body>
+</html>
