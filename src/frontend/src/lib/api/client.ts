@@ -1,4 +1,4 @@
-import type { SignalResult, StockDetail } from '@/types/signal';
+import type { SignalResult, StockDetail, BacktestSummary } from '@/types/signal';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 
@@ -27,4 +27,8 @@ export async function getStockDetail(code: string, from?: string, to?: string): 
   if (to) params.set('to', to);
   const query = params.toString();
   return fetchApi<StockDetail>(`/stocks/${code}${query ? `?${query}` : ''}`);
+}
+
+export async function getBacktestResults(): Promise<BacktestSummary[]> {
+  return fetchApi<BacktestSummary[]>('/backtest');
 }

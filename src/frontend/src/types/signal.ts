@@ -55,6 +55,22 @@ export const SIGNAL_TYPE_ICONS: Record<SignalType, string> = {
   SHORT_SQUEEZE: '⚡',
 };
 
+export interface BacktestSummary {
+  signalType: string;
+  periodStart: string;
+  periodEnd: string;
+  totalSignals: number;
+  hitCount5d: number;
+  hitRate5d: number;
+  avgReturn5d: number;
+  hitCount10d: number;
+  hitRate10d: number;
+  avgReturn10d: number;
+  hitCount20d: number;
+  hitRate20d: number;
+  avgReturn20d: number;
+}
+
 export const GRADE_COLORS: Record<SignalGrade, string> = {
   A: 'text-[#FF4D6A] bg-[#FF4D6A]/10',
   B: 'text-[#FF8B3E] bg-[#FF8B3E]/10',
