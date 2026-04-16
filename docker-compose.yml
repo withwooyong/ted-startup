@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: signal-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: signal_db
+      POSTGRES_USER: signal
+      POSTGRES_PASSWORD: signal
+    volumes:
+      - signal-data:/var/lib/postgresql/data
+      - ./src/backend/src/main/resources/db/migration/V1__init_schema.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signal -d signal_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  signal-data:

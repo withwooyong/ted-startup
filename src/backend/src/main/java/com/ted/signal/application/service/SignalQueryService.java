@@ -5,6 +5,7 @@ import com.ted.signal.application.port.in.GetStockDetailUseCase;
 import com.ted.signal.application.port.out.*;
 import com.ted.signal.domain.enums.SignalType;
 import com.ted.signal.domain.model.*;
+import com.ted.signal.domain.model.DomainError.StockNotFound;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,7 +51,7 @@ public class SignalQueryService implements GetSignalsUseCase, GetStockDetailUseC
     @Override
     public StockDetail getStockDetail(String stockCode, LocalDate from, LocalDate to) {
         var stock = stockRepository.findByStockCodeAndDeletedAtIsNull(stockCode)
-                .orElseThrow(() -> new IllegalArgumentException("종목을 찾을 수 없어요: " + stockCode));
+                .orElseThrow(() -> new DomainException(new StockNotFound(stockCode)));
 
         var prices = stockPriceRepository.findByStockIdAndTradingDateBetweenOrderByTradingDateAsc(
                 stock.getId(), from, to);
