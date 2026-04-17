@@ -7,6 +7,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-18 — 새벽] 로컬 Docker Desktop 첫 배포 스모크 테스트 + runbook 정정 + MCP lockdown (`4a9d448`, `a89c6fe`)
+
+### Added
+- `.mcp.json` (신규): 빈 `mcpServers`로 프로젝트 스코프 MCP 기본값 잠금 — 외부 MCP 서버 주입 차단
+- `docs/context-budget-report.md` (신규): `/context-budget --verbose` 산출물. 세션 오버헤드 ~24.4K tokens / 1M의 2.4% 집계, Top 1~5 절감안(~4.1K tokens / 17%) 제시
+
+### Changed
+- `.claude/settings.json`: `enabledMcpjsonServers: []` + `enableAllProjectMcpServers: false` — 프로젝트 레벨 MCP 자동활성화 차단 (보안 순기능)
+- `pipeline/artifacts/10-deploy-log/runbook.md` §2.5 스모크 테스트:
+  - test #0 신설: `.env.prod`에서 `ADMIN_API_KEY`를 현재 셸로 `export`하는 절차
+  - test #4 GET 공개 읽기(`/api/notifications/preferences`, proxy.ts 경유)로 분리
+  - test #5 PUT 쓰기(`/api/admin/notifications/preferences`, Route Handler)로 유효 payload 예시 명시
+  - signalTypes 열거값(RAPID_DECLINE/TREND_REVERSAL/SHORT_SQUEEZE), minScore 범위(0~100) 힌트 추가
+- `CHANGELOG.md` / `HANDOFF.md`: 세션 운영 현행화
+
+### Fixed
+- runbook §2.5 test #4: GET은 Route Handler에서 405 반환 — HTTP method 정정(GET → PUT). 로컬 Docker Desktop 스모크 테스트로 5/5 경로 HTTP 200 확인 후 반영
+
+### Verified (not committed)
+- 로컬 Docker Desktop 첫 배포 성공 — 3 컨테이너(db/backend/frontend) 전부 `healthy`
+- 스모크 테스트 5종 전부 2xx
+  - `GET /` → 200 (16KB SSR HTML)
+  - backend `/actuator/health` → `{"status":"UP"}`
+  - `GET /api/signals` → 200 (빈 배열, DB 초기 상태)
+  - `GET /api/notifications/preferences` → 200 (공개, proxy.ts 경유)
+  - `PUT /api/admin/notifications/preferences` → 200 (ADMIN_API_KEY 인증 통과, 값 수정→원복 확인)
+- `.env.prod` 로컬 생성 (chmod 600, gitignore 확인) — POSTGRES_PASSWORD/ADMIN_API_KEY 랜덤 생성, Telegram/KRX 실값 주입
+
+---
+
 ## [2026-04-17 — 저녁] 코드 리뷰 블로커(H-1) 수정 + Next.js 16 canonical proxy 적용 (`ef8c267`)
 
 ### Added
