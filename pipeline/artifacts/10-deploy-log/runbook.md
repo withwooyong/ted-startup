@@ -83,6 +83,9 @@ docker compose -f docker-compose.prod.yml exec db \
 ### 2.5 스모크 테스트
 
 ```bash
+# 0) 관리자 키를 현재 셸에 로드 (test #5에서 사용)
+export ADMIN_API_KEY=$(grep '^ADMIN_API_KEY=' .env.prod | cut -d= -f2-)
+
 # 1) 프론트엔드 루트 응답 확인
 curl -fsS http://localhost:3000/ | head -c 200
 
@@ -93,8 +96,24 @@ docker compose -f docker-compose.prod.yml exec backend \
 # 3) 시그널 조회 API (프론트 경유)
 curl -fsS http://localhost:3000/api/signals | head -c 500
 
-# 4) 관리자 API (알림 설정) — ADMIN_API_KEY 필요
-curl -fsS -H "X-Admin-Api-Key: $ADMIN_API_KEY" \
+# 4) 알림 설정 조회 (공개, proxy.ts 경유)
+curl -fsS http://localhost:3000/api/notifications/preferences
+
+# 5) 알림 설정 업데이트 (ADMIN_API_KEY 필요, Route Handler 경유)
+#    - 이 엔드포인트는 PUT 전용 (GET은 405).
+#    - signalTypes 유효값: RAPID_DECLINE, TREND_REVERSAL, SHORT_SQUEEZE (1~3개)
+#    - minScore: 0~100
+curl -fsS -X PUT \
+     -H "Content-Type: application/json" \
+     -H "X-Admin-Api-Key: $ADMIN_API_KEY" \
+     -d '{
+       "dailySummaryEnabled": true,
+       "urgentAlertEnabled": true,
+       "batchFailureEnabled": true,
+       "weeklyReportEnabled": true,
+       "minScore": 60,
+       "signalTypes": ["RAPID_DECLINE", "TREND_REVERSAL", "SHORT_SQUEEZE"]
+     }' \
      http://localhost:3000/api/admin/notifications/preferences
 ```
 
