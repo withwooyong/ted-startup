@@ -5,11 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
-### Changed (uncommitted — /ted-run 코드 리뷰 반영)
-- `next.config.ts` rewrites 제거 → `src/frontend/src/proxy.ts` 신규 (런타임 env 기반 프록시, Next.js 16 canonical)
+---
+
+## [2026-04-17 — 저녁] 코드 리뷰 블로커(H-1) 수정 + Next.js 16 canonical proxy 적용 (`ef8c267`)
+
+### Added
+- `src/frontend/src/proxy.ts`: 런타임 `/api/*` → `BACKEND_INTERNAL_URL` 프록시 (Next.js 16 canonical, 구 middleware 대체). `/api/admin/*`는 Route Handler 우선 통과
+
+### Changed
+- `src/frontend/next.config.ts`: `rewrites()` 제거 — build time에 routes-manifest.json으로 고정되어 런타임 env 반영 불가. 주석으로 proxy.ts 선택 이유 명시
 - `src/frontend/src/lib/api/client.ts`: `NEXT_PUBLIC_API_URL` → `NEXT_PUBLIC_API_BASE_URL` 정합, 기본값 `/api`
 - `src/frontend/src/app/api/admin/notifications/preferences/route.ts`: `BACKEND_API_URL` → `BACKEND_INTERNAL_URL` 정합, `/api` path prefix 추가, 16KB body 상한(M-4)
 - `src/backend/Dockerfile`: `./gradlew dependencies || true` → `./gradlew dependencies` (M-1, 의존성 해석 실패 은폐 제거)
+
+### Fixed
+- **[HIGH H-1]** compose / client.ts / route.ts 간 env 변수명 3중 불일치 — 프로덕션에서 브라우저→proxy→backend 경로가 끊어지는 블로커. `NEXT_PUBLIC_API_BASE_URL` + `BACKEND_INTERNAL_URL` 단일 네임스페이스로 통일
 
 ---
 

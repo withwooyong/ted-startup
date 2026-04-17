@@ -1,0 +1,4 @@
+{
+  "_comment": "이 프로젝트는 외부 MCP 서버를 요구하지 않는다. 빈 mcpServers로 프로젝트 스코프 기본값을 잠근다. Claude Desktop/web의 claude_ai_* integrations(Gmail/Slack/GCal/Notion/Atlassian-Rovo 등)는 CLI 설정 바깥이므로 앱의 Integrations 설정에서 별도 해제 필요.",
+  "mcpServers": {}
+}
