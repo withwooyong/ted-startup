@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AI Agent Team Platform — Claude Code 기반 멀티에이전트 SDLC 자동화 플랫폼.
 요구사항 한 줄 입력으로 기획→설계→개발→테스트→배포까지 16개 AI 전문가 에이전트가 순차/병렬로 처리하는 구조.
 
+**목적**: 소규모 스타트업 팀에서 모든 구성원이 기획/디자인/개발(FE/BE/앱)/보안/DevOps/운영 역할을 겸할 수 있도록 AI 에이전트가 전문성을 보완. 팀 공유를 전제로 `pipeline/` 디렉토리는 커밋 대상.
+
 - **Repository**: github.com/withwooyong/ted-startup
 - **기본 브랜치**: master
-- **현재 상태**: Phase 3 Build Sprint 2 진행 중 (시그널 엔진 + 대시보드)
+- **현재 상태**: Phase 3 Build Sprint 3 완료 (백테스팅 엔진 + 텔레그램 + 통합 테스트)
 
 ## 핵심 참조 문서
 

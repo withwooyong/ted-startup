@@ -1,0 +1,73 @@
+{
+  "pipeline_id": "ted-startup-v1",
+  "status": "in_progress",
+  "current_phase": "Phase 3: Build",
+  "current_stage": "Sprint 3 완료 → Sprint 4 착수 대기",
+  "current_agent": "08-backend",
+  "last_commit": "88aba9a",
+  "last_updated": "2026-04-17",
+  "completed_stages": [
+    "00-input",
+    "01-requirements",
+    "02-prd",
+    "03-design-spec",
+    "04-db-schema",
+    "06-design-system",
+    "06-code/sprint-1",
+    "06-code/sprint-2",
+    "06-code/sprint-3"
+  ],
+  "sprint_progress": {
+    "sprint_1": {
+      "status": "completed",
+      "commits": ["33d7676", "620f2bf", "d710aa1", "140694b"],
+      "scope": "Spring Boot 프로젝트 초기화 + KRX 크롤러 + Spring Batch + Docker PostgreSQL"
+    },
+    "sprint_2": {
+      "status": "completed",
+      "commits": ["7902cfd", "e6754cb", "63407cd"],
+      "scope": "시그널 탐지 엔진 3종 (급감/추세전환/숏스퀴즈) + 프론트엔드 대시보드/상세/백테스트 페이지"
+    },
+    "sprint_3": {
+      "status": "completed",
+      "commits": ["022284e", "88aba9a"],
+      "scope": "백테스팅 엔진 + 텔레그램 알림 4종 + Testcontainers 18개 테스트 + 코드리뷰 반영"
+    },
+    "sprint_4": {
+      "status": "planned",
+      "plan_doc": "docs/sprint-4-plan.md",
+      "scope": "N+1 쿼리 최적화 + CORS + 알림 설정 페이지 + 모바일 반응형"
+    }
+  },
+  "human_approvals": [
+    { "gate": "#1 Discovery", "status": "passed", "score": 8.1 },
+    { "gate": "#2 Design", "status": "passed", "score": 8.3 },
+    { "gate": "#3 Verify", "status": "pending", "note": "Sprint 4 완료 후 예정" }
+  ],
+  "judge_scores": {
+    "discovery": 8.1,
+    "design": 8.3,
+    "build_sprint_1": "internal_review_passed",
+    "build_sprint_2": "internal_review_passed (5차 리뷰 누적)",
+    "build_sprint_3": "internal_review_passed (CRITICAL/HIGH 모두 반영)"
+  },
+  "test_coverage": {
+    "backend": {
+      "total_tests": 18,
+      "test_types": ["signal_detection(5)", "backtest_engine(4)", "api_integration(8)", "context_loads(1)"],
+      "framework": "JUnit 5 + Testcontainers PostgreSQL",
+      "status": "all_passing"
+    },
+    "frontend": {
+      "total_tests": 0,
+      "status": "not_implemented"
+    }
+  },
+  "known_issues": [
+    {"severity": "HIGH", "id": "N+1-signal-detection", "desc": "SignalDetectionService 종목당 7쿼리 × 2500 = 17,500쿼리"},
+    {"severity": "HIGH", "id": "N+1-daily-summary", "desc": "sendDailySummary stock LAZY 로딩"},
+    {"severity": "HIGH", "id": "backtest-unbounded", "desc": "findBySignalDateBetweenWithStock 무제한 조회"},
+    {"severity": "MEDIUM", "id": "cors-api-key", "desc": "WebConfig allowedHeaders에 X-API-Key 누락"},
+    {"severity": "LOW", "id": "korean-holidays", "desc": "한국 공휴일 캘린더 미적용 (v1.1)"}
+  ]
+}

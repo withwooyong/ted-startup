@@ -1,0 +1,102 @@
+---
+agent: "07-db"
+stage: "04-db-schema"
+version: "1.0.0"
+created_at: "2026-04-16T15:30:00+09:00"
+---
+
+erDiagram
+    STOCK {
+        bigint id PK
+        varchar(6) stock_code UK
+        varchar(100) stock_name
+        varchar(10) market_type "KOSPI|KOSDAQ"
+        varchar(100) sector
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    STOCK_PRICE ||--o{ STOCK : "belongs to"
+    STOCK_PRICE {
+        bigint id PK
+        bigint stock_id FK
+        date trading_date
+        bigint close_price
+        bigint open_price
+        bigint high_price
+        bigint low_price
+        bigint volume
+        bigint market_cap
+        numeric(10_4) change_rate
+        timestamp created_at
+    }
+
+    SHORT_SELLING ||--o{ STOCK : "belongs to"
+    SHORT_SELLING {
+        bigint id PK
+        bigint stock_id FK
+        date trading_date
+        bigint short_volume "공매도 거래량"
+        bigint short_amount "공매도 거래대금"
+        numeric(10_4) short_ratio "공매도 비율(%)"
+        timestamp created_at
+    }
+
+    LENDING_BALANCE ||--o{ STOCK : "belongs to"
+    LENDING_BALANCE {
+        bigint id PK
+        bigint stock_id FK
+        date trading_date
+        bigint balance_quantity "대차잔고 수량"
+        bigint balance_amount "대차잔고 금액"
+        numeric(10_4) change_rate "전일 대비 변동률(%)"
+        bigint change_quantity "전일 대비 변동 수량"
+        integer consecutive_decrease_days "연속 감소 일수"
+        timestamp created_at
+    }
+
+    SIGNAL ||--o{ STOCK : "detected for"
+    SIGNAL {
+        bigint id PK
+        bigint stock_id FK
+        date signal_date
+        varchar(30) signal_type "RAPID_DECLINE|TREND_REVERSAL|SHORT_SQUEEZE"
+        integer score "0~100"
+        varchar(1) grade "A|B|C|D"
+        jsonb detail "스코어 산출 근거"
+        numeric(10_4) return_5d "5일 후 수익률"
+        numeric(10_4) return_10d "10일 후 수익률"
+        numeric(10_4) return_20d "20일 후 수익률"
+        timestamp created_at
+    }
+
+    BACKTEST_RESULT {
+        bigint id PK
+        varchar(30) signal_type
+        date period_start
+        date period_end
+        integer total_signals
+        integer hit_count_5d
+        numeric(10_4) hit_rate_5d
+        numeric(10_4) avg_return_5d
+        integer hit_count_10d
+        numeric(10_4) hit_rate_10d
+        numeric(10_4) avg_return_10d
+        integer hit_count_20d
+        numeric(10_4) hit_rate_20d
+        numeric(10_4) avg_return_20d
+        timestamp created_at
+    }
+
+    BATCH_JOB_LOG {
+        bigint id PK
+        varchar(50) job_name
+        varchar(20) status "SUCCESS|FAILED|RUNNING"
+        timestamp started_at
+        timestamp finished_at
+        integer total_count
+        integer success_count
+        integer fail_count
+        text error_message
+    }
