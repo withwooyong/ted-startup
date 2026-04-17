@@ -1,6 +1,6 @@
 ---
 last_updated: "2026-04-17"
-total_decisions: 28
+total_decisions: 33
 ---
 
 # Decision Registry — 핵심 의사결정 기록부
@@ -146,6 +146,33 @@ total_decisions: 28
 - **결정**: `WebConfig.addCorsMappings`에 `X-API-Key`, `OPTIONS`, `allowCredentials(true)`, `exposedHeaders` 추가
 - **근거**: 브라우저 preflight 통과 + 프론트에서 관리자 API(`/backtest/run`, `/batch/collect`, `/signals/detect`) 호출 가능
 - **커밋**: 33b6cf1
+
+### D-4.5 글로벌 NavHeader 단일 네비게이션 전환 (Sprint 4 Task 5 / 2026-04-17)
+- **결정**: 페이지별 헤더(SIGNAL 로고/백테스트 링크/대시보드 링크)를 글로벌 `NavHeader` 하나로 통합. sticky + 햄버거 + `pathname` 기반 active state
+- **근거**: 페이지 추가 시마다 중복 작성 제거 + 모바일 네비 일관성 + `aria-current` 정확도
+- **커밋**: 9436772
+
+### D-4.6 ErrorBoundary는 resetKeys 기반 자동 복구 (Sprint 4 Task 5 / 2026-04-17)
+- **결정**: class 컴포넌트 + `resetKeys: ReadonlyArray<unknown>` 지원. `componentDidUpdate`에서 Object.is 비교로 자동 리셋
+- **근거**: "다시 시도" 버튼만으로는 재발 루프 → 상위 상태 변경(period, chartData.length)에 반응해 자동 재마운트 필요 (리뷰 MEDIUM-1)
+- **커밋**: 9436772
+
+### D-4.7 Render-time 상태 리셋 패턴 적용 (Sprint 4 Task 5 / 2026-04-17)
+- **결정**: Next 16 신규 ESLint `react-hooks/set-state-in-effect` 3건 해소 — `useEffect(() => setState)` → `if (prev !== current) setPrev + setState` 패턴
+- **근거**: React 19 공식 권장 "resetting state when a prop changes" 패턴. effect는 외부 시스템 동기화 전용
+- **커밋**: 9436772
+- **적용 파일**: `NavHeader.tsx`(pathname), `stocks/[code]/page.tsx`(code+period), `page.tsx`(초기 setLoading 제거)
+
+### D-4.8 role="tablist" → role="group" + aria-pressed (Sprint 4 Task 6 / 2026-04-17)
+- **결정**: 필터/기간 버튼 그룹에서 `role="tablist"`/`role="tab"` 제거 → `role="group"` + `aria-pressed`
+- **근거**: ARIA 스펙상 `role="tab"`은 대응되는 `role="tabpanel"` 필수. 현재 버튼들은 필터 토글이므로 `aria-pressed`가 정확 (리뷰 HIGH-2)
+- **커밋**: 9436772
+
+### D-4.9 프로토타입 UI 실험 5종 누적 비교본 + 보안 패치 (2026-04-17)
+- **결정**: skeleton / tilt-magnetic / counter / ambient 4개 파일 + `index-before-skeleton.html` baseline → 기능 누적형 비교 구조. XSS/SRI/키보드/모션 접근성 패치를 5파일 전부에 선제 반영
+- **근거**: 사용자가 "API 연동 시점까지 기다리지 않고 프로토타입 단계에서 보안 선제 적용"을 선택 → 이후 실제 프론트 이식 시 추가 점검 불필요
+- **커밋**: 7a5b750
+- **잔여**: 5종 중 최종 합류본 결정 → `prototype/index.html`로 통합 (다음 세션)
 
 ## Phase 0: Meta / 운영 전략
 

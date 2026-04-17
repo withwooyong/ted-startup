@@ -5,27 +5,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
-### Added (uncommitted) — 2026-04-17 프로토타입 UI 실험 (5종 비교본)
-- `prototype/index-before-skeleton.html`: 원본 스냅샷 (git HEAD 기준, 비교용 기준선) + baseline 주석 헤더
-- `prototype/index-tilt-magnetic.html`: 3D 틸트 카드(메트릭/상세/시그널) + 마그네틱 버튼(nav/탭/테마) — `prefers-reduced-motion` + 터치 기기 자동 비활성
-- `prototype/index-counter.html`: 카운트업 애니메이션 32개 카운터 (메트릭/필터/시그널 스코어/상세 가격·스코어·잔고/백테스트 테이블) — data 속성 선언형 엔진
-- `prototype/index-ambient.html`: 배경 3층 — Aurora 메시(CSS 블롭 4개 42~74초 드리프트) + 커서 스포트라이트(CSS 변수 + `mix-blend-mode`) + 파티클 네트워크 캔버스(55 입자, 터치·저모션 비활성)
+---
 
-### Changed (uncommitted)
-- `prototype/index.html`: 스켈레톤 UI 적용 — 시그널 리스트(700ms), 상세 차트(500ms + 기간 변경 350ms), 백테스트 차트(600ms) 로딩 상태 + shimmer 애니메이션 (라이트/다크 모드 대응)
+## [2026-04-17] Sprint 4 Task 5-6 — 프론트엔드 반응형 + ErrorBoundary + 글로벌 네비 + 접근성
 
-### Fixed (uncommitted) — 코드리뷰 보안/품질 이슈 7종 전면 반영 (5개 파일 공통)
-- **[CRITICAL] XSS 싱크 3종 차단**: `renderSignals()`/`showDetail()` 의 `innerHTML` 템플릿에 `escapeHtml()` + `num()` 적용, `score-breakdown` 필드 전부 이스케이프, `aria-label` 속성 주입 차단
-- **[CRITICAL] `onclick="showDetail('${s.code}')"` JS 인젝션 제거**: `data-code` 속성 + `addEventListener('click'|'keydown')` 패턴으로 전환. 카드에 `role="button"` + `tabindex="0"` + Enter/Space 키보드 지원 추가
-- **[HIGH] `showPage()` 허용목록 가드**: `VALID_PAGES = Set(['dashboard','detail','backtest'])` early return으로 임의 ID 주입 차단
-- **[HIGH] DOM 엘리먼트 캐싱**: `cacheEls()` INIT 1회 호출로 `showDetail()`의 `document.getElementById` 8~12회 재쿼리 제거 (`els[id]` 룩업)
-- **[HIGH] `showDetail()` 리팩터**: `innerHTML` 사용 최소화, `d-total` 은 `createElement + appendChild`로 전환
-- **[MEDIUM] CDN Subresource Integrity**: Chart.js 4.4.7, Pretendard 1.3.9 `<script>`/`<link>` 에 `integrity="sha384-..."` + `crossorigin="anonymous"` + `referrerpolicy="no-referrer"`
-- **[MEDIUM] 스켈레톤 접근성**: `signal-list` 에 `role="list"` + `aria-busy` 토글 + `aria-live="polite"`
-- **[LOW] matchMedia 동적 리스너**: `prefers-reduced-motion` / `pointer: coarse` 에 `change` 리스너 추가 — OS 설정 세션 중 토글 반영 (tilt/counter/ambient 3종)
-- **[LOW] baseline 파일 의도 명시**: `index-before-skeleton.html` 헤더에 비교용 snapshot 안내 주석
+### Added
+- `src/frontend/src/components/NavHeader.tsx`: 글로벌 네비게이션 — sticky + 햄버거 + ESC + `aria-current` + render-time 리셋 패턴 (`9436772`)
+- `src/frontend/src/components/ErrorBoundary.tsx`: class 컴포넌트 + `resetKeys` 자동 복구 + `role="alert"` (`9436772`)
 
-> **메모**: 이번 세션은 Sprint 4 작업 없이 프로토타입 시각 실험 + 보안 패치 전용. 5종 HTML은 모두 단독 실행 가능하며, 코드리뷰 재검증 결과 CRITICAL/HIGH 0건 + 회귀 0건. 다음 세션에서 최종 합류본 결정 → `prototype/index.html`로 통합 예정.
+### Changed
+- `src/frontend/src/app/layout.tsx`: 글로벌 `<NavHeader />` 삽입 (`9436772`)
+- `src/frontend/src/app/page.tsx`: 중복 헤더 제거(sr-only H1), 시그널 리스트 `grid-cols-1 lg:grid-cols-2`, `<ul>/<li>` 시맨틱, 필터 `role="group" + aria-pressed` (`9436772`)
+- `src/frontend/src/app/stocks/[code]/page.tsx`: `ResponsiveContainer aspect={2}` 비율 기반 차트, ErrorBoundary 래핑, 기간 버튼 `role="group"`, render-time 상태 리셋 (`9436772`)
+- `src/frontend/src/app/backtest/page.tsx`: 모바일 `<dl/dt/dd>` 카드 ↔ 데스크탑 `<table>` 이중 렌더, ErrorBoundary 래핑 (`9436772`)
+- `src/frontend/src/components/features/SignalCard.tsx`: `<Link>`가 직접 그리드 컨테이너 (중첩 `<div role="article">` 제거), `aria-label` 상세화 (`9436772`)
+
+### Fixed
+- `react-hooks/set-state-in-effect` ESLint 3건(Next 16 신규 룰): `NavHeader.pathname`, `StockDetail.code+period`, `Dashboard` 초기 `setLoading` 중복 → render-time 리셋 패턴 (`9436772`)
+- `role="tablist"/"tab"` 스펙 위반 2건 → `role="group" + aria-pressed` (필터, 기간 버튼) (`9436772`)
+- ErrorBoundary 재발 루프: `resetKeys` + `componentDidUpdate` 자동 리셋 (리뷰 MEDIUM-1) (`9436772`)
+- `role="alert"` + `aria-live="assertive"` 중복 제거 (`9436772`)
+- 백테스트 YAxis formatter 음수 처리 (`+-1.5%` → `-1.5%`) (`9436772`)
+- `aria-current="page"`는 exact match만, 관련 경로는 시각 강조로 분리 (`9436772`)
+
+### Committed
+- Sprint 4 Task 5-6 (`9436772`): 7 files, +330/-73, `tsc + eslint + next build` 전부 ok
+
+### Pending (Task 4 + 프로토타입 선정 다음 세션)
+- Task 4: 알림 설정 페이지 (`NotificationPreference` 엔티티 + `/settings` 프론트, 1.5일)
+- 프로토타입 5종 중 합류본 선정 → `prototype/index.html`로 통합
+
+---
+
+## [2026-04-17] 프로토타입 UI 실험 5종 + 코드리뷰 보안 패치 전면 적용
+
+### Added
+- `prototype/index-before-skeleton.html`: 원본 스냅샷 (baseline, 보안 패치만) (`7a5b750`)
+- `prototype/index-tilt-magnetic.html`: 3D 틸트 카드 + 마그네틱 버튼 — `prefers-reduced-motion` + 터치 자동 비활성 (`7a5b750`)
+- `prototype/index-counter.html`: 카운트업 애니메이션 32개 카운터 (data 속성 선언형 엔진) (`7a5b750`)
+- `prototype/index-ambient.html`: 배경 3층 — Aurora 메시 + 커서 스포트라이트 + 파티클 네트워크 캔버스 (`7a5b750`)
+
+### Changed
+- `prototype/index.html`: 스켈레톤 UI 적용 (시그널 리스트/상세 차트/백테스트 차트 로딩 + shimmer, 라이트/다크 대응) (`7a5b750`)
+
+### Fixed
+- **[CRITICAL] XSS 싱크 3종 차단**: `escapeHtml()` + `num()` 헬퍼, `onclick` 인라인 → `data-code` + `addEventListener` (`7a5b750`)
+- **[HIGH] `showPage()` 허용목록**: `VALID_PAGES = Set` early return (`7a5b750`)
+- **[HIGH] DOM 엘리먼트 캐싱**: `cacheEls()` INIT 1회 → `els[id]` 룩업 (`7a5b750`)
+- **[MEDIUM] CDN SRI**: Chart.js 4.4.7 / Pretendard 1.3.9 `integrity="sha384-..."` + `crossorigin="anonymous"` (`7a5b750`)
+- **[MEDIUM] 스켈레톤 접근성**: `role="list"` + `aria-busy` 토글 + `aria-live="polite"` + 카드 `role="button"` + 키보드 (`7a5b750`)
+- **[LOW] matchMedia 동적 리스너**: `prefers-reduced-motion`/`pointer: coarse`에 `change` 리스너 (tilt/counter/ambient 3종) (`7a5b750`)
+
+> 5종 HTML 모두 단독 실행 가능. 코드리뷰 재검증 CRITICAL/HIGH 0건 + 회귀 0건. 다음 세션에서 최종 합류본 결정 → `prototype/index.html` 통합 예정.
 
 ---
 

@@ -2,7 +2,7 @@
 stage: 06-code
 agent: 08-backend + 09-frontend
 last_updated: 2026-04-17
-status: sprint-4-task-1-3-completed
+status: sprint-4-task-1-3-and-5-6-completed
 ---
 
 # Build Phase 산출물 요약
@@ -142,13 +142,52 @@ com.ted.signal
 - 신규: `CorsConfigTest` 1개 + `BacktestApiIntegrationTest.runBacktestRejectsPeriodOverThreeYears` 1개
 - 기존 18개 유지 (N+1 리팩터 후에도 동작 불변)
 
-## 알려진 이슈 (Sprint 4 Task 4-5 이관)
+## Sprint 4 Task 5-6 — 프론트엔드 반응형/접근성 (완료)
+
+**커밋**: 9436772
+
+### 주요 변경
+- **Task 5-4 글로벌 NavHeader (신규)**: sticky top, 햄버거 메뉴, ESC 키, `aria-current`, `aria-expanded`, `render-time 리셋` 패턴
+- **Task 5-5 ErrorBoundary (신규)**: class 컴포넌트 + `resetKeys` 자동 복구 + `role="alert"`
+- **Task 5-1 대시보드**: 중복 헤더 제거, 시그널 리스트 `grid-cols-1 lg:grid-cols-2`, `ul/li` 시맨틱, 필터 `role="group" + aria-pressed`
+- **Task 5-2 종목 상세**: `ResponsiveContainer aspect={2}` (고정 300px → 비율 기반), 로딩 스켈레톤 반응형, `aria-busy`/`aria-live`
+- **Task 5-3 백테스트**: 데스크탑 `<table>` vs 모바일 `<ul><li><dl>` 이중 렌더, YAxis 음수 포맷 수정
+- **Task 6 접근성**: `focus-visible:ring-2` 전역 적용, `SignalCard` Link 단순화(중첩 div 제거), 모든 버튼 `type="button"`
+
+### 코드 리뷰 반영 (HIGH 2 + MEDIUM 3 + LOW 1)
+- `react-hooks/set-state-in-effect` ESLint 3건 → render-time 리셋 패턴 (D-4.7)
+- `role="tablist"` 잘못된 패턴 → `role="group" + aria-pressed` (D-4.8)
+- ErrorBoundary reset 루프 → `resetKeys` 지원 (D-4.6)
+- `role="alert"` + `aria-live` 중복 제거
+- YAxis formatter 음수 처리
+- `aria-current="page"`는 exact match만
+
+### 검증
+- `tsc --noEmit` ✓ 0 에러
+- `eslint src/` ✓ 0 에러
+- `next build` ✓ 4 routes (/ /backtest /_not-found /stocks/[code])
+
+### 신규 파일
+- `src/frontend/src/components/NavHeader.tsx`
+- `src/frontend/src/components/ErrorBoundary.tsx`
+
+## 프로토타입 UI 실험 (커밋 `7a5b750`, 선정 대기)
+
+| 파일 | 적용 효과 | 크기 |
+|------|----------|------|
+| `index-before-skeleton.html` | baseline (보안 패치만) | 40KB |
+| `index.html` | + 스켈레톤 UI | 45KB |
+| `index-tilt-magnetic.html` | + 3D 틸트 카드 + 마그네틱 버튼 | 50KB |
+| `index-counter.html` | + 카운트업 애니메이션(32개) | 54KB |
+| `index-ambient.html` | + Aurora + 스포트라이트 + 파티클 네트워크 | 61KB |
+
+**잔여 작업**: 5종 비교 후 합류본 결정 → 실제 Next.js 프론트에 이식 (기존 보안 패치 구조 유지)
+
+## 알려진 이슈 (Task 4 + v1.1 이관)
 
 | 심각도 | 이슈 | 비고 |
 |--------|------|------|
-| MEDIUM | 알림 설정 페이지 미구현 | NotificationPreference 엔티티 + /settings 신규 필요 |
-| LOW | 모바일 반응형 미적용 | `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` 등 |
-| LOW | ErrorBoundary 없음 | Recharts 렌더링 에러 크래시 가능 |
-| LOW | 접근성 감사 | WCAG AA + 키보드 내비게이션 |
+| MEDIUM | 알림 설정 페이지 미구현 | NotificationPreference 엔티티 + /settings 신규 필요 (Task 4) |
 | LOW | 한국 공휴일 미처리 | 현재 주말만 스킵 (v1.1) |
 | LOW | CorsConfigTest 스코프 | `@SpringBootTest` → `@WebMvcTest` 분리 가능 |
+| LOW | lockfile 중복 | `~/package-lock.json` + `src/frontend/package-lock.json` → `turbopack.root` 설정 권장 |
