@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SIGNAL — 공매도 커버링 시그널</title>
+  <!-- NOTE: 이 파일은 prototype/index.html의 스켈레톤 UI 적용 이전 상태(baseline) 스냅샷입니다. 비교용으로만 유지하며, 기능 개선은 index.html 계열에서 진행합니다. -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
           integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC"
           crossorigin="anonymous"
@@ -210,41 +211,6 @@
     }
     .signal-card.grade-a-card { animation: pulse-glow 3s ease-in-out infinite; }
 
-    /* — Skeleton UI — */
-    @keyframes skeleton-shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
-    }
-    .skeleton {
-      background: linear-gradient(90deg,
-        var(--bg-surface) 0%,
-        var(--bg-hover) 50%,
-        var(--bg-surface) 100%);
-      background-size: 200% 100%;
-      animation: skeleton-shimmer 1.4s ease-in-out infinite;
-      border-radius: 6px;
-      pointer-events: none;
-      user-select: none;
-    }
-    .light-mode .skeleton {
-      background: linear-gradient(90deg,
-        #EEF0F3 0%,
-        #F7F8FA 50%,
-        #EEF0F3 100%);
-      background-size: 200% 100%;
-    }
-    .skeleton-text { height: 0.85rem; }
-    .skeleton-box { border-radius: 10px; }
-    .skeleton-signal {
-      cursor: default;
-      pointer-events: none;
-    }
-    .skeleton-signal:hover { transform: none; border-color: var(--border); background: var(--bg-surface); }
-    .skeleton-chart {
-      width: 100%; height: 280px; border-radius: 10px;
-    }
-    .skeleton-chart.sm { height: 240px; }
-
     /* — Detail Page — */
     .back-btn {
       display: inline-flex; align-items: center; gap: 6px;
@@ -429,7 +395,7 @@
       </div>
 
       <!-- Signal List -->
-      <div class="signal-list" id="signal-list" role="list" aria-busy="true" aria-live="polite"></div>
+      <div class="signal-list" id="signal-list"></div>
     </div>
 
     <!-- ===== DETAIL ===== -->
@@ -641,48 +607,18 @@
       const nav = els['nav-' + page];
       if (nav) nav.classList.add('active');
       els['nav-detail'].style.display = page === 'detail' ? '' : 'none';
-      if (page === 'backtest') {
-        showBacktestSkeletons();
-        setTimeout(() => initBacktestCharts(), 600);
-      }
+      if (page === 'backtest') initBacktestCharts();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     // ========== SIGNAL LIST ==========
     let currentFilter = 'all';
-
-    function renderSignalSkeletons(count = 6) {
-      const list = document.getElementById('signal-list');
-      list.setAttribute('aria-busy', 'true');
-      list.innerHTML = Array.from({ length: count }).map(() => `
-        <div class="signal-card skeleton-signal" aria-hidden="true">
-          <div class="skeleton skeleton-box" style="width:40px;height:40px;"></div>
-          <div style="display:flex;flex-direction:column;gap:10px;width:100%;">
-            <div style="display:flex;gap:10px;align-items:center;">
-              <div class="skeleton skeleton-text" style="width:90px;"></div>
-              <div class="skeleton skeleton-text" style="width:54px;height:0.7rem;"></div>
-            </div>
-            <div style="display:flex;gap:8px;">
-              <div class="skeleton skeleton-text" style="width:64px;height:0.7rem;"></div>
-              <div class="skeleton skeleton-text" style="width:84px;height:0.7rem;"></div>
-              <div class="skeleton skeleton-text" style="width:56px;height:0.7rem;"></div>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
-            <div class="skeleton skeleton-text" style="width:48px;height:1.4rem;"></div>
-            <div class="skeleton skeleton-text" style="width:72px;height:0.7rem;"></div>
-          </div>
-        </div>
-      `).join('');
-    }
-
     function renderSignals(sortBy = 'score') {
       const list = document.getElementById('signal-list');
       let filtered = currentFilter === 'all' ? [...signals] : signals.filter(s => s.type === currentFilter);
       if (sortBy === 'score') filtered.sort((a, b) => b.score - a.score);
       else filtered.sort((a, b) => a.balanceChange - b.balanceChange);
 
-      list.setAttribute('aria-busy', 'true');
       list.innerHTML = filtered.map(s => {
         const g = safeGrade(s.grade);
         const t = safeType(s.type);
@@ -715,7 +651,6 @@
         </div>
       `;
       }).join('');
-      list.setAttribute('aria-busy', 'false');
       list.querySelectorAll('.signal-card').forEach(card => {
         const code = card.getAttribute('data-code');
         const handler = () => showDetail(code);
@@ -790,29 +725,7 @@
       `).join('');
 
       showPage('detail');
-      showDualChartSkeleton();
-      setTimeout(() => initDualChart(30), 500);
-    }
-
-    function showDualChartSkeleton() {
-      const canvas = document.getElementById('dualChart');
-      if (dualChart) { dualChart.destroy(); dualChart = null; }
-      const parent = canvas.parentElement;
-      let sk = parent.querySelector('.skeleton-chart');
-      if (!sk) {
-        sk = document.createElement('div');
-        sk.className = 'skeleton skeleton-chart';
-        canvas.style.display = 'none';
-        parent.appendChild(sk);
-      }
-    }
-
-    function clearDualChartSkeleton() {
-      const canvas = document.getElementById('dualChart');
-      const parent = canvas.parentElement;
-      const sk = parent.querySelector('.skeleton-chart');
-      if (sk) sk.remove();
-      canvas.style.display = '';
+      initDualChart(30);
     }
 
     function generateChartData(days) {
@@ -843,7 +756,6 @@
     }
 
     function initDualChart(days) {
-      clearDualChartSkeleton();
       const ctx = document.getElementById('dualChart').getContext('2d');
       if (dualChart) dualChart.destroy();
       const d = generateChartData(days);
@@ -879,40 +791,12 @@
     function changePeriod(days, el) {
       el.parentElement.querySelectorAll('.period-tab').forEach(b => b.classList.remove('active'));
       el.classList.add('active');
-      showDualChartSkeleton();
-      setTimeout(() => initDualChart(days), 350);
+      initDualChart(days);
     }
 
     // ========== BACKTEST CHARTS ==========
     let returnChartI = null, monthlyChartI = null;
-
-    function showBacktestSkeletons() {
-      ['returnChart', 'monthlyChart'].forEach(id => {
-        const canvas = document.getElementById(id);
-        const parent = canvas.parentElement;
-        if (returnChartI && id === 'returnChart') { returnChartI.destroy(); returnChartI = null; }
-        if (monthlyChartI && id === 'monthlyChart') { monthlyChartI.destroy(); monthlyChartI = null; }
-        if (!parent.querySelector('.skeleton-chart')) {
-          const sk = document.createElement('div');
-          sk.className = 'skeleton skeleton-chart sm';
-          canvas.style.display = 'none';
-          parent.appendChild(sk);
-        }
-      });
-    }
-
-    function clearBacktestSkeletons() {
-      ['returnChart', 'monthlyChart'].forEach(id => {
-        const canvas = document.getElementById(id);
-        const parent = canvas.parentElement;
-        const sk = parent.querySelector('.skeleton-chart');
-        if (sk) sk.remove();
-        canvas.style.display = '';
-      });
-    }
-
     function initBacktestCharts() {
-      clearBacktestSkeletons();
       const c = chartColors();
 
       const ctx1 = document.getElementById('returnChart').getContext('2d');
@@ -963,8 +847,7 @@
 
     // ========== INIT ==========
     cacheEls();
-    renderSignalSkeletons(6);
-    setTimeout(() => renderSignals(), 700);
+    renderSignals();
   </script>
 </body>
 </html>

@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+### Added (uncommitted) — 2026-04-17 프로토타입 UI 실험 (5종 비교본)
+- `prototype/index-before-skeleton.html`: 원본 스냅샷 (git HEAD 기준, 비교용 기준선) + baseline 주석 헤더
+- `prototype/index-tilt-magnetic.html`: 3D 틸트 카드(메트릭/상세/시그널) + 마그네틱 버튼(nav/탭/테마) — `prefers-reduced-motion` + 터치 기기 자동 비활성
+- `prototype/index-counter.html`: 카운트업 애니메이션 32개 카운터 (메트릭/필터/시그널 스코어/상세 가격·스코어·잔고/백테스트 테이블) — data 속성 선언형 엔진
+- `prototype/index-ambient.html`: 배경 3층 — Aurora 메시(CSS 블롭 4개 42~74초 드리프트) + 커서 스포트라이트(CSS 변수 + `mix-blend-mode`) + 파티클 네트워크 캔버스(55 입자, 터치·저모션 비활성)
+
+### Changed (uncommitted)
+- `prototype/index.html`: 스켈레톤 UI 적용 — 시그널 리스트(700ms), 상세 차트(500ms + 기간 변경 350ms), 백테스트 차트(600ms) 로딩 상태 + shimmer 애니메이션 (라이트/다크 모드 대응)
+
+### Fixed (uncommitted) — 코드리뷰 보안/품질 이슈 7종 전면 반영 (5개 파일 공통)
+- **[CRITICAL] XSS 싱크 3종 차단**: `renderSignals()`/`showDetail()` 의 `innerHTML` 템플릿에 `escapeHtml()` + `num()` 적용, `score-breakdown` 필드 전부 이스케이프, `aria-label` 속성 주입 차단
+- **[CRITICAL] `onclick="showDetail('${s.code}')"` JS 인젝션 제거**: `data-code` 속성 + `addEventListener('click'|'keydown')` 패턴으로 전환. 카드에 `role="button"` + `tabindex="0"` + Enter/Space 키보드 지원 추가
+- **[HIGH] `showPage()` 허용목록 가드**: `VALID_PAGES = Set(['dashboard','detail','backtest'])` early return으로 임의 ID 주입 차단
+- **[HIGH] DOM 엘리먼트 캐싱**: `cacheEls()` INIT 1회 호출로 `showDetail()`의 `document.getElementById` 8~12회 재쿼리 제거 (`els[id]` 룩업)
+- **[HIGH] `showDetail()` 리팩터**: `innerHTML` 사용 최소화, `d-total` 은 `createElement + appendChild`로 전환
+- **[MEDIUM] CDN Subresource Integrity**: Chart.js 4.4.7, Pretendard 1.3.9 `<script>`/`<link>` 에 `integrity="sha384-..."` + `crossorigin="anonymous"` + `referrerpolicy="no-referrer"`
+- **[MEDIUM] 스켈레톤 접근성**: `signal-list` 에 `role="list"` + `aria-busy` 토글 + `aria-live="polite"`
+- **[LOW] matchMedia 동적 리스너**: `prefers-reduced-motion` / `pointer: coarse` 에 `change` 리스너 추가 — OS 설정 세션 중 토글 반영 (tilt/counter/ambient 3종)
+- **[LOW] baseline 파일 의도 명시**: `index-before-skeleton.html` 헤더에 비교용 snapshot 안내 주석
+
+> **메모**: 이번 세션은 Sprint 4 작업 없이 프로토타입 시각 실험 + 보안 패치 전용. 5종 HTML은 모두 단독 실행 가능하며, 코드리뷰 재검증 결과 CRITICAL/HIGH 0건 + 회귀 0건. 다음 세션에서 최종 합류본 결정 → `prototype/index.html`로 통합 예정.
+
 ---
 
 ## [2026-04-17] Sprint 4 Task 1-3 — N+1 쿼리 최적화 + 백테스팅 3년 제한 + CORS X-API-Key
