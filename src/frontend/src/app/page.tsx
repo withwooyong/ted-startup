@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import SignalCard from '@/components/features/SignalCard';
+import CountUp from '@/components/ui/CountUp';
+import Magnetic from '@/components/ui/Magnetic';
 import { getSignals } from '@/lib/api/client';
 import { SignalResult } from '@/types/signal';
 
@@ -67,12 +69,12 @@ export default function DashboardPage() {
           { label: 'Trend Reversal', value: counts.TREND_REVERSAL, color: 'text-[#6395FF]' },
           { label: 'Short Squeeze', value: counts.SHORT_SQUEEZE, color: 'text-[#FF8B3E]' },
         ].map(m => (
-          <div key={m.label} className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-4 hover:border-[#6395FF]/30 transition-colors">
+          <div key={m.label} className="bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] p-4 hover:border-[#6395FF]/30 transition-colors">
             <div className="text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-2">
               {m.label}
             </div>
             <div className={`font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight ${m.color}`}>
-              {m.value}
+              <CountUp value={m.value} duration={1200} />
             </div>
           </div>
         ))}
@@ -86,22 +88,23 @@ export default function DashboardPage() {
           className="flex gap-1 bg-[#131720] rounded-[10px] p-0.5 border border-white/[0.06] overflow-x-auto max-w-full"
         >
           {FILTERS.map(f => (
-            <button
-              key={f.key}
-              type="button"
-              aria-pressed={filter === f.key}
-              onClick={() => setFilter(f.key)}
-              className={`px-3 sm:px-4 py-1.5 rounded-lg text-[0.78rem] font-medium transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
-                filter === f.key
-                  ? 'text-white bg-[#6395FF] shadow-[0_2px_8px_rgba(99,149,255,0.3)]'
-                  : 'text-[#6B7A90] hover:text-[#E8ECF1]'
-              }`}
-            >
-              {f.label}
-              <span className="text-[0.65rem] opacity-60 ml-1 font-[family-name:var(--font-mono)]">
-                {counts[f.key]}
-              </span>
-            </button>
+            <Magnetic key={f.key} strength={0.2} radius={1.2}>
+              <button
+                type="button"
+                aria-pressed={filter === f.key}
+                onClick={() => setFilter(f.key)}
+                className={`px-3 sm:px-4 py-1.5 rounded-lg text-[0.78rem] font-medium transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
+                  filter === f.key
+                    ? 'text-white bg-[#6395FF] shadow-[0_2px_8px_rgba(99,149,255,0.3)]'
+                    : 'text-[#6B7A90] hover:text-[#E8ECF1]'
+                }`}
+              >
+                {f.label}
+                <span className="text-[0.65rem] opacity-60 ml-1 font-[family-name:var(--font-mono)]">
+                  {counts[f.key]}
+                </span>
+              </button>
+            </Magnetic>
           ))}
         </div>
         <label className="flex items-center gap-2 text-xs text-[#6B7A90]">
