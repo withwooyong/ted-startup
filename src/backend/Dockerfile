@@ -19,8 +19,9 @@ COPY gradle ./gradle
 COPY build.gradle settings.gradle ./
 
 # 래퍼 실행권한 확보 후 의존성만 선다운로드 (소스 변경해도 캐시 재사용)
+# 의존성 해석 실패는 이후 bootJar 에서도 동일하게 터지므로 바로 드러나는 편이 낫다.
 RUN chmod +x gradlew \
- && ./gradlew --no-daemon dependencies || true
+ && ./gradlew --no-daemon dependencies
 
 # 소스 복사 후 bootJar 빌드 (테스트는 CI에서 별도 수행)
 COPY src ./src

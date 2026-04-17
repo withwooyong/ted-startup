@@ -4,7 +4,9 @@ import type {
   NotificationPreferenceUpdate,
 } from '@/types/notification';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+// 브라우저에서는 상대 경로 '/api'를 사용해 Next.js 서버의 rewrites가 backend로 프록시한다.
+// 개발 환경에서 별도 도메인 백엔드를 쓰고 싶으면 NEXT_PUBLIC_API_BASE_URL을 설정.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api';
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

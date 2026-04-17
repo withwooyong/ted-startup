@@ -3,10 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BACKEND_BASE =
-  process.env.BACKEND_API_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  'http://localhost:8080/api';
+// 서버 사이드 전용 env — compose에서 BACKEND_INTERNAL_URL=http://backend:8080 주입
+const BACKEND_BASE = process.env.BACKEND_INTERNAL_URL || 'http://localhost:8080';
+
+// 관리자 preferences 페이로드는 수백 바이트 수준. 16KB 상한으로 DoS/오동작 페이로드 방어.
+const MAX_BODY_BYTES = 16 * 1024;
 
 /**
  * 관리자 API Key를 서버 측에서만 보관하기 위한 릴레이 라우트.
@@ -22,9 +23,23 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const body = await req.text();
+  const contentLength = Number(req.headers.get('content-length') ?? '0');
+  if (contentLength > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { status: 413, message: '요청 본문이 너무 큽니다' },
+      { status: 413 },
+    );
+  }
 
-  const upstream = await fetch(`${BACKEND_BASE}/notifications/preferences`, {
+  const body = await req.text();
+  if (body.length > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { status: 413, message: '요청 본문이 너무 큽니다' },
+      { status: 413 },
+    );
+  }
+
+  const upstream = await fetch(`${BACKEND_BASE}/api/notifications/preferences`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
