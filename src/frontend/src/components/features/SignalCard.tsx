@@ -17,19 +17,19 @@ const TYPE_BG: Record<string, string> = {
 export default function SignalCard({ signal }: { signal: SignalResult }) {
   const s = signal;
   return (
-    <Link href={`/stocks/${s.stockCode}`}>
-      <div
-        className={`
-          group grid grid-cols-[40px_1fr_auto] items-center gap-4
-          bg-[#131720] border border-white/[0.06] rounded-[14px] p-4
-          cursor-pointer transition-all duration-200
-          hover:border-[#6395FF]/30 hover:bg-[#1E2538] hover:translate-x-1
-          ${s.grade === 'A' ? 'animate-pulse-glow' : ''}
-        `}
-        role="article"
-        aria-label={`${s.stockName} ${SIGNAL_TYPE_LABELS[s.signalType]} 스코어 ${s.score}점`}
-      >
-        <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center text-lg ${TYPE_BG[s.signalType]}`}>
+    <Link
+      href={`/stocks/${s.stockCode}`}
+      aria-label={`${s.stockName} ${s.stockCode} — ${SIGNAL_TYPE_LABELS[s.signalType]} 스코어 ${s.score}점 ${s.grade}등급, 상세 보기`}
+      className={`
+        group grid grid-cols-[40px_1fr_auto] items-center gap-3 sm:gap-4
+        bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4
+        transition-all duration-200
+        hover:border-[#6395FF]/30 hover:bg-[#1E2538] hover:translate-x-1
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50
+        ${s.grade === 'A' ? 'animate-pulse-glow' : ''}
+      `}
+    >
+        <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center text-lg ${TYPE_BG[s.signalType]}`} aria-hidden="true">
           {SIGNAL_TYPE_ICONS[s.signalType]}
         </div>
 
@@ -63,7 +63,6 @@ export default function SignalCard({ signal }: { signal: SignalResult }) {
             {s.grade} · {SIGNAL_TYPE_LABELS[s.signalType]}
           </span>
         </div>
-      </div>
     </Link>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Outfit, DM_Mono } from "next/font/google";
+import NavHeader from "@/components/NavHeader";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -26,6 +27,7 @@ export default function RootLayout({
   return (
     <html lang="ko" className={`${outfit.variable} ${dmMono.variable} dark`}>
       <body className="min-h-screen bg-[#0B0E11] text-[#E8ECF1] antialiased">
+        <NavHeader />
         {children}
         <footer className="border-t border-white/5 bg-[#0B0E11]/90">
           <div className="max-w-6xl mx-auto px-5 py-3">

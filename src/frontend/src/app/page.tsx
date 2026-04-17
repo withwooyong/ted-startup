@@ -20,9 +20,6 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-
     getSignals()
       .then((data: SignalResult[]) => {
         setSignals(data);
@@ -50,19 +47,20 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className="max-w-6xl mx-auto px-5 py-7">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-7">
-        <h1 className="font-[family-name:var(--font-display)] text-xl font-bold bg-gradient-to-r from-[#6395FF] to-[#a78bfa] bg-clip-text text-transparent">
-          SIGNAL<span className="text-[#3D4A5C] text-xs font-normal ml-2">v1.0</span>
-        </h1>
+    <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7">
+      {/* Page subheader */}
+      <div className="flex items-center justify-between mb-5 sm:mb-7">
+        <h1 className="sr-only">시그널 대시보드</h1>
+        <span className="font-[family-name:var(--font-display)] text-sm text-[#6B7A90]" aria-hidden="true">
+          오늘의 시그널
+        </span>
         <span className="font-[family-name:var(--font-mono)] text-xs text-[#3D4A5C]">
           {new Date().toISOString().split('T')[0]}
         </span>
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-7">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5 sm:mb-7">
         {[
           { label: 'Total Signals', value: counts.all, color: '' },
           { label: 'Rapid Decline', value: counts.RAPID_DECLINE, color: 'text-[#FF4D6A]' },
@@ -81,13 +79,19 @@ export default function DashboardPage() {
       </div>
 
       {/* Filter + Sort */}
-      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-        <div className="flex gap-1 bg-[#131720] rounded-[10px] p-0.5 border border-white/[0.06]">
+      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap" role="toolbar" aria-label="시그널 필터 및 정렬">
+        <div
+          role="group"
+          aria-label="시그널 타입 필터"
+          className="flex gap-1 bg-[#131720] rounded-[10px] p-0.5 border border-white/[0.06] overflow-x-auto max-w-full"
+        >
           {FILTERS.map(f => (
             <button
               key={f.key}
+              type="button"
+              aria-pressed={filter === f.key}
               onClick={() => setFilter(f.key)}
-              className={`px-4 py-1.5 rounded-lg text-[0.78rem] font-medium transition-all ${
+              className={`px-3 sm:px-4 py-1.5 rounded-lg text-[0.78rem] font-medium transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
                 filter === f.key
                   ? 'text-white bg-[#6395FF] shadow-[0_2px_8px_rgba(99,149,255,0.3)]'
                   : 'text-[#6B7A90] hover:text-[#E8ECF1]'
@@ -100,20 +104,24 @@ export default function DashboardPage() {
             </button>
           ))}
         </div>
-        <select
-          value={sort}
-          onChange={e => setSort(e.target.value as 'score' | 'change')}
-          className="px-3 py-1.5 rounded-lg text-xs bg-[#131720] border border-white/[0.06] text-[#6B7A90] focus:outline-none focus:border-[#6395FF]/30"
-        >
-          <option value="score">스코어순</option>
-          <option value="change">감소율순</option>
-        </select>
+        <label className="flex items-center gap-2 text-xs text-[#6B7A90]">
+          <span className="sr-only sm:not-sr-only">정렬:</span>
+          <select
+            value={sort}
+            onChange={e => setSort(e.target.value as 'score' | 'change')}
+            aria-label="시그널 정렬 기준"
+            className="px-3 py-1.5 rounded-lg text-xs bg-[#131720] border border-white/[0.06] text-[#6B7A90] focus:outline-none focus:border-[#6395FF]/30"
+          >
+            <option value="score">스코어순</option>
+            <option value="change">감소율순</option>
+          </select>
+        </label>
       </div>
 
       {/* Signal List */}
       {loading && (
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3" aria-busy="true" aria-live="polite">
+          {[1, 2, 3, 4].map(i => (
             <div key={i} className="h-20 bg-[#131720] rounded-[14px] animate-pulse" />
           ))}
         </div>
@@ -140,11 +148,13 @@ export default function DashboardPage() {
       )}
 
       {!loading && !error && sorted.length > 0 && (
-        <div className="space-y-2">
+        <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3" role="list" aria-label="탐지된 시그널 목록">
           {sorted.map(s => (
-            <SignalCard key={s.signalId} signal={s} />
+            <li key={s.signalId}>
+              <SignalCard signal={s} />
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </main>
   );

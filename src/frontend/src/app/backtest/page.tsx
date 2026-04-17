@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { getBacktestResults } from '@/lib/api/client';
-import { BacktestSummary, SIGNAL_TYPE_LABELS, SignalType } from '@/types/signal';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import { BacktestSummary } from '@/types/signal';
 import {
   ResponsiveContainer,
   BarChart,
@@ -55,15 +55,12 @@ export default function BacktestPage() {
     : '';
 
   return (
-    <main className="max-w-6xl mx-auto px-5 py-7">
+    <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7">
       {/* Header */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="mb-2">
         <h1 className="font-[family-name:var(--font-display)] text-xl font-bold">
           Backtest Results
         </h1>
-        <Link href="/" className="text-sm text-[#6B7A90] hover:text-[#6395FF] transition-colors">
-          대시보드 →
-        </Link>
       </div>
       {periodStr && (
         <p className="font-[family-name:var(--font-mono)] text-xs text-[#3D4A5C] mb-6">
@@ -72,7 +69,7 @@ export default function BacktestPage() {
       )}
 
       {loading && (
-        <div className="space-y-4">
+        <div className="space-y-4" aria-busy="true" aria-live="polite">
           <div className="h-48 bg-[#131720] rounded-[14px] animate-pulse" />
           <div className="h-64 bg-[#131720] rounded-[14px] animate-pulse" />
         </div>
@@ -100,8 +97,8 @@ export default function BacktestPage() {
 
       {!loading && !error && results.length > 0 && (
         <>
-          {/* Summary Table */}
-          <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] overflow-x-auto mb-6">
+          {/* Summary — Table (desktop) */}
+          <div className="hidden sm:block bg-[#131720] border border-white/[0.06] rounded-[14px] overflow-x-auto mb-6">
             <table className="w-full text-sm">
               <caption className="sr-only">시그널 타입별 백테스팅 결과</caption>
               <thead>
@@ -109,23 +106,23 @@ export default function BacktestPage() {
                   <th className="px-4 py-3 text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">시그널</th>
                   <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">발생</th>
                   <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(5d)</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold hidden sm:table-cell" scope="col">적중률(10d)</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold hidden sm:table-cell" scope="col">적중률(20d)</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(10d)</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(20d)</th>
                   <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">수익률(5d)</th>
                 </tr>
               </thead>
               <tbody>
                 {results.map(r => (
                   <tr key={r.signalType} className="border-t border-white/[0.06] hover:bg-[#1E2538] transition-colors">
-                    <td className="px-4 py-3 font-medium" scope="row">{SIGNAL_TYPE_NAMES[r.signalType] || r.signalType}</td>
+                    <th className="px-4 py-3 font-medium text-left" scope="row">{SIGNAL_TYPE_NAMES[r.signalType] || r.signalType}</th>
                     <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)]">{r.totalSignals}</td>
                     <td className={`px-4 py-3 text-right font-semibold font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate5d ?? 0)}`}>
                       {(r.hitRate5d ?? 0).toFixed(1)}%
                     </td>
-                    <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] hidden sm:table-cell ${hitRateColor(r.hitRate10d ?? 0)}`}>
+                    <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate10d ?? 0)}`}>
                       {(r.hitRate10d ?? 0).toFixed(1)}%
                     </td>
-                    <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] hidden sm:table-cell ${hitRateColor(r.hitRate20d ?? 0)}`}>
+                    <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate20d ?? 0)}`}>
                       {(r.hitRate20d ?? 0).toFixed(1)}%
                     </td>
                     <td className={`px-4 py-3 text-right font-semibold font-[family-name:var(--font-mono)] ${returnColor(r.avgReturn5d ?? 0)}`}>
@@ -137,16 +134,62 @@ export default function BacktestPage() {
             </table>
           </div>
 
+          {/* Summary — Card list (mobile) */}
+          <ul className="sm:hidden space-y-3 mb-6" aria-label="시그널 타입별 백테스팅 결과">
+            {results.map(r => (
+              <li key={r.signalType} className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold text-sm">{SIGNAL_TYPE_NAMES[r.signalType] || r.signalType}</span>
+                  <span className="font-[family-name:var(--font-mono)] text-xs text-[#6B7A90]">
+                    발생 {r.totalSignals}
+                  </span>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <dt className="text-[#6B7A90]">적중 5d</dt>
+                    <dd className={`font-[family-name:var(--font-mono)] font-semibold ${hitRateColor(r.hitRate5d ?? 0)}`}>
+                      {(r.hitRate5d ?? 0).toFixed(1)}%
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-[#6B7A90]">수익 5d</dt>
+                    <dd className={`font-[family-name:var(--font-mono)] font-semibold ${returnColor(r.avgReturn5d ?? 0)}`}>
+                      {(r.avgReturn5d ?? 0) > 0 ? '+' : ''}{(r.avgReturn5d ?? 0).toFixed(1)}%
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-[#6B7A90]">적중 10d</dt>
+                    <dd className={`font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate10d ?? 0)}`}>
+                      {(r.hitRate10d ?? 0).toFixed(1)}%
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-[#6B7A90]">적중 20d</dt>
+                    <dd className={`font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate20d ?? 0)}`}>
+                      {(r.hitRate20d ?? 0).toFixed(1)}%
+                    </dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+
           {/* Return Chart */}
-          <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-4">
-            <h3 className="text-[0.78rem] font-semibold text-[#6B7A90] font-[family-name:var(--font-display)] mb-4">
+          <ErrorBoundary resetKeys={[chartData.length]}>
+          <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4">
+            <h2 className="text-[0.78rem] font-semibold text-[#6B7A90] font-[family-name:var(--font-display)] mb-4">
               보유기간별 평균 수익률
-            </h3>
-            <ResponsiveContainer width="100%" height={280}>
+            </h2>
+            <ResponsiveContainer width="100%" aspect={2.2}>
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                 <XAxis dataKey="name" tick={{ fill: '#4A5568', fontSize: 11 }} tickLine={false} />
-                <YAxis tick={{ fill: '#4A5568', fontSize: 10 }} tickFormatter={v => `+${v}%`} tickLine={false} axisLine={false} />
+                <YAxis
+                  tick={{ fill: '#4A5568', fontSize: 10 }}
+                  tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip
                   contentStyle={{ background: '#1A1F28', border: 'none', borderRadius: 10, color: '#E8ECF1' }}
                   formatter={(value) => {
@@ -161,6 +204,7 @@ export default function BacktestPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          </ErrorBoundary>
         </>
       )}
     </main>
