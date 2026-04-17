@@ -46,14 +46,20 @@ export async function getNotificationPreferences(): Promise<NotificationPreferen
 
 export async function updateNotificationPreferences(
   preferences: NotificationPreferenceUpdate,
-  apiKey: string,
 ): Promise<NotificationPreference> {
-  return fetchApi<NotificationPreference>('/notifications/preferences', {
+  // Next.js Route Handler를 경유해 서버 측 ADMIN_API_KEY로 릴레이한다.
+  // 클라이언트 번들에는 관리자 키가 포함되지 않는다.
+  const res = await fetch('/api/admin/notifications/preferences', {
     method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': apiKey,
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(preferences),
+    cache: 'no-store',
   });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.message || `API Error: ${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
 }

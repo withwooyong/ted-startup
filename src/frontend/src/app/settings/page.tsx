@@ -21,8 +21,6 @@ const CHANNEL_KEYS = [
 ] as const;
 type ChannelKey = (typeof CHANNEL_KEYS)[number];
 
-const ADMIN_API_KEY = process.env.NEXT_PUBLIC_ADMIN_API_KEY || '';
-
 function friendlyError(err: unknown): string {
   if (err && typeof err === 'object' && 'status' in err) {
     const status = (err as { status?: number }).status;
@@ -91,13 +89,9 @@ export default function SettingsPage() {
       setToast('최소 한 개의 시그널 타입을 선택해주세요');
       return;
     }
-    if (!ADMIN_API_KEY) {
-      setToast('관리자 API Key가 설정되지 않았습니다 (NEXT_PUBLIC_ADMIN_API_KEY)');
-      return;
-    }
     setSaving(true);
     try {
-      const result = await updateNotificationPreferences(form, ADMIN_API_KEY);
+      const result = await updateNotificationPreferences(form);
       setUpdatedAt(result.updatedAt);
       setToast('저장되었습니다');
     } catch (err) {
