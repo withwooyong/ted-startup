@@ -19,7 +19,7 @@
 
 | 영역 | 선택 | 비고 |
 |------|------|------|
-| Backend | Spring Boot 3.4 + Java 21 | Hexagonal Architecture |
+| Backend | Spring Boot 3.5.0 + Java 21 | Hexagonal Architecture |
 | DB | PostgreSQL 16 | 월별 시계열 파티셔닝 |
 | Frontend | Next.js 15 + TypeScript | Recharts 차트 |
 | 배치 | Spring Batch | 일 1회 (06:00) |
