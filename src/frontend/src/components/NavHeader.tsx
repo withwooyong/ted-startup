@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 const NAV_ITEMS = [
   { href: '/', label: '대시보드' },
   { href: '/backtest', label: '백테스트' },
+  { href: '/settings', label: '설정' },
 ];
 
 export default function NavHeader() {

@@ -1,10 +1,10 @@
 # Sprint 4 작업계획서 — 성능 최적화 + 보안 + 사용자 체감 기능
 
 > 생성일: 2026-04-17
-> 최종 업데이트: 2026-04-17 (Task 1-3, 5, 6 완료 — Task 4만 대기)
+> 최종 업데이트: 2026-04-17 (Task 1-6 전체 완료)
 > 이전 Sprint: Sprint 3 완료 (백테스팅 엔진 + 텔레그램 알림 + 통합 테스트)
-> 기준 커밋: `88aba9a` → 현재 `9436772`
-> 진행 현황: **Task 1-3 (`33b6cf1`) + Task 5-6 (`9436772`) 완료, Task 4만 다음 세션 이관**
+> 기준 커밋: `88aba9a` → 현재 `9436772` (+ Task 4 커밋 예정)
+> 진행 현황: **Sprint 4 전체 Task(1-6) 완료** — Human Approval #3 대기
 > 목표 기간: 3~5일
 
 ---
@@ -34,7 +34,7 @@ Sprint 3에서 핵심 기능(백테스팅 + 알림)과 테스트 인프라(Testc
 | Task 1: N+1 쿼리 최적화 | ✅ 완료 (17,500쿼리 → 7쿼리) | `33b6cf1` |
 | Task 2: 백테스팅 최적화 | ✅ 완료 (3년 제한 + 벌크 조회) | `33b6cf1` |
 | Task 3: CORS X-API-Key | ✅ 완료 | `33b6cf1` |
-| Task 4: 알림 설정 페이지 | ⏳ 다음 세션 이관 | — |
+| Task 4: 알림 설정 페이지 | ✅ 완료 (엔티티 + GET/PUT API + `/settings` 페이지 + Telegram 필터) | (커밋 예정) |
 | Task 5: 모바일 반응형 + ErrorBoundary | ✅ 완료 (3개 페이지 + NavHeader + ErrorBoundary resetKeys) | `9436772` |
 | Task 6: 접근성 감사 | ✅ 완료 (aria-pressed, focus-visible, Link 단순화) | `9436772` |
 

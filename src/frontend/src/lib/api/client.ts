@@ -1,14 +1,21 @@
 import type { SignalResult, StockDetail, BacktestSummary } from '@/types/signal';
+import type {
+  NotificationPreference,
+  NotificationPreferenceUpdate,
+} from '@/types/notification';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 
-async function fetchApi<T>(path: string): Promise<T> {
+async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
     cache: 'no-store',
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || `API Error: ${res.status}`);
+    const err = new Error(body.message || `API Error: ${res.status}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -31,4 +38,22 @@ export async function getStockDetail(code: string, from?: string, to?: string): 
 
 export async function getBacktestResults(): Promise<BacktestSummary[]> {
   return fetchApi<BacktestSummary[]>('/backtest');
+}
+
+export async function getNotificationPreferences(): Promise<NotificationPreference> {
+  return fetchApi<NotificationPreference>('/notifications/preferences');
+}
+
+export async function updateNotificationPreferences(
+  preferences: NotificationPreferenceUpdate,
+  apiKey: string,
+): Promise<NotificationPreference> {
+  return fetchApi<NotificationPreference>('/notifications/preferences', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiKey,
+    },
+    body: JSON.stringify(preferences),
+  });
 }

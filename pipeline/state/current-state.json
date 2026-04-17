@@ -2,8 +2,8 @@
   "pipeline_id": "ted-startup-v1",
   "status": "in_progress",
   "current_phase": "Phase 3: Build",
-  "current_stage": "Sprint 4 Task 1-3+5-6 완료 → Task 4만 대기",
-  "current_agent": "09-frontend",
+  "current_stage": "Sprint 4 전체 완료 → Human Approval #3 대기",
+  "current_agent": "08-backend + 09-frontend",
   "last_commit": "9436772",
   "last_updated": "2026-04-17",
   "completed_stages": [
@@ -45,14 +45,17 @@
         "commit": "9436772",
         "scope": "모바일 반응형 + ErrorBoundary(resetKeys) + 글로벌 NavHeader + 접근성(aria-pressed, focus-visible, Link 단순화)"
       },
-      "task_4_pending": {
-        "scope": "알림 설정 페이지 (NotificationPreference 엔티티 + GET/PUT API + 프론트 /settings)"
-      }
+      "task_4_completed": {
+        "commit": "(예정)",
+        "scope": "알림 설정 — NotificationPreference 엔티티(싱글 로우 id=1) + GET/PUT /api/notifications/preferences + TelegramNotificationService 4채널 필터(daily/urgent/batch/weekly + minScore + signalTypes) + 프론트 /settings 페이지(토글/슬라이더/저장)"
+      },
+      "status_overall": "completed"
     },
     "prototype_ui_experiments": {
       "commit": "7a5b750",
       "scope": "스켈레톤/틸트-마그네틱/카운트업/Aurora-스포트라이트-파티클 5종 비교본 + 코드리뷰 보안 패치 8종",
-      "pending_decision": "5종 중 최종 합류본 선정 → prototype/index.html로 통합 필요"
+      "decision": "D-4.10 ambient 합류본 확정 (2026-04-17) → prototype/index.html에 동일 내용 복사 완료",
+      "next_step": "Next.js 이식 — useTilt/useCountUp 훅 + AuroraBackground/MagneticButton 컴포넌트 분해"
     }
   },
   "human_approvals": [
@@ -70,8 +73,8 @@
   },
   "test_coverage": {
     "backend": {
-      "total_tests": 20,
-      "test_types": ["signal_detection(5)", "backtest_engine(4)", "api_integration(9)", "cors(1)", "context_loads(1)"],
+      "total_tests": 29,
+      "test_types": ["signal_detection(5)", "backtest_engine(4)", "api_integration(9)", "cors(1)", "context_loads(1)", "notification_api(9)"],
       "framework": "JUnit 5 + Testcontainers PostgreSQL",
       "status": "all_passing"
     },
@@ -93,6 +96,8 @@
     {"id": "cors-api-key", "resolved_in": "33b6cf1", "note": "WebConfig.allowedHeaders에 X-API-Key 추가"},
     {"id": "mobile-responsive", "resolved_in": "9436772", "note": "3개 페이지 반응형 (sm/lg 브레이크포인트) + 햄버거 네비"},
     {"id": "error-boundary", "resolved_in": "9436772", "note": "ErrorBoundary class 컴포넌트 + resetKeys 자동 복구"},
-    {"id": "react-hooks-set-state-in-effect", "resolved_in": "9436772", "note": "Next 16 신규 ESLint 룰 3건 → render-time 리셋 패턴"}
+    {"id": "react-hooks-set-state-in-effect", "resolved_in": "9436772", "note": "Next 16 신규 ESLint 룰 3건 → render-time 리셋 패턴"},
+    {"id": "notification-settings-missing", "resolved_in": "(예정)", "note": "/settings 페이지 + GET/PUT API + Telegram 4채널 필터링 적용"},
+    {"id": "prototype-canonical-decision", "resolved_in": "(예정)", "note": "D-4.10 — ambient를 최종 합류본으로 채택, prototype/index.html에 복사"}
   ]
 }

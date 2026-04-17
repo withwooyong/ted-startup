@@ -2,7 +2,7 @@
 stage: 06-code
 agent: 08-backend + 09-frontend
 last_updated: 2026-04-17
-status: sprint-4-task-1-3-and-5-6-completed
+status: sprint-4-completed
 ---
 
 # Build Phase 산출물 요약
@@ -171,23 +171,64 @@ com.ted.signal
 - `src/frontend/src/components/NavHeader.tsx`
 - `src/frontend/src/components/ErrorBoundary.tsx`
 
-## 프로토타입 UI 실험 (커밋 `7a5b750`, 선정 대기)
+## 프로토타입 UI 실험 (커밋 `7a5b750`, 합류본 = ambient 확정)
 
-| 파일 | 적용 효과 | 크기 |
-|------|----------|------|
-| `index-before-skeleton.html` | baseline (보안 패치만) | 40KB |
-| `index.html` | + 스켈레톤 UI | 45KB |
-| `index-tilt-magnetic.html` | + 3D 틸트 카드 + 마그네틱 버튼 | 50KB |
-| `index-counter.html` | + 카운트업 애니메이션(32개) | 54KB |
-| `index-ambient.html` | + Aurora + 스포트라이트 + 파티클 네트워크 | 61KB |
+| 파일 | 적용 효과 | 크기 | 상태 |
+|------|----------|------|------|
+| `index-before-skeleton.html` | baseline (보안 패치만) | 40KB | 비교 레퍼런스 |
+| `index-tilt-magnetic.html` | + 3D 틸트 카드 + 마그네틱 버튼 | 50KB | 비교 레퍼런스 |
+| `index-counter.html` | + 카운트업 애니메이션(32개) | 54KB | 비교 레퍼런스 |
+| `index-ambient.html` | + Aurora 4-blob + 스포트라이트 + 파티클 네트워크 (누적본) | 61KB | **최종 합류본** |
+| `index.html` | ambient 동일 내용 (캐노니컬) | 61KB | **엔트리** |
 
-**잔여 작업**: 5종 비교 후 합류본 결정 → 실제 Next.js 프론트에 이식 (기존 보안 패치 구조 유지)
+### ambient 탑재 효과 (D-4.10)
+- **Aurora 배경**: 4개 blob(파랑/보라/빨강/주황) drift 애니메이션 42~74s, `filter:blur(90px)` + `mix-blend-mode:screen`, `prefers-reduced-motion` 존중
+- **Skeleton UI**: `@keyframes skeleton-shimmer` 1.4s, 카드/테이블/차트 3개 모듈 로딩 상태
+- **Tilt + Shine**: 메트릭/디테일 카드 마우스 추적 3D 회전 + `.tilt-shine` 광택 레이어
+- **Magnetic 버튼**: 필터 탭에 커서 인력 효과 (class `magnetic`)
+- **CountUp**: `data-count` + `data-duration` + `data-decimals` + `data-suffix` 속성 32개, Chart.js 4.4.7 + Pretendard Variable
 
-## 알려진 이슈 (Task 4 + v1.1 이관)
+**다음 단계** (Next.js 이식 설계):
+- `aurora` → `<AuroraBackground />` fixed layer 컴포넌트
+- `tilt` → `useTilt()` 훅 (mouse 이벤트 + ref)
+- `count` → `useCountUp(target, duration)` 훅 (requestAnimationFrame)
+- `magnetic` → `<MagneticButton>` 래퍼
+- 이미 적용된 스켈레톤은 기존 `Loading` 상태에 `animate-pulse`로 동등 구현 확인
+
+## Sprint 4 Task 4 — 알림 설정 페이지 (완료, 커밋 예정)
+
+### 백엔드 신규/변경 (D-4.11)
+- 엔티티: `NotificationPreference` (id=1 싱글 로우). 4채널 플래그(daily/urgent/batch/weekly) + `minScore`(0-100) + `signalTypes` JSONB
+- 포트/서비스: `GetNotificationPreferenceUseCase`, `UpdateNotificationPreferenceUseCase`, `NotificationPreferenceService` (지연 생성 + 필터링용 fallback)
+- 컨트롤러: `GET/PUT /api/notifications/preferences` + Bean Validation
+- DDL 참고: `db/migration/V2__notification_preference.sql` (Flyway 도입 시 바로 적용)
+- TelegramNotificationService 필터: 4채널 모두 preference 반영
+  - `sendDailySummary`: enabled + signalTypes + minScore
+  - `sendUrgentAlerts`: enabled + signalTypes (A등급 자체가 minScore 상회)
+  - `sendBatchFailure`, `sendWeeklyReport`: enabled
+- GlobalExceptionHandler: `@Valid @RequestBody` 검증/역직렬화/도메인 IllegalArgument → 400
+
+### 프론트 신규/변경
+- `/settings` 페이지 (`src/app/settings/page.tsx`): 4개 스위치 토글(`role="switch"`) + 3개 시그널 타입 필터(`aria-pressed`) + minScore 슬라이더(`input[type=range]`) + 저장 버튼 + 토스트
+- `src/types/notification.ts`: `NotificationPreference`/`NotificationPreferenceUpdate` 타입 + 채널 라벨
+- `src/lib/api/client.ts`: `fetchApi`에 `RequestInit` 옵션, `getNotificationPreferences`/`updateNotificationPreferences`
+- `NavHeader.tsx`: `/settings` 링크 추가
+
+### 테스트 (9개 신규, 리뷰 반영 후 확장)
+- `NotificationApiIntegrationTest`: 기본값 생성(1) / 인증 없음/잘못된 키 401(2) / 전체 업데이트 + 영속(1) / minScore 범위 400(1) / 알 수 없는 타입 400 + 응답 반사 없음 검증(1) / 빈 배열 400(1) / 4개 이상 400(1) / 필수 필드 누락 400(1)
+- **전체 백엔드 테스트**: 29개(기존 20 + 신규 9) 모두 통과
+
+### 리뷰 반영 (D-4.12)
+- HIGH 4 + MEDIUM 9 전량 수정 (java/typescript/security 리뷰어 3종 병렬 실행 결과)
+- `ApiKeyValidator` 컴포넌트로 3개 컨트롤러 중복 제거 (Backtest/SignalDetection/Batch)
+- `IllegalArgumentException` 전역 캐치 제거 → `DomainException(DomainError.InvalidParameter)` 경로로 통일
+- `UpdateCommand` record compact constructor가 검증 책임 소유 (Hexagonal 경계 교정)
+
+## 알려진 이슈 (v1.1 이관)
 
 | 심각도 | 이슈 | 비고 |
 |--------|------|------|
-| MEDIUM | 알림 설정 페이지 미구현 | NotificationPreference 엔티티 + /settings 신규 필요 (Task 4) |
 | LOW | 한국 공휴일 미처리 | 현재 주말만 스킵 (v1.1) |
 | LOW | CorsConfigTest 스코프 | `@SpringBootTest` → `@WebMvcTest` 분리 가능 |
 | LOW | lockfile 중복 | `~/package-lock.json` + `src/frontend/package-lock.json` → `turbopack.root` 설정 권장 |
+| LOW | Flyway 미도입 | 현재 `ddl-auto: create-drop`(테스트/로컬)에 의존. 프로덕션 전환 시 Flyway 도입 + V1/V2 순차 적용 |

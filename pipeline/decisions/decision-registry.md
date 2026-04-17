@@ -1,6 +1,6 @@
 ---
 last_updated: "2026-04-17"
-total_decisions: 33
+total_decisions: 36
 ---
 
 # Decision Registry — 핵심 의사결정 기록부
@@ -172,7 +172,42 @@ total_decisions: 33
 - **결정**: skeleton / tilt-magnetic / counter / ambient 4개 파일 + `index-before-skeleton.html` baseline → 기능 누적형 비교 구조. XSS/SRI/키보드/모션 접근성 패치를 5파일 전부에 선제 반영
 - **근거**: 사용자가 "API 연동 시점까지 기다리지 않고 프로토타입 단계에서 보안 선제 적용"을 선택 → 이후 실제 프론트 이식 시 추가 점검 불필요
 - **커밋**: 7a5b750
-- **잔여**: 5종 중 최종 합류본 결정 → `prototype/index.html`로 통합 (다음 세션)
+- **후속**: D-4.10에서 `index-ambient.html`을 최종 합류본으로 확정
+
+### D-4.12 Task 4 리뷰 반영 — HIGH 4 + MEDIUM 9 전량 수정 (2026-04-17)
+- **배경**: Task 4 구현 후 java-reviewer / typescript-reviewer / security-reviewer 3개 리뷰어 병렬 실행 → BLOCK(HIGH 4) 판정
+- **핵심 수정**:
+  1. `PUT /api/notifications/preferences` 인증 추가 — 기존 관리자 API 패턴(X-API-Key) 재사용. `ApiKeyValidator` 컴포넌트로 추출해 3개 컨트롤러 중복 제거
+  2. `loadOrCreate` race condition — `DataIntegrityViolationException` catch + 재조회. 싱글톤 row 지연 생성의 동시 최초 요청 경합을 멱등 처리
+  3. `IllegalArgumentException` 전역 캐치 제거 — JDK 내부 오류가 400으로 마스킹되는 위험 해소. 검증은 `DomainException(DomainError.InvalidParameter)` 경로로 이동
+  4. Hexagonal 경계 교정 — `sanitizeSignalTypes` 검증을 Controller에서 `UpdateCommand` compact constructor로 이동. record 생성 자체가 검증 계기 → 어떤 경로로 생성해도 도메인 규칙 강제
+- **원칙**: 사용자 입력을 에러 메시지에 반사하지 않음(정보 노출 방지). `@Size(min=1, max=3)`으로 DoS 벡터 차단. 도메인 `update()` 자체도 방어 검증(이중 안전망)
+- **프론트**: `aria-*` 중복 제거, `cache: 'no-store'` spread 순서 교정, 백엔드 에러 메시지 직접 노출 → status 기반 `friendlyError()` 매핑
+- **테스트**: 5개 → 9개 확장 (인증 2, 업데이트 1, 검증 5, 기본값 1). 에러 응답 입력 반사 없음 검증 포함
+- **전체 테스트**: 20 → 29개 통과 (기존 20 + Task 4 신규 9)
+- **리뷰 판정 변화**: BLOCK(HIGH 4) → PASS (HIGH 0, MEDIUM 0 남음, LOW 5 v1.1 이관)
+
+### D-4.11 알림 설정 = 싱글 로우 패턴 (Sprint 4 Task 4 / 2026-04-17)
+- **결정**: `NotificationPreference` 엔티티를 **싱글 로우(id=1 고정)** 로 운영. 4개 채널 플래그(daily/urgent/batch/weekly) + `minScore`(0-100) + `signalTypes`(JSONB 배열)
+- **근거**:
+  - MVP 1인 운영 → 사용자/인증 개념이 아직 없음 (카카오 OAuth는 추후)
+  - Sprint 4 plan의 `channel`(TELEGRAM/EMAIL/WEB) 구분보다 **시나리오별 on/off**가 실제 UX에 더 정확 (일일 요약/긴급/배치/주간)
+  - 첫 GET 호출 시 기본값 row 자동 생성 (`loadOrCreate`) → 별도 초기화 스크립트 불필요
+- **필터 적용 범위**:
+  - `sendDailySummary`: toggle + signalTypes + minScore 삼중 필터
+  - `sendUrgentAlerts`: toggle + signalTypes (A등급 자체가 minScore 상회)
+  - `sendBatchFailure`, `sendWeeklyReport`: toggle만
+  - `sendUrgentAlert(single)`: 필터 미적용 — 호출자 책임 원칙
+- **확장 경로**: user 테이블 도입 시 `user_id FK` + unique constraint로 다중 사용자 전환 가능
+- **파일**: `domain/model/NotificationPreference`, `application/service/NotificationPreferenceService`, `adapter/in/web/NotificationPreferenceController`, `db/migration/V2__notification_preference.sql`
+- **테스트**: 5개 신규 통합 테스트 (기본값 생성 / 전체 업데이트 / minScore 범위 / 알 수 없는 타입 / 필수 필드 누락)
+
+### D-4.10 프로토타입 합류본 = ambient 확정 (2026-04-17)
+- **결정**: `index-ambient.html`(1332줄, 61KB)을 최종 합류본으로 채택하고 `prototype/index.html`을 동일 내용으로 덮어써 캐노니컬 엔트리 통일
+- **근거**: skeleton(로딩) + tilt/tilt-shine(3D 카드) + magnetic(버튼 인력) + data-count(카운트업) + aurora(4 blob 배경) 5종 효과가 누적 탑재된 유일한 파일. UI/UX 화려도 극대화가 프로토타입 목적에 부합
+- **잔여 파일**: `index-{before-skeleton,tilt-magnetic,counter,ambient}.html` 4종은 단계별 비교 레퍼런스로 보존 (삭제 보류)
+- **다음 단계**: Next.js 프론트 이식 시 효과별 컴포넌트 분해 — aurora → fixed layer, tilt → hook(useTilt), counter → hook(useCountUp), magnetic → 버튼 래퍼
+- **사용자 승인**: 2026-04-17 대화 내
 
 ## Phase 0: Meta / 운영 전략
 

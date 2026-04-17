@@ -1,14 +1,14 @@
 # Session Handoff
 
-> Last updated: 2026-04-17 13:40 (KST)
+> Last updated: 2026-04-17 (Task 4 완료 직후, 커밋 직전)
 > Branch: `master`
 > Latest commit: `9436772` - Sprint 4 Task 5-6: 반응형 + ErrorBoundary + 글로벌 네비 + 접근성
 > 원격 동기화: ✅ `origin/master`와 동일
-> 커밋 상태: ✅ 전체 푸시 완료
+> 커밋 상태: ⏳ Sprint 4 Task 4 + 프로토타입 합류본 결정 커밋 대기
 
 ## Current Status
 
-Sprint 4는 **Task 4(알림 설정 페이지)만 남은 상태**. 오늘 하루 만에:
+**Sprint 4 전체 완료** → Human Approval #3 대기 단계. 오늘 하루 만에:
 1. **모델 운용 전략 전환** (`d55738d`): Max 구독자 Opus 4.7 단일 운영
 2. **Sprint 4 Task 1-3** (`33b6cf1`): N+1 17,500쿼리 → 7쿼리, 백테스팅 3년, CORS
 3. **프로토타입 UI 실험 5종 + 보안 패치** (`7a5b750`): skeleton/tilt/counter/ambient 누적 비교본
@@ -31,16 +31,23 @@ Sprint 4는 **Task 4(알림 설정 페이지)만 남은 상태**. 오늘 하루 
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | Sprint 4 Task 4: 알림 설정 페이지 | 대기 | `NotificationPreference` 엔티티 + `GET/PUT /api/notifications/preferences` + 프론트 `/settings` (1.5일) |
-| 2 | 프로토타입 5종 합류본 결정 | 대기 | skeleton + tilt-magnetic + counter + ambient 중 선택 조합 → `prototype/index.html` 통합 |
-| 3 | 프로토타입 효과 → Next.js 프론트 이식 | 이관 | 합류본 결정 후. 스켈레톤은 이미 적용됨, 나머지 효과 선택 적용 |
-| 4 | CorsConfigTest 스코프 축소 | LOW | `@SpringBootTest` → `@WebMvcTest` (테스트 속도 향상) |
-| 5 | `turbopack.root` 설정 | LOW | `~/package-lock.json` + 프로젝트 `package-lock.json` 공존 경고 제거 |
-| 6 | 한국 공휴일 캘린더 (v1.1) | 이관 | 현재 주말만 스킵 |
+| 1 | Sprint 4 Task 4: 알림 설정 페이지 | ✅ 완료 | D-4.11 싱글 로우 + 4채널 필터 + `/settings` 페이지 + 5개 신규 테스트 |
+| 2 | 프로토타입 5종 합류본 결정 | ✅ 완료 | D-4.10 `index-ambient.html`(1332줄)을 최종 합류본으로 확정, `prototype/index.html`에 복사 |
+| 3 | 프로토타입 효과 → Next.js 프론트 이식 | 대기 | ambient 5종 효과 → `AuroraBackground`/`useTilt`/`useCountUp`/`MagneticButton` 컴포넌트 분해 (반나절~1일) |
+| 4 | Human Approval #3 + Phase 5 Ship 고려 | 대기 | Sprint 4 전체 완료 → DevOps 배포 + 성과분석 단계 진입 가능 |
+| 5 | CorsConfigTest 스코프 축소 | LOW | `@SpringBootTest` → `@WebMvcTest` (테스트 속도 향상) |
+| 6 | `turbopack.root` 설정 | LOW | `~/package-lock.json` + 프로젝트 `package-lock.json` 공존 경고 제거 |
+| 7 | 한국 공휴일 캘린더 (v1.1) | 이관 | 현재 주말만 스킵 |
+| 8 | Flyway 도입 (v1.1) | 이관 | 현재 `ddl-auto: create-drop` 의존 — 프로덕션 전환 시 필요 |
 
 ## Key Decisions Made
 
-**Sprint 4 Task 5-6 (신규)**:
+**Sprint 4 Task 4 (신규)**:
+- **D-4.10 프로토타입 합류본 = ambient**: `index-ambient.html`(1332줄, aurora/skeleton/tilt/magnetic/count 5종 누적) → `prototype/index.html`로 복사, 4종 비교본은 참고용 보존
+- **D-4.11 알림 설정 = 싱글 로우(id=1)**: `NotificationPreference` 4채널 플래그 + minScore + signalTypes JSONB. MVP 1인 운영 전제, 사용자 테이블 도입 시 `user_id FK`로 확장. Telegram 4채널 모두 preference 필터 반영 (daily=3중 필터, urgent=2중, batch/weekly=toggle)
+- **D-4.12 Task 4 리뷰 반영 (HIGH 4 + MEDIUM 9)**: 3종 리뷰어 병렬 결과 BLOCK → PASS로 전환. 핵심 수정: PUT 인증 추가, loadOrCreate race handling, IllegalArgumentException 전역 캐치 제거, `UpdateCommand` compact constructor로 검증 책임 이동 (Hexagonal 경계 교정), `ApiKeyValidator` 추출로 3개 컨트롤러 중복 제거. 테스트 5 → 9개, 백엔드 전체 29개 통과
+
+**Sprint 4 Task 5-6**:
 - **D-4.5 글로벌 NavHeader 단일화**: 페이지별 헤더/네비 링크 제거 → sticky 햄버거 `NavHeader` 하나. `usePathname` + ESC + `aria-current`
 - **D-4.6 ErrorBoundary는 resetKeys 기반 자동 복구**: class 컴포넌트 + `componentDidUpdate`에서 Object.is 비교. "다시 시도"만으로는 재발 루프 → 상위 상태 변경에 반응해 자동 리셋
 - **D-4.7 Render-time 상태 리셋 패턴**: Next 16 `react-hooks/set-state-in-effect` 해소 — `useEffect(() => setState)` → `if (prev !== current) setPrev + setState`. React 19 공식 권장
@@ -52,22 +59,25 @@ Sprint 4는 **Task 4(알림 설정 페이지)만 남은 상태**. 오늘 하루 
 
 ## Known Issues
 
+**해소됨 (Task 4 + 프로토타입)**:
+- ~~알림 설정 페이지 없음~~ → `NotificationPreference` + `GET/PUT /api/notifications/preferences` + `/settings` 페이지 (커밋 예정)
+- ~~프로토타입 5종 합류본 미결정~~ → D-4.10 ambient 확정, `prototype/index.html`에 복사 (커밋 예정)
+
 **해소됨 (Task 5-6)**:
 - ~~모바일 반응형 미적용~~ → 3개 페이지 `sm:`/`lg:` 브레이크포인트 (`9436772`)
 - ~~ErrorBoundary 없음~~ → `resetKeys` 지원 class 컴포넌트 (`9436772`)
 - ~~Next 16 신규 ESLint 3건~~ → render-time 리셋 패턴 (`9436772`)
 - ~~접근성 미감사~~ → aria-pressed/aria-current/focus-visible 전반 적용 (`9436772`)
 
-**이관됨 (Task 4 또는 v1.1)**:
-- 알림 설정 페이지 없음 (엔티티 신규 필요)
-- 프로토타입 5종 합류본 미결정
-- 한국 공휴일 미처리 (v1.1)
+**v1.1 이관**:
+- 한국 공휴일 미처리 (현재 주말만 스킵)
+- Flyway 미도입 (현재 `ddl-auto: create-drop` 의존)
 - CorsConfigTest 전체 컨텍스트 로드 (LOW)
 - lockfile 중복 경고 (LOW)
 
 ## Context for Next Session
 
-- **사용자 원래 의도**: Sprint 4에서 N+1/CORS/알림 설정/모바일 반응형 4.5일 예정 → **3.5일 분량(Task 1-3, 5-6) 완료, Task 4만 남음**
+- **사용자 원래 의도**: Sprint 4에서 N+1/CORS/알림 설정/모바일 반응형 4.5일 예정 → **Task 1-6 전체 완료**
 - **세션 흐름 요약**:
   1. 모델 전략 질문 → Opus 4.7 단일 운영으로 문서 정합화
   2. `/ted-run docs/sprint-4-plan.md` → Task 1-3 완료 (백엔드)
