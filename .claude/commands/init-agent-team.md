@@ -13,7 +13,7 @@ argument-hint: [프로젝트명] (선택)
 $ARGUMENTS가 비어있지 않으면 프로젝트명으로 사용하고, 비어있으면 현재 디렉토리명을 사용하세요.
 
 기본 기술스택 (변경 가능):
-- Backend: Spring Boot 3.4 + Java 21
+- Backend: Spring Boot 3.5.0 + Java 21
 - Frontend: Next.js 15 + TypeScript
 - DB: PostgreSQL 16
 - Convention: 네이버(백엔드) + 토스(디자인) + 카카오(인증)
@@ -59,7 +59,7 @@ echo "✅ Step 1 완료: 디렉토리 구조 생성"
 ## 프로젝트 개요
 - **이름**: ${PROJECT_NAME}
 - **플랫폼**: Claude Code 기반 AI 에이전트 팀 자동화
-- **기술스택**: Spring Boot 3.4 + Java 21 / Next.js 15 + TypeScript / PostgreSQL 16
+- **기술스택**: Spring Boot 3.5.0 + Java 21 / Next.js 15 + TypeScript / PostgreSQL 16
 
 ## 에이전트 호출 규칙
 1. 각 에이전트는 `agents/XX-name/AGENT.md`를 시스템 프롬프트로 로드
@@ -132,7 +132,7 @@ Compaction 발생 후 다음 단계 실행 시:
 
 ## 기술 스택 상세
 
-### Backend: Spring Boot 3.4 + Java 21
+### Backend: Spring Boot 3.5.0 + Java 21
 - 아키텍처: Hexagonal (Ports & Adapters)
 - 빌드: Gradle (Groovy DSL)
 - 테스트: JUnit 5 + Mockito + Testcontainers

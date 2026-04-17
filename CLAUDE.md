@@ -15,6 +15,7 @@ AI Agent Team Platform — Claude Code 기반 멀티에이전트 SDLC 자동화 
 
 ## 핵심 참조 문서
 
+- 사용설명서: `docs/PIPELINE-GUIDE.md` — 실전 운영 요약, 다른 프로젝트 이식 가이드 (여기부터 읽기)
 - 마스터 설계서: `docs/design/ai-agent-team-master.md` — 모든 아키텍처/기술 판단의 권위 있는 출처
 - Scaffolding 생성기: `.claude/commands/init-agent-team.md` — 에이전트/파이프라인 구조 자동 생성
 
@@ -41,7 +42,7 @@ AI Agent Team Platform — Claude Code 기반 멀티에이전트 SDLC 자동화 
 
 | 영역 | 선택 |
 |------|------|
-| Backend | Spring Boot 3.4 + Java 21 (Hexagonal Architecture) |
+| Backend | Spring Boot 3.5.0 + Java 21 (Hexagonal Architecture) |
 | Frontend | Next.js 15 + TypeScript (App Router) |
 | DB | PostgreSQL 16 |
 | 쿼리 전략 | Spring Data JPA 3단계 (QueryDSL 미사용) |
