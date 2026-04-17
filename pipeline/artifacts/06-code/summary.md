@@ -2,7 +2,7 @@
 stage: 06-code
 agent: 08-backend + 09-frontend
 last_updated: 2026-04-17
-status: sprint-3-completed
+status: sprint-4-task-1-3-completed
 ---
 
 # Build Phase 산출물 요약
@@ -120,13 +120,35 @@ com.ted.signal
 └── config/ (WebConfig)
 ```
 
-## 알려진 이슈 (Sprint 4 대상)
+## Sprint 4 Task 1-3 — 성능/보안 해소 (완료)
 
-| 심각도 | 이슈 | 위치 |
+**커밋**: 33b6cf1
+
+### 주요 변경
+- **N+1 해소 (Task 1)**: `SignalDetectionService.detectAll` 17,500쿼리 → 7쿼리
+  - 활성 종목 1회 + 당일 벌크 3건(lending/price/short) + 히스토리 2건(trend/volume, stockIds IN) + 기존 시그널 1건
+  - `existsBy` 루프 제거, Set 기반 dedup
+  - `sendDailySummary`는 `findBySignalDateWithStockOrderByScoreDesc`(JOIN FETCH) 사용
+- **백테스팅 (Task 2)**: 최대 기간 5년 → 3년, 미래 날짜 차단, 주가 `findAllByStockIdsAndTradingDateBetween` 단일 쿼리
+- **CORS (Task 3)**: `X-API-Key`, `OPTIONS`, `allowCredentials(true)`, `exposedHeaders` 추가
+
+### 코드 리뷰 반영 (HIGH 3 + MEDIUM 2)
+- JOIN FETCH 누락 3곳 수정 (StockPrice/ShortSelling `findAllByTradingDate`, Signal dedup 조회)
+- `findAllByTradingDateBetween` 언바운디드 → `findAllByStockIdsAndTradingDateBetween` (활성 종목만)
+- 백테스팅 `to` 미래 날짜 차단
+- `detail.volumeChangeRate` 점수(int) 중복 → 실제 거래량 비율(BigDecimal) 저장
+
+### 테스트 (20개, 전부 통과)
+- 신규: `CorsConfigTest` 1개 + `BacktestApiIntegrationTest.runBacktestRejectsPeriodOverThreeYears` 1개
+- 기존 18개 유지 (N+1 리팩터 후에도 동작 불변)
+
+## 알려진 이슈 (Sprint 4 Task 4-5 이관)
+
+| 심각도 | 이슈 | 비고 |
 |--------|------|------|
-| HIGH | N+1 17,500쿼리 | SignalDetectionService |
-| HIGH | sendDailySummary LAZY 로딩 | TelegramNotificationService |
-| HIGH | 백테스팅 무제한 조회 | SignalRepository.findBySignalDateBetweenWithStock |
-| MEDIUM | CORS X-API-Key 미허용 | WebConfig |
-| LOW | ErrorBoundary 없음 | 프론트엔드 |
-| LOW | 한국 공휴일 미처리 | MarketDataScheduler |
+| MEDIUM | 알림 설정 페이지 미구현 | NotificationPreference 엔티티 + /settings 신규 필요 |
+| LOW | 모바일 반응형 미적용 | `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` 등 |
+| LOW | ErrorBoundary 없음 | Recharts 렌더링 에러 크래시 가능 |
+| LOW | 접근성 감사 | WCAG AA + 키보드 내비게이션 |
+| LOW | 한국 공휴일 미처리 | 현재 주말만 스킵 (v1.1) |
+| LOW | CorsConfigTest 스코프 | `@SpringBootTest` → `@WebMvcTest` 분리 가능 |

@@ -1,6 +1,6 @@
 ---
 last_updated: "2026-04-17"
-total_decisions: 24
+total_decisions: 28
 ---
 
 # Decision Registry — 핵심 의사결정 기록부
@@ -126,6 +126,26 @@ total_decisions: 24
 - **결정**: N+1 최적화 → CORS → 알림 설정 페이지 → 모바일 반응형 순서
 - **근거**: 성능/보안 우선 해소 후 사용자 체감 기능 확장
 - **문서**: docs/sprint-4-plan.md
+
+### D-4.1 N+1 해소 — 벌크 조회 + 메모리 루프 패턴 (Sprint 4 / 2026-04-17)
+- **결정**: `SignalDetectionService.detectAll` 종목별 DB 조회 루프 → 활성 종목 1회 조회 후 벌크 쿼리 6건 + 메모리 루프
+- **근거**: 17,500 쿼리 → 7 쿼리. Set dedup으로 `existsBy` 쿼리 제거. Map 구조로 O(1) 조회
+- **커밋**: 33b6cf1
+
+### D-4.2 Repository 벌크 메서드 네이밍 — `findAllByStockIdsAndTradingDateBetween` (Sprint 4 / 2026-04-17)
+- **결정**: `findByStockIdInAndTradingDateBetween` → `findAllByStockIdsAndTradingDateBetween`로 통일
+- **근거**: `findAll` prefix로 "대량 조회" 의도 표현 + stockIds IN 필터로 OOM 방지 (리뷰 HIGH-2 반영)
+- **커밋**: 33b6cf1
+
+### D-4.3 백테스팅 최대 기간 5년 → 3년 (Sprint 4 / 2026-04-17)
+- **결정**: `BacktestController` 최대 기간 5년 → 3년, `to` 미래 날짜 차단 추가
+- **근거**: 3년도 충분한 검증 기간 + 메모리/성능 여유. 미래 날짜는 데이터 부재로 무의미
+- **커밋**: 33b6cf1
+
+### D-4.4 CORS X-API-Key 허용 + OPTIONS + allowCredentials (Sprint 4 / 2026-04-17)
+- **결정**: `WebConfig.addCorsMappings`에 `X-API-Key`, `OPTIONS`, `allowCredentials(true)`, `exposedHeaders` 추가
+- **근거**: 브라우저 preflight 통과 + 프론트에서 관리자 API(`/backtest/run`, `/batch/collect`, `/signals/detect`) 호출 가능
+- **커밋**: 33b6cf1
 
 ## Phase 0: Meta / 운영 전략
 
