@@ -1,10 +1,10 @@
 {
   "pipeline_id": "ted-startup-v1",
-  "status": "in_progress",
-  "current_phase": "Phase 4: Verify",
-  "current_stage": "Verify 완료 (조건부) → 블로커 4건 수정 → Approval #3 가결 → Phase 5 Ship 준비",
-  "current_agent": "00-judge (평가 완료)",
-  "last_commit": "871ff57",
+  "status": "deployed",
+  "current_phase": "Phase 5: Ship (완료)",
+  "current_stage": "Ship 산출물 완성 + Judge PASS 8.1 → v1.0 배포 준비 완료",
+  "current_agent": "00-judge (Ship 평가 완료)",
+  "last_commit": "eb5fc15",
   "last_updated": "2026-04-17",
   "completed_stages": [
     "00-input",
@@ -20,7 +20,9 @@
     "06-code/sprint-4-complete",
     "07-test-results",
     "08-review-report",
-    "09-security-audit"
+    "09-security-audit",
+    "10-deploy-log",
+    "11-analytics"
   ],
   "sprint_progress": {
     "sprint_1": {
@@ -74,8 +76,45 @@
     "build_sprint_2": "internal_review_passed (5차 리뷰 누적)",
     "build_sprint_3": "internal_review_passed (CRITICAL/HIGH 모두 반영)",
     "build_sprint_4_task_1_3": "internal_review_passed (HIGH 3 + MEDIUM 2 반영)",
-    "verify": 7.6
+    "verify": 7.6,
+    "ship": 8.1
   },
+  "ship_artifacts": {
+    "devops": {
+      "files": [
+        "src/backend/Dockerfile",
+        "src/frontend/Dockerfile",
+        "docker-compose.prod.yml",
+        ".env.prod.example",
+        ".github/workflows/ci.yml",
+        "pipeline/artifacts/10-deploy-log/runbook.md",
+        ".gitignore (수정)",
+        "src/frontend/next.config.ts (output:standalone 추가)"
+      ],
+      "caveats": [
+        "Flyway 미설치 → V1/V2 SQL이 initdb로 최초 부팅 시 1회만 실행. V3+는 수동 (v1.1 Flyway 추가 권장)",
+        "Docker registry 미확정 → CI docker-build는 push 안함",
+        "Reverse proxy + TLS는 runbook §1 선택 사항 (Judge가 48h 내 필수 전환 권고)"
+      ]
+    },
+    "analytics": {
+      "file": "pipeline/artifacts/11-analytics/launch-report.md",
+      "d7_kpis": [
+        "배치 정시 실행률 ≥ 99% (7 영업일)",
+        "Telegram 발송 성공률 ≥ 99% + 08:30 ±2분 도달",
+        "백테스팅 baseline 확정 (5d 적중률 ≥ 60%, 평균 수익률 ≥ +2%)"
+      ],
+      "top_red_flag": "F2 — 연속 3영업일 배치 실패 (downstream 전체 무력화)"
+    },
+    "judge_report": "pipeline/artifacts/10-deploy-log/ship-judge-evaluation.md"
+  },
+  "post_ship_recommendations": [
+    { "priority": "P0", "deadline": "Ship+48h", "task": "Reverse proxy + TLS(Caddy/Nginx + Let's Encrypt) 구축 — ADMIN_API_KEY 평문 전송 회피" },
+    { "priority": "P0", "deadline": "Ship+7d", "task": "management.endpoints.web.exposure.include=health,metrics,prometheus 활성화 — Week 1 P95/에러율 baseline 수집" },
+    { "priority": "P1", "deadline": "v1.1", "task": "Flyway 도입 — V3+ 자동 마이그레이션" },
+    { "priority": "P1", "deadline": "v1.1", "task": "프론트엔드 테스트 하네스 (Vitest + RTL + MSW)" },
+    { "priority": "P2", "deadline": "v1.1", "task": "TanStack Query 도입 — 4개 페이지 리팩터" }
+  ],
   "verify_agent_reports": {
     "qa": { "verdict": "CONDITIONAL", "path": "pipeline/artifacts/07-test-results/qa-report.md", "note": "29/29 백엔드 테스트 통과, 프론트 테스트 0건 (v1.1 백로그)" },
     "code_review": { "verdict": "CONDITIONAL", "path": "pipeline/artifacts/08-review-report/review-report.md", "severity": { "critical": 1, "high": 4, "medium": 7, "low": 5 }, "note": "CRITICAL/HIGH 4건 블로커 수정 완료" },

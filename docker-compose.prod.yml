@@ -1,0 +1,107 @@
+# =============================================================================
+# docker-compose.prod.yml — 단일 VPS/홈서버 프로덕션 스택
+# -----------------------------------------------------------------------------
+# 3 services: db(postgres:16-alpine) / backend(spring boot) / frontend(next.js)
+# - 환경변수는 .env.prod (git 제외) 에서 주입
+# - 외부 노출은 frontend:3000 만 (backend, db 는 내부 네트워크 전용)
+# - DB 볼륨(signal-prod-data) 영구 보존
+# - depends_on 헬스체크로 기동 순서 보장
+# =============================================================================
+
+name: ted-signal-prod
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: ted-signal-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Asia/Seoul
+      PGTZ: Asia/Seoul
+    volumes:
+      - signal-prod-data:/var/lib/postgresql/data
+      # 초기 부팅 시 스키마 자동 적용 (Flyway 미도입 상태 보완)
+      # 볼륨이 비어있을 때만 실행됨 → 재기동 시 스킵
+      - ./src/backend/src/main/resources/db/migration/V1__init_schema.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./src/backend/src/main/resources/db/migration/V2__notification_preference.sql:/docker-entrypoint-initdb.d/02_notification.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - backend-net
+    # DB 포트는 외부 노출 금지 (운영자 psql 필요 시 `docker compose exec db psql`)
+
+  # ---------------------------------------------------------------------------
+  # Backend (Spring Boot)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./src/backend
+      dockerfile: Dockerfile
+    image: ted-signal-backend:${IMAGE_TAG:-latest}
+    container_name: ted-signal-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      KRX_AUTH_KEY: ${KRX_AUTH_KEY}
+      TZ: Asia/Seoul
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-net
+    # 백엔드 8080 은 내부 네트워크 전용 (프론트엔드 SSR 에서만 접근)
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # Frontend (Next.js 16 standalone)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./src/frontend
+      dockerfile: Dockerfile
+    image: ted-signal-frontend:${IMAGE_TAG:-latest}
+    container_name: ted-signal-frontend
+    restart: unless-stopped
+    environment:
+      # 서버사이드에서만 사용되는 백엔드 API base URL (내부 네트워크)
+      BACKEND_INTERNAL_URL: http://backend:8080
+      # 브라우저 노출용 — 역프록시 뒤에 있으면 "/" 로 두고 Nginx 에서 /api 를 backend 로 라우팅
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      TZ: Asia/Seoul
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - backend-net
+
+networks:
+  backend-net:
+    driver: bridge
+
+volumes:
+  signal-prod-data:
+    name: ted-signal-prod-data

@@ -12,6 +12,10 @@ dist/
 .env
 .env.*
 !.env.example
+!.env.prod.example
+# 프로덕션 시크릿 — 절대 커밋 금지 (위 .env.* 규칙으로 이미 제외되지만 명시)
+.env.prod
+.env.prod.local
 
 # IDE
 .idea/
