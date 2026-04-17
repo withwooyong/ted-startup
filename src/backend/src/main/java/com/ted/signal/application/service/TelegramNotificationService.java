@@ -32,7 +32,7 @@ public class TelegramNotificationService {
      * 시나리오 1: 일일 시그널 요약 (08:30 발송)
      */
     public boolean sendDailySummary(LocalDate date) {
-        var signals = signalRepository.findBySignalDateOrderByScoreDesc(date);
+        var signals = signalRepository.findBySignalDateWithStockOrderByScoreDesc(date);
         if (signals.isEmpty()) {
             log.info("{}일자 시그널 없음 — 일일 요약 스킵", date);
             return false;

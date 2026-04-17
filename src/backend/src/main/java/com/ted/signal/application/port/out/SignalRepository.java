@@ -15,6 +15,14 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
 
     @Query("""
             SELECT s FROM Signal s
+            JOIN FETCH s.stock
+            WHERE s.signalDate = :date
+            ORDER BY s.score DESC
+            """)
+    List<Signal> findBySignalDateWithStockOrderByScoreDesc(@Param("date") LocalDate date);
+
+    @Query("""
+            SELECT s FROM Signal s
             JOIN FETCH s.stock st
             WHERE s.signalDate = :date
               AND (:type IS NULL OR s.signalType = :type)

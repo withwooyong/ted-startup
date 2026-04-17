@@ -45,6 +45,7 @@ public class BacktestController {
      * 백테스팅 실행 (API Key 인증 필요)
      * POST /api/backtest/run?from=2023-04-17&to=2026-04-17
      * Header: X-API-Key: {admin-api-key}
+     * 최대 기간: 3년
      */
     @PostMapping("/run")
     public ResponseEntity<RunBacktestUseCase.BacktestExecutionResult> run(
@@ -56,13 +57,17 @@ public class BacktestController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
-        LocalDate end = to != null ? to : LocalDate.now();
+        LocalDate today = LocalDate.now();
+        LocalDate end = to != null ? to : today;
         LocalDate start = from != null ? from : end.minusYears(3);
 
+        if (end.isAfter(today)) {
+            return ResponseEntity.badRequest().build();
+        }
         if (start.isAfter(end)) {
             return ResponseEntity.badRequest().build();
         }
-        if (start.isBefore(end.minusYears(5))) {
+        if (start.isBefore(end.minusYears(3))) {
             return ResponseEntity.badRequest().build();
         }
 

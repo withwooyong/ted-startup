@@ -7,6 +7,7 @@ import com.ted.signal.application.port.out.StockPriceRepository;
 import com.ted.signal.domain.enums.SignalType;
 import com.ted.signal.domain.model.BacktestResult;
 import com.ted.signal.domain.model.Signal;
+import com.ted.signal.domain.model.StockPrice;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,33 +44,29 @@ public class BacktestEngineService implements RunBacktestUseCase {
             return new BacktestExecutionResult(0, 0, 0, System.currentTimeMillis() - start);
         }
 
-        // 2. 종목별로 그룹핑 → 주가 벌크 로드 → 수익률 계산
+        // 2. 종목별 그룹핑
         Map<Long, List<Signal>> byStock = signals.stream()
                 .collect(Collectors.groupingBy(s -> s.getStock().getId()));
 
+        // 3. 모든 관련 종목의 주가를 단일 IN 쿼리로 벌크 로드 (N+1 제거)
+        LocalDate priceFrom = signals.stream()
+                .map(Signal::getSignalDate).min(LocalDate::compareTo).orElse(from);
+        LocalDate priceTo = signals.stream()
+                .map(Signal::getSignalDate).max(LocalDate::compareTo).orElse(to)
+                .plusDays(FUTURE_BUFFER_DAYS);
+
+        Map<Long, TreeMap<LocalDate, Long>> priceMapByStock = new HashMap<>();
+        stockPriceRepository.findAllByStockIdsAndTradingDateBetween(byStock.keySet(), priceFrom, priceTo)
+                .forEach(sp -> priceMapByStock
+                        .computeIfAbsent(sp.getStock().getId(), k -> new TreeMap<>())
+                        .put(sp.getTradingDate(), sp.getClosePrice()));
+
+        // 4. 메모리 기반 수익률 계산
         int returnsCalculated = 0;
-
         for (var entry : byStock.entrySet()) {
-            Long stockId = entry.getKey();
-            List<Signal> stockSignals = entry.getValue();
+            TreeMap<LocalDate, Long> priceMap = priceMapByStock.getOrDefault(entry.getKey(), new TreeMap<>());
 
-            // 주가 벌크 로드: 시그널 최소일 ~ 최대일 + 버퍼
-            LocalDate minDate = stockSignals.stream()
-                    .map(Signal::getSignalDate).min(LocalDate::compareTo).orElse(from);
-            LocalDate maxDate = stockSignals.stream()
-                    .map(Signal::getSignalDate).max(LocalDate::compareTo).orElse(to)
-                    .plusDays(FUTURE_BUFFER_DAYS);
-
-            var prices = stockPriceRepository
-                    .findByStockIdAndTradingDateBetweenOrderByTradingDateAsc(stockId, minDate, maxDate);
-
-            // TreeMap으로 거래일 기반 O(1) 조회 + tailMap으로 N영업일 후 탐색
-            TreeMap<LocalDate, Long> priceMap = new TreeMap<>();
-            for (var p : prices) {
-                priceMap.put(p.getTradingDate(), p.getClosePrice());
-            }
-
-            for (Signal signal : stockSignals) {
+            for (Signal signal : entry.getValue()) {
                 BigDecimal r5d = calculateReturn(priceMap, signal.getSignalDate(), 5);
                 BigDecimal r10d = calculateReturn(priceMap, signal.getSignalDate(), 10);
                 BigDecimal r20d = calculateReturn(priceMap, signal.getSignalDate(), 20);
@@ -81,10 +78,10 @@ public class BacktestEngineService implements RunBacktestUseCase {
             }
         }
 
-        // 3. 시그널 일괄 저장 (dirty checking으로 UPDATE)
+        // 5. 시그널 일괄 저장 (dirty checking)
         signalRepository.saveAll(signals);
 
-        // 4. SignalType별 집계 → BacktestResult 일괄 저장
+        // 6. SignalType별 집계 → BacktestResult 일괄 저장
         List<BacktestResult> results = new ArrayList<>();
         for (SignalType type : SignalType.values()) {
             List<Signal> typed = signals.stream()
@@ -111,13 +108,11 @@ public class BacktestEngineService implements RunBacktestUseCase {
 
     /**
      * 시그널 발생일 기준 N영업일 후 수익률 계산
-     * return = (futurePrice - basePrice) / basePrice * 100
      */
     private BigDecimal calculateReturn(TreeMap<LocalDate, Long> priceMap, LocalDate signalDate, int tradingDays) {
         Long basePrice = priceMap.get(signalDate);
         if (basePrice == null || basePrice == 0) return null;
 
-        // signalDate 이후 거래일만 추출
         var futureDates = new ArrayList<>(priceMap.tailMap(signalDate, false).keySet());
         if (futureDates.size() < tradingDays) return null;
 
@@ -137,7 +132,6 @@ public class BacktestEngineService implements RunBacktestUseCase {
                                            LocalDate from, LocalDate to) {
         int total = signals.size();
 
-        // 수익률이 null이 아닌 시그널만 집계 대상
         List<Signal> with5d = signals.stream().filter(s -> s.getReturn5d() != null).toList();
         List<Signal> with10d = signals.stream().filter(s -> s.getReturn10d() != null).toList();
         List<Signal> with20d = signals.stream().filter(s -> s.getReturn20d() != null).toList();

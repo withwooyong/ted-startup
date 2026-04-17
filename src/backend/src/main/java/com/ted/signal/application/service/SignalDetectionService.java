@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -25,6 +24,8 @@ public class SignalDetectionService implements DetectSignalsUseCase {
     private static final BigDecimal RAPID_DECLINE_THRESHOLD = new BigDecimal("-10.0");
     private static final int TREND_MA_SHORT = 5;
     private static final int TREND_MA_LONG = 20;
+    private static final int TREND_HISTORY_DAYS = TREND_MA_LONG + 10;
+    private static final int VOLUME_HISTORY_DAYS = 30;
 
     private final StockRepository stockRepository;
     private final StockPriceRepository stockPriceRepository;
@@ -38,41 +39,96 @@ public class SignalDetectionService implements DetectSignalsUseCase {
         long start = System.currentTimeMillis();
         log.info("=== 시그널 탐지 시작: {} ===", date);
 
-        var stocks = stockRepository.findByIsActiveTrueAndDeletedAtIsNull();
-        int rapidCount = 0, trendCount = 0, squeezeCount = 0;
+        // 1. 전체 데이터 벌크 로드 (N+1 제거: 종목당 7쿼리 → 전체 6쿼리)
+        List<Stock> stocks = stockRepository.findByIsActiveTrueAndDeletedAtIsNull();
+        Set<Long> activeStockIds = stocks.stream().map(Stock::getId).collect(Collectors.toSet());
 
-        for (var stock : stocks) {
-            // 대차잔고 급감 시그널
-            if (detectRapidDecline(stock, date)) rapidCount++;
+        Map<Long, LendingBalance> balanceByStock = lendingBalanceRepository.findAllByTradingDate(date)
+                .stream()
+                .collect(Collectors.toMap(lb -> lb.getStock().getId(), lb -> lb, (a, b) -> a));
 
-            // 추세전환 시그널
-            if (detectTrendReversal(stock, date)) trendCount++;
+        Map<Long, StockPrice> priceByStock = stockPriceRepository.findAllByTradingDate(date)
+                .stream()
+                .collect(Collectors.toMap(sp -> sp.getStock().getId(), sp -> sp, (a, b) -> a));
 
-            // 숏스퀴즈 종합 스코어
-            if (detectShortSqueeze(stock, date)) squeezeCount++;
+        Map<Long, ShortSelling> shortByStock = shortSellingRepository.findAllByTradingDate(date)
+                .stream()
+                .collect(Collectors.toMap(ss -> ss.getStock().getId(), ss -> ss, (a, b) -> a));
+
+        // 추세전환용 대차잔고 히스토리 (활성 종목만, 이후 메모리에서 정렬)
+        LocalDate trendFrom = date.minusDays(TREND_HISTORY_DAYS);
+        Map<Long, List<LendingBalance>> trendHistory = activeStockIds.isEmpty()
+                ? Map.of()
+                : lendingBalanceRepository
+                        .findAllByStockIdsAndTradingDateBetween(activeStockIds, trendFrom, date)
+                        .stream()
+                        .collect(Collectors.groupingBy(lb -> lb.getStock().getId()));
+
+        // 숏스퀴즈용 거래량 히스토리 (활성 종목, 당일 제외)
+        LocalDate volumeFrom = date.minusDays(VOLUME_HISTORY_DAYS);
+        Map<Long, List<StockPrice>> volumeHistory = activeStockIds.isEmpty()
+                ? Map.of()
+                : stockPriceRepository
+                        .findAllByStockIdsAndTradingDateBetween(activeStockIds, volumeFrom, date.minusDays(1))
+                        .stream()
+                        .collect(Collectors.groupingBy(sp -> sp.getStock().getId()));
+
+        // 기존 시그널 존재 여부 Set (JOIN FETCH로 N+1 방지)
+        Set<String> existingKeys = signalRepository.findBySignalDateWithStockOrderByScoreDesc(date)
+                .stream()
+                .map(s -> signalKey(s.getStock().getId(), s.getSignalType()))
+                .collect(Collectors.toCollection(HashSet::new));
+
+        // 2. 메모리 기반 탐지 루프 (DB 히트 없음)
+        List<Signal> toSave = new ArrayList<>();
+
+        for (Stock stock : stocks) {
+            Long stockId = stock.getId();
+
+            detectRapidDecline(stock, date, balanceByStock.get(stockId), existingKeys)
+                    .ifPresent(toSave::add);
+
+            detectTrendReversal(stock, date, trendHistory.getOrDefault(stockId, List.of()), existingKeys)
+                    .ifPresent(toSave::add);
+
+            detectShortSqueeze(
+                    stock, date,
+                    balanceByStock.get(stockId),
+                    priceByStock.get(stockId),
+                    shortByStock.get(stockId),
+                    volumeHistory.getOrDefault(stockId, List.of()),
+                    existingKeys
+            ).ifPresent(toSave::add);
         }
+
+        // 3. 일괄 저장
+        if (!toSave.isEmpty()) {
+            signalRepository.saveAll(toSave);
+        }
+
+        long rapidCount = toSave.stream().filter(s -> s.getSignalType() == SignalType.RAPID_DECLINE).count();
+        long trendCount = toSave.stream().filter(s -> s.getSignalType() == SignalType.TREND_REVERSAL).count();
+        long squeezeCount = toSave.stream().filter(s -> s.getSignalType() == SignalType.SHORT_SQUEEZE).count();
 
         long elapsed = System.currentTimeMillis() - start;
         log.info("=== 시그널 탐지 완료: 급감 {}, 추세전환 {}, 숏스퀴즈 {} ({}ms) ===",
                 rapidCount, trendCount, squeezeCount, elapsed);
 
-        return new DetectionResult(rapidCount, trendCount, squeezeCount, elapsed);
+        return new DetectionResult((int) rapidCount, (int) trendCount, (int) squeezeCount, elapsed);
     }
 
     /**
      * 시그널 1: 대차잔고 급감
-     * 전일 대비 대차잔고 감소율이 임계값(-10%) 이하인 종목
      */
-    private boolean detectRapidDecline(Stock stock, LocalDate date) {
-        var balance = lendingBalanceRepository.findByStockIdAndTradingDate(stock.getId(), date);
-        if (balance.isEmpty()) return false;
+    private Optional<Signal> detectRapidDecline(Stock stock, LocalDate date,
+                                                LendingBalance lb, Set<String> existingKeys) {
+        if (lb == null || lb.getChangeRate() == null
+                || lb.getChangeRate().compareTo(RAPID_DECLINE_THRESHOLD) > 0) {
+            return Optional.empty();
+        }
 
-        var lb = balance.get();
-        if (lb.getChangeRate() == null || lb.getChangeRate().compareTo(RAPID_DECLINE_THRESHOLD) > 0) return false;
-
-        // 이미 탐지된 시그널이면 스킵
-        if (signalRepository.existsByStockIdAndSignalDateAndSignalType(
-                stock.getId(), date, SignalType.RAPID_DECLINE)) return false;
+        String key = signalKey(stock.getId(), SignalType.RAPID_DECLINE);
+        if (!existingKeys.add(key)) return Optional.empty();
 
         int score = calculateRapidDeclineScore(lb);
         var detail = Map.<String, Object>of(
@@ -81,28 +137,27 @@ public class SignalDetectionService implements DetectSignalsUseCase {
                 "consecutiveDecreaseDays", lb.getConsecutiveDecreaseDays()
         );
 
-        signalRepository.save(Signal.builder()
+        return Optional.of(Signal.builder()
                 .stock(stock).signalDate(date)
                 .signalType(SignalType.RAPID_DECLINE)
                 .score(score).grade(SignalGrade.fromScore(score))
                 .detail(detail)
                 .build());
-        return true;
     }
 
     /**
-     * 시그널 2: 추세전환
-     * 대차잔고 5일/20일 이동평균 골든크로스 감지
+     * 시그널 2: 추세전환 (골든크로스)
      */
-    private boolean detectTrendReversal(Stock stock, LocalDate date) {
-        var from = date.minusDays(TREND_MA_LONG + 10); // 영업일 여유분
-        var balances = lendingBalanceRepository
-                .findByStockIdAndTradingDateBetweenOrderByTradingDateAsc(stock.getId(), from, date);
+    private Optional<Signal> detectTrendReversal(Stock stock, LocalDate date,
+                                                 List<LendingBalance> history, Set<String> existingKeys) {
+        if (history.size() < TREND_MA_LONG + 1) return Optional.empty();
 
-        if (balances.size() < TREND_MA_LONG + 1) return false;
+        // tradingDate 오름차순 보장 (groupingBy는 순서 보장 안 됨)
+        var sorted = history.stream()
+                .sorted(Comparator.comparing(LendingBalance::getTradingDate))
+                .toList();
 
-        // 이동평균 계산
-        var quantities = balances.stream().map(LendingBalance::getBalanceQuantity).toList();
+        var quantities = sorted.stream().map(LendingBalance::getBalanceQuantity).toList();
         int size = quantities.size();
 
         double maShortToday = movingAverage(quantities, size - 1, TREND_MA_SHORT);
@@ -110,12 +165,11 @@ public class SignalDetectionService implements DetectSignalsUseCase {
         double maShortYesterday = movingAverage(quantities, size - 2, TREND_MA_SHORT);
         double maLongYesterday = movingAverage(quantities, size - 2, TREND_MA_LONG);
 
-        // 골든크로스: 단기MA가 장기MA를 하향 돌파 (대차잔고 감소 = 숏커버링 신호)
         boolean goldenCross = maShortYesterday >= maLongYesterday && maShortToday < maLongToday;
-        if (!goldenCross) return false;
+        if (!goldenCross) return Optional.empty();
 
-        if (signalRepository.existsByStockIdAndSignalDateAndSignalType(
-                stock.getId(), date, SignalType.TREND_REVERSAL)) return false;
+        String key = signalKey(stock.getId(), SignalType.TREND_REVERSAL);
+        if (!existingKeys.add(key)) return Optional.empty();
 
         int score = calculateTrendReversalScore(maShortToday, maLongToday, maShortYesterday, maLongYesterday);
         var detail = Map.<String, Object>of(
@@ -124,47 +178,39 @@ public class SignalDetectionService implements DetectSignalsUseCase {
                 "crossType", "GOLDEN_CROSS"
         );
 
-        signalRepository.save(Signal.builder()
+        return Optional.of(Signal.builder()
                 .stock(stock).signalDate(date)
                 .signalType(SignalType.TREND_REVERSAL)
                 .score(score).grade(SignalGrade.fromScore(score))
                 .detail(detail)
                 .build());
-        return true;
     }
 
     /**
      * 시그널 3: 숏스퀴즈 종합 스코어
-     * 대차잔고 감소율(30%) + 거래량 급증(25%) + 주가 상승(25%) + 공매도 비율(20%)
      */
-    private boolean detectShortSqueeze(Stock stock, LocalDate date) {
-        var balance = lendingBalanceRepository.findByStockIdAndTradingDate(stock.getId(), date);
-        var price = stockPriceRepository.findByStockIdAndTradingDate(stock.getId(), date);
-        var shortSell = shortSellingRepository.findByStockIdAndTradingDate(stock.getId(), date);
+    private Optional<Signal> detectShortSqueeze(Stock stock, LocalDate date,
+                                                LendingBalance lb, StockPrice sp, ShortSelling ss,
+                                                List<StockPrice> priceHistory,
+                                                Set<String> existingKeys) {
+        if (lb == null || sp == null) return Optional.empty();
 
-        if (balance.isEmpty() || price.isEmpty()) return false;
-
-        var lb = balance.get();
-        var sp = price.get();
-
-        // 각 팩터 스코어 계산 (0~max)
-        int balanceScore = scoreBalanceChange(lb.getChangeRate());           // max 30
-        int volumeScore = scoreVolumeChange(stock.getId(), date, sp);       // max 25
-        int priceScore = scorePriceChange(sp.getChangeRate());              // max 25
-        int shortRatioScore = scoreShortRatio(shortSell.orElse(null));      // max 20
+        int balanceScore = scoreBalanceChange(lb.getChangeRate());
+        BigDecimal volumeRatio = calcVolumeRatio(priceHistory, sp);
+        int volumeScore = scoreVolumeChange(volumeRatio);
+        int priceScore = scorePriceChange(sp.getChangeRate());
+        int shortRatioScore = scoreShortRatio(ss);
 
         int totalScore = balanceScore + volumeScore + priceScore + shortRatioScore;
+        if (totalScore < 40) return Optional.empty();
 
-        // 스코어 40 미만이면 시그널 생성하지 않음
-        if (totalScore < 40) return false;
-
-        if (signalRepository.existsByStockIdAndSignalDateAndSignalType(
-                stock.getId(), date, SignalType.SHORT_SQUEEZE)) return false;
+        String key = signalKey(stock.getId(), SignalType.SHORT_SQUEEZE);
+        if (!existingKeys.add(key)) return Optional.empty();
 
         var detail = Map.<String, Object>of(
                 "balanceChangeRate", lb.getChangeRate() != null ? lb.getChangeRate() : BigDecimal.ZERO,
                 "balanceScore", balanceScore,
-                "volumeChangeRate", volumeScore, // 거래량 스코어 (별도 변동률 계산은 scoreVolumeChange 내부)
+                "volumeChangeRate", volumeRatio,
                 "volumeScore", volumeScore,
                 "priceChangeRate", sp.getChangeRate() != null ? sp.getChangeRate() : BigDecimal.ZERO,
                 "priceScore", priceScore,
@@ -172,13 +218,12 @@ public class SignalDetectionService implements DetectSignalsUseCase {
                 "consecutiveDecreaseDays", lb.getConsecutiveDecreaseDays()
         );
 
-        signalRepository.save(Signal.builder()
+        return Optional.of(Signal.builder()
                 .stock(stock).signalDate(date)
                 .signalType(SignalType.SHORT_SQUEEZE)
                 .score(totalScore).grade(SignalGrade.fromScore(totalScore))
                 .detail(detail)
                 .build());
-        return true;
     }
 
     // ========== Scoring Functions ==========
@@ -192,38 +237,35 @@ public class SignalDetectionService implements DetectSignalsUseCase {
 
     private int calculateTrendReversalScore(double maShortToday, double maLongToday,
                                             double maShortYesterday, double maLongYesterday) {
-        // 교차 강도: 단기MA와 장기MA의 괴리율
         double divergence = Math.abs(maShortToday - maLongToday) / maLongToday * 100;
         int divergenceScore = (int) Math.min(40, divergence * 10);
-        // 추세 방향 전환 속도
         double speed = Math.abs((maShortToday - maShortYesterday) / maShortYesterday * 100);
         int speedScore = (int) Math.min(30, speed * 15);
         return Math.min(100, divergenceScore + speedScore + 30);
     }
 
-    /** 대차잔고 변동률 → 스코어 (max 30) */
     private int scoreBalanceChange(BigDecimal changeRate) {
         if (changeRate == null) return 0;
         double absChange = Math.abs(changeRate.doubleValue());
         return (int) Math.min(30, absChange * 1.5);
     }
 
-    /** 거래량 급증 → 스코어 (max 25): 20일 평균 대비 */
-    private int scoreVolumeChange(Long stockId, LocalDate date, StockPrice today) {
-        var from = date.minusDays(30);
-        var prices = stockPriceRepository.findByStockIdAndTradingDateBetweenOrderByTradingDateAsc(
-                stockId, from, date.minusDays(1));
-
-        if (prices.isEmpty() || today.getVolume() == 0) return 0;
-
-        double avgVolume = prices.stream().mapToLong(StockPrice::getVolume).average().orElse(0);
-        if (avgVolume == 0) return 0;
-
-        double ratio = today.getVolume() / avgVolume;
-        return (int) Math.max(0, Math.min(25, (ratio - 1) * 12.5));
+    /** 오늘 거래량 / 20일 평균 거래량 비율 */
+    private BigDecimal calcVolumeRatio(List<StockPrice> priceHistory, StockPrice today) {
+        if (priceHistory.isEmpty() || today.getVolume() == 0) return BigDecimal.ZERO;
+        double avgVolume = priceHistory.stream().mapToLong(StockPrice::getVolume).average().orElse(0);
+        if (avgVolume == 0) return BigDecimal.ZERO;
+        return BigDecimal.valueOf(today.getVolume() / avgVolume)
+                .setScale(4, RoundingMode.HALF_UP);
     }
 
-    /** 주가 상승률 → 스코어 (max 25) */
+    /** 거래량 비율 → 스코어 (max 25) */
+    private int scoreVolumeChange(BigDecimal ratio) {
+        if (ratio == null || ratio.signum() == 0) return 0;
+        double r = ratio.doubleValue();
+        return (int) Math.max(0, Math.min(25, (r - 1) * 12.5));
+    }
+
     private int scorePriceChange(BigDecimal changeRate) {
         if (changeRate == null) return 0;
         double change = changeRate.doubleValue();
@@ -231,7 +273,6 @@ public class SignalDetectionService implements DetectSignalsUseCase {
         return (int) Math.min(25, change * 5);
     }
 
-    /** 공매도 비율 → 스코어 (max 20): 비율이 높을수록 숏스퀴즈 가능성 */
     private int scoreShortRatio(ShortSelling ss) {
         if (ss == null || ss.getShortRatio() == null) return 0;
         double ratio = ss.getShortRatio().doubleValue();
@@ -240,9 +281,13 @@ public class SignalDetectionService implements DetectSignalsUseCase {
 
     // ========== Helpers ==========
 
+    private static String signalKey(Long stockId, SignalType type) {
+        return stockId + ":" + type.name();
+    }
+
     private double movingAverage(List<Long> values, int endIndex, int period) {
-        int start = Math.max(0, endIndex - period + 1);
-        return values.subList(start, endIndex + 1).stream()
+        int startIdx = Math.max(0, endIndex - period + 1);
+        return values.subList(startIdx, endIndex + 1).stream()
                 .mapToLong(Long::longValue).average().orElse(0);
     }
 

@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,6 +20,16 @@ public interface LendingBalanceRepository extends JpaRepository<LendingBalance, 
 
     @Query("SELECT lb FROM LendingBalance lb JOIN FETCH lb.stock WHERE lb.tradingDate = :date")
     List<LendingBalance> findAllByTradingDate(@Param("date") LocalDate date);
+
+    @Query("""
+            SELECT lb FROM LendingBalance lb
+            WHERE lb.stock.id IN :stockIds
+              AND lb.tradingDate BETWEEN :from AND :to
+            """)
+    List<LendingBalance> findAllByStockIdsAndTradingDateBetween(
+            @Param("stockIds") Collection<Long> stockIds,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 
     boolean existsByStockIdAndTradingDate(Long stockId, LocalDate date);
 

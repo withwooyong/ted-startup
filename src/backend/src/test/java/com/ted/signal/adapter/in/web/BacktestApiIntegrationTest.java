@@ -115,4 +115,17 @@ class BacktestApiIntegrationTest extends IntegrationTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalSignalsProcessed", is(0)));
     }
+
+    @Test
+    @DisplayName("POST /api/backtest/run: 3년 초과 기간 요청은 400 Bad Request")
+    void runBacktestRejectsPeriodOverThreeYears() throws Exception {
+        LocalDate end = LocalDate.now();
+        LocalDate tooFarBack = end.minusYears(3).minusDays(1);
+
+        mockMvc.perform(post("/api/backtest/run")
+                        .header("X-API-Key", "test-key")
+                        .param("from", tooFarBack.toString())
+                        .param("to", end.toString()))
+                .andExpect(status().isBadRequest());
+    }
 }
