@@ -1,6 +1,6 @@
 ---
 last_updated: "2026-04-17"
-total_decisions: 23
+total_decisions: 24
 ---
 
 # Decision Registry — 핵심 의사결정 기록부
@@ -126,3 +126,18 @@ total_decisions: 23
 - **결정**: N+1 최적화 → CORS → 알림 설정 페이지 → 모바일 반응형 순서
 - **근거**: 성능/보안 우선 해소 후 사용자 체감 기능 확장
 - **문서**: docs/sprint-4-plan.md
+
+## Phase 0: Meta / 운영 전략
+
+### D-0.1 모델 운용 전략 — Opus 4.7 단일 운영 (2026-04-17)
+- **결정**: 이전 "Phase 1~3 Sonnet 4.6 / Phase 4 Opus 4.7" 분기 전략 → **모든 Phase Opus 4.7 단일 운영**으로 전환
+- **근거**:
+  - Claude Code Max $200 구독 → 모델 분기로 얻는 비용 이득 없음
+  - Sprint 3 코드리뷰에서 Opus 4.7이 N+1 17,500건 등 HIGH 이슈 7건 포착 (Sonnet 대비 우위 확인)
+  - Phase 1~3에서도 엣지 케이스/복합 제약 판단은 Opus가 유리
+  - 리밋 도달 시 Sonnet 4.6 자동 fallback — statusline으로 실시간 인지 가능
+- **적용 범위**: 이 프로젝트(ted-startup) 기본값. 타 프로젝트 이식 시 구독 유형에 따라 Option A/B 선택
+- **문서**:
+  - docs/PIPELINE-GUIDE.md (모델 운용 전략 섹션)
+  - docs/design/ai-agent-team-master.md (§11 모델 전략)
+  - .claude/commands/init-agent-team.md (CLAUDE.md 템플릿)

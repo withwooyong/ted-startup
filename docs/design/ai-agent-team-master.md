@@ -961,7 +961,7 @@ src/frontend/
 - [ ] 1M 컨텍스트 활용 전략 최적화 (Full Context vs Selective 단계별 매핑)
 - [ ] Compaction 동작 모니터링 및 핵심 정보 영속화 패턴 적용
 - [ ] 병렬 실행 가능 구간 식별 및 적용 (Agent Teams 활용)
-- [ ] 비용 최적화 (단계별 모델 선택: Opus 4.7 vs Sonnet 4.6)
+- [ ] 모델 전략 확정 (Max 구독자: Opus 4.7 단일 / API 종량제: 단계별 Opus 4.7 ↔ Sonnet 4.6 분기)
 
 ---
 
@@ -975,12 +975,32 @@ src/frontend/
 - Compaction 기능이 1M 초과 시 자동 요약하지만, 핵심 정보는 파일로 영속화
 - `pipeline/artifacts/`의 산출물 요약본(summary.md)은 비용 절감용으로 별도 관리
 
-### 비용 최적화 (1M 컨텍스트 시대)
+### 모델 전략 (구독 유형별 분기)
+
+**Option A — Claude Code Max / Team / Enterprise 구독자 (이 프로젝트 기본값)**
+- **Opus 4.7 단일 운영** — 모든 Phase에서 최고 품질 모델 사용
+- 근거:
+  - 월 고정 구독료 기준 → 모델 분기로 얻는 비용 이득 없음
+  - Phase 1~3에서도 Opus가 Sonnet 대비 엣지 케이스/복합 제약 판단에서 우위
+  - 분기 관리의 인지 비용이 오히려 손해
+- 리밋 도달 시: Sonnet 4.6 자동 fallback (Claude Code 내장, statusline으로 인지)
+- 실전 사례: Sprint 3 코드리뷰에서 Opus 4.7이 N+1 쿼리 17,500건 발견 — Sonnet 표면 리뷰로는 포착 난이도 높은 이슈
+
+**Option B — API 종량제 / 비용 민감 사용자**
 - Discovery/Design 단계: Sonnet 4.6 사용 ($3/$15 per 1M tokens — Opus 대비 40% 절감)
 - 코드 생성/리뷰: Opus 4.7 사용 ($5/$25 per 1M tokens, 128K max output)
-- Phase 4 검증: Opus 4.7 Full Context Mode (정확도 최우선)
+- Phase 4 검증: Opus 4.7 Full Context Mode (정확도 최우선, 공통)
 - 반복적 테스트 실행은 실제 테스트 러너(Jest, Playwright, k6)에 위임
 - 전체 파이프라인 예상 비용: $15~30 (Selective Loading 적용 시)
+
+| 구분 | Option A (Max) | Option B (API) |
+|------|--------------|---------------|
+| Phase 1 Discovery | Opus 4.7 | Sonnet 4.6 |
+| Phase 2 Design | Opus 4.7 | Sonnet 4.6 |
+| Phase 3 Build | Opus 4.7 | Sonnet 4.6 (+ Opus 선택적) |
+| Phase 4 Verify | Opus 4.7 | Opus 4.7 |
+| Phase 5 Ship | Opus 4.7 | Sonnet 4.6 |
+| Judge Agent | Opus 4.7 | Sonnet 4.6 |
 
 ### 에이전트 프롬프트 개선 사이클
 ```
@@ -1512,10 +1532,11 @@ Gate Controller → 다음 단계 진행
 ### 실행 비용 분석
 
 ```
-Judge Agent 1회 실행 비용 (Sonnet 4.6 사용 권장):
+Judge Agent 1회 실행 비용 (Option B / API 종량제 기준 — Sonnet 4.6 사용 시):
 - 입력: 산출물 (~5,000 토큰) + Rubric (~2,000 토큰) + 이전 산출물 요약 (~2,000 토큰)
 - 출력: 평가 리포트 (~1,500 토큰)
 - 총: ~10,500 토큰 ≈ $0.05 (Sonnet 4.6: $3/$15 per 1M tokens)
+- Option A (Max 구독) 적용 시: Opus 4.7 사용, 구독료에 포함 → 추가 비용 0
 
 전체 파이프라인 Judge 비용:
 - 15단계 × 1.3회 (평균 재시도 포함) ≈ 20회 × $0.05 = $1.00
@@ -1525,7 +1546,8 @@ Judge Agent 1회 실행 비용 (Sonnet 4.6 사용 권장):
    첫 생성 품질을 높이는 Few-shot 투자가 더 경제적
 
 1M 컨텍스트 시대 Judge 최적화:
-- Judge Agent는 Sonnet 4.6으로 충분 (평가는 생성보다 가벼움)
+- API 종량제 기준: Judge Agent는 Sonnet 4.6으로 충분 (평가는 생성보다 가벼움)
+- Max 구독자: Opus 4.7 그대로 사용 — 편향 없는 정밀 평가
 - 단, 코드 리뷰 Judge는 Full Context Mode로 전체 소스 로드 가능
   → 200K 시절에는 불가능했던 "프로젝트 전체 맥락의 코드 리뷰"가 실현
 ```

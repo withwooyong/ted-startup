@@ -45,8 +45,8 @@
 ### 환경
 | 항목 | 버전 / 값 |
 |------|-----------|
-| Claude Code | 최신 (Opus 4.7 권장) |
-| 구독 | Max / Team / Enterprise (1M 컨텍스트 지원) |
+| Claude Code | 최신 (Opus 4.7 권장, 단일 운영) |
+| 구독 | Max / Team / Enterprise (1M 컨텍스트 + Opus 단일 운영 전제) |
 | `.claude/settings.json` env | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`<br>`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90` |
 | Git | `init`, worktree 지원 |
 | 기본 스택 | Java 21, Node 20+, PostgreSQL 16, Docker |
@@ -55,10 +55,28 @@
 - **반드시 숙지**: `docs/design/ai-agent-team-master.md` 목차 + Part I
 - **참조**: 이 가이드 (`PIPELINE-GUIDE.md`)
 
-### 비용 감각 (참고)
+### 모델 운용 전략 (구독 유형별)
+
+**A. Claude Code Max / Team / Enterprise 구독자 — 권장**
+- **Opus 4.7 단일 운영** (모든 Phase 기본값)
+- 근거: 비용 고정 → 품질 최대화가 합리적. Phase별 분기 관리 비용이 오히려 손해
+- 리밋 도달 시: Sonnet 4.6 자동 fallback → statusline으로 실시간 인지
+- 실전 효과: Sprint 3에서 Opus 4.7이 N+1 쿼리 17,500건 등 HIGH 이슈 7건 포착 (Sonnet이면 표면 리뷰로 놓쳤을 가능성)
+
+**B. API 종량제 / 비용 민감 사용자**
 - 전체 파이프라인 1회 실행: $40~80 (Agent Teams 포함)
 - Selective Loading 적용 시: $15~30 수준
 - **핵심 절감 레버**: Phase 1~3은 Sonnet 4.6, Phase 4 검증만 Opus 4.7
+
+| 단계 | Max 구독자 | 비용 민감 |
+|------|-----------|-----------|
+| Phase 1 Discovery | Opus 4.7 | Sonnet 4.6 |
+| Phase 2 Design | Opus 4.7 | Sonnet 4.6 |
+| Phase 3 Build | Opus 4.7 | Sonnet 4.6 (코드 생성만 Opus 선택적) |
+| Phase 4 Verify | Opus 4.7 | Opus 4.7 (공통, 정확도 최우선) |
+| Phase 5 Ship | Opus 4.7 | Sonnet 4.6 |
+
+> 💡 **이 프로젝트(ted-startup)는 Max $200 구독 기준 Opus 4.7 단일 운영**.
 
 ---
 
@@ -289,10 +307,19 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 - `.gitignore`에서 `pipeline/` 제거 → 전원이 동일 파이프라인 컨텍스트 공유
 
 ### Q5. 비용이 너무 많이 나와요
+**API 종량제 사용자 한정** (Max/Team/Enterprise 구독자는 고정 비용이므로 해당 없음):
 - Phase 1~3: Sonnet 4.6 사용 (Opus 대비 40~80% 절감)
-- Phase 4 검증만 Opus 4.7
+- Phase 4 검증만 Opus 4.7 (정확도 최우선)
 - Selective Loading 강제: 매 단계 Layer 2 요약본 사용
 - 1회 실행당 $15~30 수준 가능
+
+> Max 구독자는 Opus 4.7 단일 운영 권장 — 섹션 2 "모델 운용 전략" 참조.
+
+### Q6. Opus 리밋이 걸리면 어떻게 되나요?
+- Claude Code가 자동으로 Sonnet 4.6으로 fallback (수동 개입 불필요)
+- `~/.claude/settings.json`의 `statusLine`에서 현재 모델 실시간 표시
+- 5시간 세션 리밋 리셋 후 자동 복귀
+- Fallback 중에도 작업은 중단 없이 지속 — 품질만 일시 저하
 
 ---
 

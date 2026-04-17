@@ -110,6 +110,25 @@ echo "✅ Step 1 완료: 디렉토리 구조 생성"
 - 코드 리뷰/보안 검증은 소스코드 전체 원본 로드
 - 1M 윈도우 활용으로 크로스 파일 분석 가능
 
+## 모델 운용 전략
+
+### Option A: Max / Team / Enterprise 구독자 (권장)
+- **모든 Phase에서 Opus 4.7 단일 운영**
+- 고정 구독료 → 품질 극대화가 합리적
+- 리밋 도달 시 Sonnet 4.6 자동 fallback (statusline으로 인지)
+
+### Option B: API 종량제 / 비용 민감
+- Phase 1~3: Sonnet 4.6 (Opus 대비 40~80% 절감)
+- Phase 4 검증: Opus 4.7 (정확도 최우선, 공통)
+- Phase 5: Sonnet 4.6
+
+| 단계 | Option A | Option B |
+|------|---------|---------|
+| Discovery / Design | Opus 4.7 | Sonnet 4.6 |
+| Build | Opus 4.7 | Sonnet 4.6 |
+| Verify | Opus 4.7 | Opus 4.7 |
+| Ship | Opus 4.7 | Sonnet 4.6 |
+
 ## Compact Instructions
 
 Compaction 시 반드시 보존해야 할 핵심 컨텍스트:
@@ -1130,6 +1149,11 @@ tree -L 2 -I 'node_modules|build|.git' 2>/dev/null || find . -maxdepth 2 -type d
 
 ⚠️ 주의사항:
 - Agent Teams 기능이 활성화되어 있습니다 (Build/Verify 단계에서 병렬 실행)
-- 예상 비용: 전체 파이프라인 $40~80
+- 모델 운용:
+  - Max/Team/Enterprise 구독자 → **Opus 4.7 단일 운영 권장** (품질 최대화)
+  - API 종량제 → Phase 1~3 Sonnet 4.6, Phase 4 Opus 4.7 (비용 절감)
+- 예상 비용:
+  - Max 구독: 구독료 포함 (추가 비용 0)
+  - API 종량제: 전체 파이프라인 $15~80 (Selective Loading 적용 여부 따라)
 - 예상 시간: MVP 런칭까지 3~6주
 ```
