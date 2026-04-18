@@ -1,12 +1,12 @@
 # Session Handoff
 
-> Last updated: 2026-04-19 (KST, 오후 — α 부분 성공 + KRX 어댑터 버그 수정 직후)
-> Branch: `master` (origin 대비 1 커밋 앞서 — 푸시 대기, 본 문서 커밋 포함 시 2)
-> Latest commit: `bb8d2f2` — fix(krx): fetch_stock_prices — pykrx 1.2.x 시가총액 충돌 + KOSDAQ 누락
+> Last updated: 2026-04-19 (KST, 저녁 — E2/i 커밋 후 3년 백필 백그라운드 기동 직후)
+> Branch: `master` (origin 대비 3 커밋 앞서 — 푸시 대기, 본 문서 커밋 포함 시 4)
+> Latest commit: `c71a0fc` — 백필 스크립트: 3년 영업일 stock_price 순회 수집
 
 ## Current Status
 
-**α(KRX 실데이터 배치) 를 "stock 마스터 코드·주가 레벨" 까지 실데이터로 복구.** 진행 중 발견한 pykrx 1.2.x 스키마 드리프트 2건(`시가총액` 컬럼 충돌·KOSDAQ 누락)을 어댑터 단에서 수정해 커밋. 배치 재실행 결과 `POST /api/batch/collect?date=2026-04-17` → HTTP 200, stocks/stock_prices 각 2,879건 upsert. 단 `stock_name` · `market_type` 은 pykrx OHLCV 응답에 포함되지 않아 2,874건이 공백/'KOSPI' 단일로 저장 — carry-over i 로 이관. β 재실행으로 5 핵심 종목 이름 긴급 복구해 UI 회귀 차단.
+**E2(DART 단축명 필터) + i(KRX market_type/stock_name 매핑 복구) 를 같은 세션에 해소하고, 3년(752영업일) 실데이터 백필을 백그라운드 기동.** 어댑터 수정으로 α 잔여 이슈(2,874건 market_type 단일·이름 공백) 구조적 원인을 제거했고, `StockRepository.upsert_by_code` 가 빈 이름은 덮어쓰지 않도록 방어해 β 시드 회귀도 차단. 테스트 146 → 158. 백필 실행(Bash id `bh6enx6xu`)은 약 2시간 예상이며 완료 보고는 차기 세션 인계.
 
 ## Completed This Session (전 세션에서 이어지는 단일 세션 스트림)
 
@@ -21,9 +21,12 @@
 | 7 | β UI 회귀 검증 시드 | `a494863` | seed_ui_demo.py, 테스트 10건 |
 | 8 | 운영 문서 현행화(3) | `3c35295` | HANDOFF, CHANGELOG (β/Z 반영) |
 | 9 | α KRX 어댑터 버그 2건 수정 | `bb8d2f2` | krx_client.py, test_krx_client.py |
+| 10 | 운영 문서 현행화(4) | `6ec57d5` | HANDOFF, CHANGELOG (α/carry-over) |
+| 11 | E2 + i carry-over 처리 | `93a88ec` | sync_dart, krx_client, stock repo, tests |
+| 12 | 백필 스크립트 | `c71a0fc` | backfill_stock_prices + test |
 
-**누적 규모(전체 세션)**: 9 커밋 / +1,600 라인 내외.
-**테스트**: 백엔드 **146/146 PASS** (기존 98 + 본 세션 신규 48). mypy strict 0, ruff 0 (신규 파일).
+**누적 규모(전체 세션)**: 12 커밋 / +2,000 라인 내외.
+**테스트**: 백엔드 **158/158 PASS** (기존 98 + 본 세션 신규 60). mypy strict 0, ruff 0 (신규 파일).
 
 ### α 배치 실측 결과 (`POST /api/batch/collect?date=2026-04-17`)
 | 지표 | 값 | 비고 |
@@ -54,13 +57,13 @@
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | **원격 푸시** | pending | `bb8d2f2` + 본 문서 커밋 2건 |
-| 2 | **i: stock_name·market_type 매핑 복구** | carry-over (α 잔여) | KOSPI/KOSDAQ 티커 리스트 별도 조회로 market_type 매핑 + `get_market_ticker_name` 루프 또는 batch API 로 이름 병합. 2,874건 영향. ~1시간 실행 예상(rate limit 영향) |
-| 3 | **E2: DART 단축명 필터 보강** | 보류 | `맥쿼리인프라` 류가 통과되는 케이스. 패턴 정교화 |
-| 4 | **과거 N일 주가 백필** | 보류 | 현재 2026-04-17 단일 날짜만 실데이터. 3M 범위 실데이터 지표를 보려면 과거 영업일 반복 collect 필요 |
+| 1 | **원격 푸시** | pending | 본 문서 커밋 포함 4건 |
+| 2 | **3년 백필 완료 확인** | 백그라운드 진행 중 | Bash id `bh6enx6xu`. 752영업일 × 약 10초/일 ≈ 125분. 로그 파일 `/private/tmp/.../bh6enx6xu.output`. 차기 세션에서 성공/실패 카운트 집계 후 마감 |
+| 3 | **stock_name 실명 복구** | carry-over | 현재 α 재실행 시 market_type 은 정확하지만 stock_name 은 공백 유지. dart_corp_mapping 조인 또는 pykrx 티커별 이름 lookup(rate limit 2시간+) 필요 |
+| 4 | **E2 블랙리스트 DB 반영** | 보류 | `sync_dart_corp_mapping` 재실행으로 088980/423310 삭제 확인. β 가 시드한 5 종목에 포함 안 되므로 UI 영향 없음 |
 | 5 | **slowapi Redis 백엔드** | 보류 | multi-worker 확장 전까지 불필요 |
 | 6 | **force_refresh 조건부 rate limiting** | 보류 | 현재 엔드포인트 전체 30/min 으로 충분 |
-| 7 | **Frontend Playwright 회귀 테스트** | 보류 | UI 렌더링 실측은 했지만 자동화 없음 |
+| 7 | **Frontend Playwright 회귀 테스트** | 보류 | UI 렌더링 실측은 했지만 자동화 없음. 0.5일 규모 |
 | 8 | **`BrokerAdapter` Protocol 추출** | 보류 | 키움 합류 전까지 미필요 |
 | 9 | **Caddy unhealthy** | 관찰 | localhost self-signed 한정 |
 
@@ -84,6 +87,8 @@
 - `e6d79e6` KRX 교차 필터
 - `a494863` UI 시드 (파생 지표 복구)
 - `bb8d2f2` KRX 어댑터 버그 2건(시가총액 충돌·KOSDAQ 누락)
+- `93a88ec` E2 DART 블랙리스트 + i KRX market_type/이름 보존
+- `c71a0fc` 3년 백필 스크립트
 
 ### 본 세션 관찰(차후 개선)
 - **DART 단축명 매칭 누락** — 맥쿼리인프라(088980) 가 `"인프라투융자회사"` 패턴과 매칭 실패해 통과. 패턴 보강 필요(E2 작업).

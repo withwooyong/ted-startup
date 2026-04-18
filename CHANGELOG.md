@@ -7,6 +7,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-19 — 저녁] E2 + i + 3년 백필 스크립트 (`93a88ec` … `c71a0fc`)
+
+차기 세션 carry-over 2건(DART 단축명 필터 · KRX stock_name/market_type)을 병렬 처리하고, 3년(752영업일) 실데이터 백필 스크립트를 구현·기동. 백필 자체는 백그라운드 약 2시간 실행(완료 보고는 차기 세션). 백엔드 테스트 146 → **158**.
+
+### Added
+- **`EXCLUDED_STOCK_CODES` 블랙리스트**(`93a88ec`): `sync_dart_corp_mapping` 에 명시 제외 코드 셋 (`088980` 맥쿼리인프라, `423310` KB발해인프라). DART 단축명이 기존 이름 패턴에 매칭되지 않는 케이스 보완. "인프라" 로 패턴 확장 시 "현대인프라코어" 등 오탐 위험으로 지양.
+- **KRX market_type 매핑**(`93a88ec`): `KrxClient._build_market_type_map` 가 KOSPI/KOSDAQ 티커 리스트 2회 조회로 dict 구성. `_to_stock_price_row` 가 market_type 을 주입받아 row 컬럼 미존재 시에도 정확 매핑.
+- **`StockRepository.upsert_by_code` 보호 규칙**(`93a88ec`): 빈 `stock_name` 은 기존 row 의 이름을 덮어쓰지 않음. β 가 시드한 5 핵심 종목 이름이 α 재실행으로 공백화되는 회귀 차단.
+- **`scripts/backfill_stock_prices.py`**(`c71a0fc`): urllib 기반 CLI. `POST /api/batch/collect?date=...` 를 영업일 역순(오름차순 정렬 후 실행)으로 순회. 기본 752영업일. 중간 실패는 개별 날짜만 기록하고 진행. 배치 내부가 upsert 멱등이라 재실행 안전.
+- **테스트 8건**: E2 2건(코드 블랙리스트 경계값) + i 3건(KOSDAQ 매핑·upsert 이름 보존 2종) + 백필 3건(business_days_back) + 기존 KRX 테스트 3건에 `get_market_ticker_list` stub 확장.
+
+### In Progress (백그라운드)
+- **3년 백필 실행** — Bash id `bh6enx6xu` 로 진행 중. 752영업일 × 약 10초/일 ≈ 125분. 완료 시 각 영업일의 stock_price 실데이터가 upsert 되며 β 의 허구 스냅샷 범위를 실데이터로 대체.
+
+---
+
 ## [2026-04-19 — 오후] α 부분 성공 + KRX 어댑터 버그 2건 긴급 수정 (`bb8d2f2`)
 
 α(KRX 실데이터 배치 실행 → stock 마스터 복구) 시도 중 pykrx 1.2.x 와 어댑터 간 스키마 드리프트 2건을 발견·수정. 배치 재실행으로 KOSPI+KOSDAQ stock 마스터 2,879건과 2026-04-17 주가를 실데이터로 적재. 단 `get_market_ohlcv_by_ticker(market=ALL)` 이 종목명·시장구분을 반환하지 않아 2,874건의 `stock_name` 이 공백·`market_type` 이 단일 'KOSPI' 로 저장되는 잔여 이슈 발생(carry-over i). β 재실행으로 5 핵심 종목 이름만 긴급 복구해 UI 회귀는 차단.
