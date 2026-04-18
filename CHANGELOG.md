@@ -7,6 +7,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-19 — 낮] Z(E 실측) + β(UI 시드) 병렬 수행 — UI 파생 지표 복구 (`a494863`)
+
+직전 커밋에서 구현한 E(KRX 교차 필터)의 실측과, 데이터 부재로 `—` 를 표시하던 포트폴리오 UI 의 수익률/MDD 카드를 복구하기 위한 데모 시드를 병렬로 처리. backend 재빌드 → Z 실측 → β 스크립트 구현 → DB 적재 → 브라우저 확인까지 한 트랙에서 완결.
+
+### Added
+- **`scripts/seed_ui_demo.py`**(`a494863`): UI 회귀 검증 전용 CLI. 5개 대표 종목(삼성전자/SK하이닉스/NAVER/카카오/셀트리온) × 최대 90 영업일 OHLCV 를 결정론적 random-walk(seed 고정)로 생성해 `stock_price` 에 upsert. 활성 계좌 × 날짜별 `portfolio_snapshot` 을 현재 보유수량 × 해당일 종가로 재구성. `--wipe` 는 stock 마스터를 건드리지 않고 기간 내 시세/스냅샷만 정리(portfolio_holding 참조 관계 보존).
+- **신규 테스트 10건**: `business_days_back` 주말 제외/순서/개수, `generate_price_series` 결정론/시드별 차이/OHLC 불변식/충분한 변동폭, `DEMO_STOCKS` 유효성 등.
+
+### Verified (실측)
+- **Z: KRX 교차 필터 실환경 동작** — `scripts.sync_dart_corp_mapping --dry-run` 결과 DART 3,654 → KRX 교집합 **2,538건**(1,116건 축소). pykrx 로그인 성공 로그 확인 (`KRX 로그인 ID: withwooyong` · 만료 1시간).
+- **β: 시드 적재 및 UI 복구** — `stock 5 · stock_price 450 · portfolio_snapshot 90` 적재. `https://localhost/portfolio` 에서 누적 수익률(3M) = **+5.31%** (빨강, 한국 관습), MDD(3M) = **-10.23%** (파랑) 정상 렌더링. UI 의 파생 지표 경로(Metric 카드·색상 코딩·포맷팅) 전부 동작 확인.
+
+### Observed (차후 개선)
+- **`.env.prod` KRX 크리덴셜 이미 존재** — Z 실측 중 드러남. α 작업이 사실상 즉시 실행 가능 상태이며 stock 마스터를 실데이터로 복구 가능.
+- **DART 단축명 매칭 누락** — 필터 패턴 `"인프라투융자회사"` 가 DART 가 저장한 단축명 `"맥쿼리인프라"` 와 매칭 실패. 해당 종목(088980)이 그대로 통과. 패턴에 단축명 추가 필요.
+- **wipe 가 stock 마스터 보존해야 하는 제약** — `portfolio_holding.stock_id` FK 때문에 stock 선삭제 불가. 시드 스크립트는 기간 내 `stock_price`/`portfolio_snapshot` 만 정리하고 stock 은 upsert 경로로 덮도록 설계.
+
+---
+
 ## [2026-04-19 — 오전] P13-3 AI 리포트 rate limiting + P13-4 KRX 교차 필터 + DB 벌크 upsert 실행 + UI 실측 (`3e44ab6` … `e6d79e6`)
 
 바로 전 세션에서 구현한 P13-1/P13-2 의 실측 검증을 마무리한 뒤, 동일 세션 내에서 **(A) DART 벌크 sync 본실행 → (B) AI 리포트 엔드포인트 slowapi rate limiting → (D) 포트폴리오 UI 실측 → (E) KRX 현재 상장 교차 필터** 4건을 순차·병렬 처리. DB 에 실데이터 3,654건 적재, 백엔드 테스트 131→135건으로 확장.
