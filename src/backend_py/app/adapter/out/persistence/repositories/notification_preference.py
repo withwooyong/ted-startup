@@ -17,9 +17,14 @@ class NotificationPreferenceRepository:
             pref = NotificationPreference(id=NotificationPreference.SINGLETON_ID)
             self._session.add(pref)
             await self._session.flush()
+            # server_default(예: updated_at NOW()) 값을 파이썬 측에 반영
+            await self._session.refresh(pref)
         return pref
 
     async def save(self, pref: NotificationPreference) -> NotificationPreference:
         self._session.add(pref)
         await self._session.flush()
+        # onupdate=func.now() 로 갱신된 updated_at 을 파이썬 속성에 동기화.
+        # 이 단계가 없으면 이후 Pydantic model_validate 중 MissingGreenlet 발생.
+        await self._session.refresh(pref)
         return pref

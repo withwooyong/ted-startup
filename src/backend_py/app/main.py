@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from app.adapter.web._error_handler import register_exception_handlers
+from app.adapter.web.routers import api_router
 from app.config.settings import get_settings
 
 
@@ -24,7 +26,7 @@ def create_app() -> FastAPI:
             allow_origins=allowed_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "X-Admin-Api-Key"],
+            allow_headers=["Authorization", "Content-Type", "X-Admin-Api-Key", "X-API-Key"],
             max_age=600,
         )
 
@@ -34,6 +36,8 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "UP", "app": settings.app_name, "env": settings.app_env}
 
+    register_exception_handlers(app)
+    app.include_router(api_router)
     return app
 
 

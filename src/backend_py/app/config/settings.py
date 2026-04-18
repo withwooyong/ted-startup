@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = Field(default="", description="BotFather 발급 토큰")
     telegram_chat_id: str = Field(default="", description="수신 채팅/채널 ID")
 
+    # ---- Admin ----
+    # 관리자 API Key — /api/*/detect, /run, /collect, PUT /preferences 에 요구.
+    # 값이 비어 있으면 모든 요청은 401 로 거부(fail-closed).
+    admin_api_key: str = Field(default="", description="X-API-Key 헤더 검증용 고정 키(32+ 바이트)")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
