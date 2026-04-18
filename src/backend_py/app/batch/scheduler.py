@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,9 +21,13 @@ KST = ZoneInfo("Asia/Seoul")
 
 
 async def _fire_pipeline() -> None:
-    """스케줄러 콜백 — 예외가 스케줄러 루프를 죽이지 않도록 방어."""
+    """스케줄러 콜백 — 예외가 스케줄러 루프를 죽이지 않도록 방어.
+
+    trading_date 는 KST 로 명시적으로 계산. 프로세스 TZ 가 UTC 로 떨어져도 하루 밀림 방지.
+    """
     try:
-        result = await run_market_data_pipeline(trading_date=date.today())
+        trading_date = datetime.now(KST).date()
+        result = await run_market_data_pipeline(trading_date=trading_date)
         if result.skipped:
             return
         if not result.succeeded:

@@ -49,6 +49,12 @@ def main() -> None:
     else:
         _run(["alembic", "upgrade", "head"])
 
+    # Docker 사설 대역에서만 X-Forwarded-* 신뢰. 운영 스택에선 Caddy 가 같은 브리지 네트워크에 있어
+    # 172.16/12 안의 IP 로 접속. "*" 로 두면 실수로 포트 노출 시 X-Forwarded-For 스푸핑 가능.
+    # 다른 런타임(Kubernetes 등)에선 FORWARDED_ALLOW_IPS 환경변수로 오버라이드.
+    forwarded_allow = os.environ.get(
+        "FORWARDED_ALLOW_IPS", "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    )
     uvicorn_args = [
         "uvicorn",
         "app.main:app",
@@ -58,7 +64,7 @@ def main() -> None:
         str(settings.port),
         "--proxy-headers",
         "--forwarded-allow-ips",
-        "*",
+        forwarded_allow,
     ]
     print(f"[entrypoint] starting uvicorn: {' '.join(uvicorn_args)}", flush=True)
     os.execvp(uvicorn_args[0], uvicorn_args)

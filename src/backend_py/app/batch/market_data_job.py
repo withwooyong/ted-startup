@@ -98,7 +98,6 @@ async def run_market_data_pipeline(
     steps.append(outcome)
 
     # Step 2: detect
-    detected_signal_ids: list[int] = []
     async with factory() as session:
         outcome = await _run_step(
             "detect",
@@ -110,10 +109,6 @@ async def run_market_data_pipeline(
                 "squeeze": r.short_squeeze,
             },
         )
-        # 방금 탐지된 시그널을 notify 단계로 전달하기 위해 재조회
-        if outcome.succeeded:
-            signals = await SignalRepository(session).list_by_date(trading_date)
-            detected_signal_ids = [s.id for s in signals]
     steps.append(outcome)
 
     # Step 3: notify — detect 성공 시만
@@ -151,7 +146,6 @@ async def run_market_data_pipeline(
         "파이프라인 종료 date=%s elapsed=%dms 성공=%s",
         trading_date, total, result.succeeded,
     )
-    _ = detected_signal_ids  # 현재 직접 사용 안 함(추후 상세 통계용)
     return result
 
 
