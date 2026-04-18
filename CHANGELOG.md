@@ -18,8 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 - **`scripts/backfill_stock_prices.py`**(`c71a0fc`): urllib 기반 CLI. `POST /api/batch/collect?date=...` 를 영업일 역순(오름차순 정렬 후 실행)으로 순회. 기본 752영업일. 중간 실패는 개별 날짜만 기록하고 진행. 배치 내부가 upsert 멱등이라 재실행 안전.
 - **테스트 8건**: E2 2건(코드 블랙리스트 경계값) + i 3건(KOSDAQ 매핑·upsert 이름 보존 2종) + 백필 3건(business_days_back) + 기존 KRX 테스트 3건에 `get_market_ticker_list` stub 확장.
 
-### In Progress (백그라운드)
-- **3년 백필 실행** — Bash id `bh6enx6xu` 로 진행 중. 752영업일 × 약 10초/일 ≈ 125분. 완료 시 각 영업일의 stock_price 실데이터가 upsert 되며 β 의 허구 스냅샷 범위를 실데이터로 대체.
+### Verified (실측)
+- **E2 블랙리스트 동작 확인** — `sync_dart_corp_mapping --dry-run` 재실행 시 DART 기본 3,654 → 3,653 (088980 제거), KRX 교차 후 2,538 → 2,537. 블랙리스트 1건 반영(423310 은 DART corpCode.xml 미등재이거나 KRX 상장 리스트 외로 이미 제거된 상태로 추정).
+- **3년 백필 완료** — Bash id `bh6enx6xu`, 총 **752영업일 · 성공 752 · 실패 0 · 소요 125분 38초**. DB 최종 상태: `stock_price` 2,130,316 rows × 752 days (2023-06-01~2026-04-17), `short_selling` 718,997 rows × 752 days, `lending_balance` 668,322 rows × 699 days(공휴일/스키마 이슈 53일 제외), `distinct stock` 3,098 (현재 상장 2,879 + 과거 상장/폐지 219).
+- **`lending_balance` 스키마 불일치 범위 축소 관찰** — α 에서 2026-04-17 은 0건이었지만 과거 날짜(2023-11~)는 952건 정상. 즉 pykrx 의 schema drift 가 최근 날짜에 국한되어 과거 시계열에는 영향 없음. carry-over 범위 대폭 축소.
 
 ---
 
