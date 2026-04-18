@@ -5,16 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2026-04-18 — 저녁~밤] Phase 8/9 마무리 + §11 신규 도메인(P10~P15) + 프론트 UI + 리뷰 대응 (`24b43ba` … `7f4f3d1`)
+
+이전 세션에서 Phase 1~7 으로 Java→Python 런타임 이전을 마친 데 이어, 본 세션은 **Phase 8/9 정리 + §11 (포트폴리오·AI 분석 리포트) 신규 도메인 전체 + 프론트 UI + 코드 리뷰 대응** 을 단일 세션에 완결. 커밋 12개 · 약 +7,120 / -5,141 라인 (Java 삭제 4,710 포함) · 백엔드 98/98 PASS · mypy strict 0 · ruff 0 · 프론트 build/tsc/lint clean.
+
 ### Removed
-- **Phase 8 — Java 스택 물리 제거** (본 세션): `src/backend/` 디렉토리 전량 삭제 (Spring Boot 3.5 + Java 21 + Gradle 설정 + 테스트 69개 포함). 이로써 2026-04 Java→Python big-bang 이전이 완결. 기능·테스트 공백 없음(Python 52/52 PASS 로 대체 검증 완료).
+- **Phase 8 — Java 스택 물리 제거**(`24b43ba`): `src/backend/` 디렉토리 전량 삭제 (Spring Boot 3.5 + Java 21 + Gradle + 테스트 69개 포함 4,710 라인). 2026-04 Java→Python big-bang 이전 완결. Python 52/52 PASS 로 대체 검증 완료.
+
+### Added
+- **Phase 9 — 기술스택 문서/에이전트 Python 전환**(`005011e`): `CLAUDE.md` Tech Stack 표 + Backend Conventions(PEP 8·ruff·mypy strict·Pydantic v2·SQLAlchemy 2.0 async·APScheduler) + Key Design Decisions 전면 재작성. `docs/design/ai-agent-team-master.md` 기술 스택 확정 표 FastAPI/Python 전환 + Part V(부록 I~L, Java 21 Virtual Threads/JPA/QueryDSL) **역사적 기록·비활성** 배너 부착. `agents/08-backend/AGENT.md` 전면 재작성. `pipeline/artifacts/10-deploy-log/runbook.md` 내부 포트 8080→8000, /actuator/health→/health, Flyway→Alembic + entrypoint, KRX_AUTH_KEY→KRX_ID/KRX_PW 등 갱신.
+- **P10 — 포트폴리오 도메인**(`97203c2`, +1,439): Alembic 003 (brokerage_account/portfolio_holding/portfolio_transaction/portfolio_snapshot 4 테이블 + UNIQUE/CHECK/인덱스). 모델 4종 + Repository 4종 + UseCase 4종 (RegisterAccount/RecordTransaction(가중평균 평단가)/ComputeSnapshot/ComputePerformance — pandas cummax/pct_change 벡터 연산으로 MDD·Sharpe). FastAPI 라우터 7 엔드포인트. 테스트 11 케이스.
+- **P11 — KIS 모의투자 REST 연동**(`c003fc8`, +774): `KisClient` (httpx + OAuth2 `client_credentials` 토큰 캐시·300초 전 자동 재발급, TR_ID VTTC8434R 모의 전용, 실거래 URL 진입 차단, tenacity 재시도). `SyncPortfolioFromKisUseCase` — connection_type='kis_rest_mock' + environment='mock' 이중 검증, 잔고→holding 직접 upsert. Settings 에 KIS_APP_KEY_MOCK/SECRET/ACCOUNT + base_url 하드코드. 테스트 9 케이스.
+- **P12 — 포트폴리오↔시그널 정합도 리포트**(`11e80c2`, +343): `SignalRepository.list_by_stocks_between` — IN + 기간 + min_score 복합 쿼리로 N+1 회피. `SignalAlignmentUseCase` — 종목별 max_score·hit_count 집계·정렬. `GET /api/portfolio/accounts/{id}/signal-alignment` 라우터. 테스트 5 케이스.
+- **P13a — DART OpenAPI Tier1 어댑터**(`b2c20f4`, +711): Alembic 004 (`dart_corp_mapping` — KRX 6자리↔DART 8자리 매핑). `DartClient` — fetch_company/fetch_disclosures/fetch_financial_summary 3 엔드포인트, status='000'|'013' 만 통과 (그 외 `DartUpstreamError` 승격), 괄호 표기 음수·천단위 쉼표 Decimal 안전 변환, populate_existing upsert 패턴. 테스트 9 케이스.
+- **P13b — AI 분석 리포트 파이프라인**(`caf8355`, +1,484): Alembic 005 (`analysis_report` JSONB content/sources, (stock_code, report_date) UNIQUE 로 24h 캐시). `LLMProvider` Protocol (`app/application/port/out/llm_provider.py`) + Tier1/Tier2 dataclass + REPORT_JSON_SCHEMA strict JSON. `OpenAIProvider` (Plan B, httpx `/v1/chat/completions` + `response_format=json_schema`, 역할 분리 시스템 프롬프트 "숫자는 Tier1 만, 정성은 Tier2 만 인용"). `AnalysisReportService` — 24h 캐시 조회 → dart_corp_mapping 해결 → DART 3종(company/disclosures 90d/financials 전년 CFS) + KRX 가격·시그널 Tier1 수집 → provider.analyze → 자동 소스 보강(공식 홈페이지 + 최근 공시 3건) → upsert. `POST /api/reports/{stock_code}` 라우터 (Admin Key 보호, force_refresh 쿼리, 404/400/502 매핑). 테스트 9 케이스.
+- **P14 — 프론트 포트폴리오·AI 리포트 UI**(`3cd5c75`, +1,349): Next.js 16 + React 19. `/portfolio` (계좌 스위처 + 4 지표 카드 + 스냅샷/KIS 동기화 액션 + 보유 테이블 + AI 리포트 바로가기), `/portfolio/[accountId]/alignment` (시그널 정합도 상세, 스코어 슬라이더 필터), `/reports/[stockCode]` (AI 리포트 본문 — BUY/HOLD/SELL 컬러 뱃지, 강점/리스크 2열, 출처 Tier1/2 뱃지 + 외부 링크, 재생성 버튼). 제네릭 Route Handler `/api/admin/[...path]` (GET/POST/PUT/DELETE/PATCH, ADMIN_API_KEY 서버 측 부착, 64KB 본문 상한). API 클라이언트 2 (portfolio/reports) + 타입 2 (portfolio/report, snake_case 백엔드 정렬). NavHeader 에 '포트폴리오' 메뉴 추가.
+- **P15 — 키움 REST 가용성 조사**(`7f4f3d1`, +177): `docs/research/kiwoom-rest-feasibility.md` — 문서 스파이크 전용 (구현 없음). 2026-04 공식 도메인 `openapi.kiwoom.com`, 모의 `mockapi.kiwoom.com`, Python SDK `kiwoom-rest-api` 0.1.12 미성숙 확인. KIS vs 키움 11항목 비교 매트릭스. **결론: No-Go**. Go 조건 3/3 (개인 키움 계좌 수요 + SDK 0.2+ 성숙 + KIS 어댑터 계약 고정) 충족 시 재평가. 플랜 §11.1 의 `developers.kiwoom.com` 오기 정정.
+
+### Fixed
+- **P13b 리뷰 fix**(`185dfaf`): mypy strict HIGH 5 (cast dict[str, Any], list[ReportSource] 제네릭, -> ReportSource 반환 타입) + 보안 MEDIUM 4 (`is_safe_public_url` 유틸로 javascript:/ftp:/file: 스킴 차단, OpenAI 에러 본문 외부 누설 제거 — body 는 logger.warning 만, `openai_base_url` HTTPS 스킴 강제로 SSRF 차단, `<tier1_data>`/`<tier2_data>` XML-like fence 로 프롬프트 인젝션 완화). 테스트 3 케이스 추가.
+- **P14 리뷰 fix**(`c008592`): HIGH 3 (릴레이 path 세그먼트 `^[A-Za-z0-9_\-.]+$` allowlist + `.`/`..` 명시 거부 — undici collapse 로 /api/ 스코프 탈출 SSRF 차단, reports 페이지 `cancelled` 플래그 + `refreshTick` idempotent 재생성 패턴으로 race 제거, `SourceRow` `safeHref` 로 javascript: URI 브라우저 실행 차단) + MEDIUM 4 (refreshCurrent 에러 투명 전파, `aria-label` 새 탭 안내, `ADMIN_BASE`/adminCall 공용 헬퍼 추출, accountId NaN 가드).
 
 ### Changed
-- **Phase 9 — 문서·에이전트 갱신** (본 세션):
-  - `CLAUDE.md` Tech Stack 표 + Backend Conventions 섹션 Python(PEP 8 + ruff + mypy strict, Pydantic v2, SQLAlchemy 2.0 async, APScheduler) 기준으로 재작성. Key Design Decisions 도 asyncio / Pydantic / vectorbt / Alembic 기준으로 갱신
-  - `docs/design/ai-agent-team-master.md` "기술 스택 확정" 표를 FastAPI/Python 으로 갱신하고 전환 근거 박스 추가. Part V (부록 I~L, Java 21 Virtual Threads / JPA / QueryDSL) 헤더에 **역사적 기록 · 비활성** 배너 부착. Teammate 1 / scaffolding 출력 예시 Python 으로 치환
-  - `agents/08-backend/AGENT.md` 전면 재작성 — 페르소나·스택·컨벤션·쿼리 전략·리뷰 체크리스트 를 FastAPI + SQLAlchemy 2.0 async 기준으로 교체. `src/backend_py/app/` 디렉토리 트리 반영, `in` 예약어 회피(`adapter/web/`) 명시
-  - `pipeline/artifacts/10-deploy-log/runbook.md` — 내부 포트 8080 → 8000, `/actuator/health` → `/health`, `/actuator/prometheus` → `/metrics`, Flyway 미도입 언급 → Alembic + entrypoint 자동 마이그레이션, 스키마 변경 절차 `alembic revision/upgrade/downgrade` 기준으로 재작성, KRX_AUTH_KEY → KRX_ID/KRX_PW, §11 선택 시크릿(DART/OPENAI/KIS) 명시, AWS 이관 Secrets Manager 항목 확장
-  - `docs/migration/java-to-python-plan.md` 진척도 표 Phase 8/9 ✅ 마킹, 대상 저장소 표기 업데이트
+- **cleanup: mypy strict 0 · ruff 0 · frontend 타입 스키마 정합**(`51bfe10`, +332/-232): 백엔드 mypy 23→0, ruff 17→0. `pandas-stubs`/`types-python-dateutil` dev deps. StrEnum 4종 전환. Repository 공용 `rowcount_of()` 헬퍼. 외부 클라이언트 forward-ref 따옴표 제거(UP037). KIS/DART Any 반환 isinstance/cast 좁히기. market_data_job 파라미터 full 타입 힌트. 프론트 `signal.ts`/`SignalCard`/`page.tsx`/`stocks/[code]/page.tsx`/`backtest/page.tsx` snake_case 백엔드 응답과 정렬, `SignalDetail` + `detailNumber()` JSONB 안전 접근, `StockDetail` 가짜 `latestPrice/timeSeries` 구조 → 실제 `stock{}/prices[]` 로 정정, CountUp `queueMicrotask` 로 React 19 린트 해소.
+
+### Known Issues / Follow-up
+- `POST /api/reports/{stock_code}?force_refresh=true` 에 rate limiting 없음 — 관리자 키만으로 LLM 호출 폭주 가능. `slowapi` 도입 권고 (리뷰 LOW).
+- 실 E2E 검증 미완: `.env.prod` 의 실 DART/OpenAI/KIS 키로 브라우저에서 `/portfolio` → AI 리포트 생성까지 1회 검증 필요.
 
 ---
 
