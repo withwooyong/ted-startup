@@ -124,7 +124,8 @@ services:
     networks:
       - backend-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost/"]
+      # Caddy admin API(2019, 내부 전용)로 프로세스 활성 확인 — 인증서 검증 우회 불필요
+      test: ["CMD", "wget", "-qO-", "http://localhost:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3

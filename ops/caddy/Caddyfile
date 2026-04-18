@@ -21,11 +21,8 @@
 	tls {$ACME_EMAIL}
 
 	# Next.js 앞단: SSR + static + /api 라우팅 모두 frontend 가 처리
-	reverse_proxy frontend:3000 {
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-For {remote_host}
-		header_up X-Forwarded-Proto {scheme}
-	}
+	# X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host 는 Caddy 가 기본 부착
+	reverse_proxy frontend:3000
 
 	# 공통 보안 헤더 (모든 호스트)
 	header {
