@@ -1,5 +1,6 @@
 // 모든 포트폴리오 API 는 관리자 키 보호 — Next.js Route Handler 를 경유해
 // 서버 측에서 ADMIN_API_KEY 를 부착한다. 클라이언트 번들엔 키 없음.
+import { adminCall as call } from '@/lib/api/admin';
 import type {
   Account,
   AccountCreateRequest,
@@ -11,30 +12,6 @@ import type {
   Transaction,
   TransactionCreateRequest,
 } from '@/types/portfolio';
-
-const ADMIN_BASE = '/api/admin';
-
-async function call<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const res = await fetch(`${ADMIN_BASE}${path}`, {
-    ...init,
-    cache: 'no-store',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { message?: string; detail?: string };
-    const msg = body.message || body.detail || `API Error: ${res.status}`;
-    const err = new Error(msg) as Error & { status?: number };
-    err.status = res.status;
-    throw err;
-  }
-  return (await res.json()) as T;
-}
 
 export async function listAccounts(): Promise<Account[]> {
   return call<Account[]>('/portfolio/accounts');

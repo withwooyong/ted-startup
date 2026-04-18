@@ -24,37 +24,46 @@ export default function AlignmentPage({
   params: Promise<{ accountId: string }>;
 }) {
   const { accountId: raw } = use(params);
-  const accountId = Number(raw);
+  const parsedAccountId = Number(raw);
+  const isValidAccount = Number.isInteger(parsedAccountId) && parsedAccountId > 0;
   const [report, setReport] = useState<SignalAlignmentReport | null>(null);
   const [minScore, setMinScore] = useState(60);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [prevKey, setPrevKey] = useState(`${accountId}:${minScore}`);
+  const [loading, setLoading] = useState(isValidAccount);
+  const [error, setError] = useState<string | null>(
+    isValidAccount ? null : '유효하지 않은 계좌 ID 입니다',
+  );
 
-  const currentKey = `${accountId}:${minScore}`;
-  if (currentKey !== prevKey) {
+  // render-phase state reset — 의존성 변경 시 즉시 로딩 상태 진입.
+  const currentKey = `${parsedAccountId}:${minScore}`;
+  const [prevKey, setPrevKey] = useState(currentKey);
+  if (isValidAccount && currentKey !== prevKey) {
     setPrevKey(currentKey);
     setLoading(true);
     setError(null);
   }
 
   useEffect(() => {
+    if (!isValidAccount) return;
     let cancelled = false;
-    getSignalAlignment(accountId, { min_score: minScore })
+    getSignalAlignment(parsedAccountId, { min_score: minScore })
       .then(r => {
         if (cancelled) return;
         setReport(r);
-        setLoading(false);
       })
       .catch(err => {
         if (cancelled) return;
         setError((err as Error).message);
+      })
+      .finally(() => {
+        if (cancelled) return;
         setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [accountId, minScore]);
+  }, [parsedAccountId, minScore, isValidAccount]);
+
+  const accountId = parsedAccountId;
 
   return (
     <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7">

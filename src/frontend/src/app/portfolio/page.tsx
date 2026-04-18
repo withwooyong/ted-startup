@@ -89,9 +89,14 @@ export default function PortfolioPage() {
     };
   }, [selected]);
 
-  async function refreshCurrent() {
+  async function refreshCurrent(): Promise<void> {
     if (!selected) return;
-    const [h, p] = await Promise.all([listHoldings(selected.id), getPerformance(selected.id)]);
+    // 실패는 상위 핸들러에서 배너로 표시하도록 전파. 침묵 실패로 성공 배너와
+    // 실제 stale 데이터가 불일치하는 UX 문제를 차단.
+    const [h, p] = await Promise.all([
+      listHoldings(selected.id),
+      getPerformance(selected.id),
+    ]);
     setHoldings(h);
     setPerformance(p);
   }
@@ -106,7 +111,15 @@ export default function PortfolioPage() {
         kind: 'info',
         text: `스냅샷 저장 완료: 평가금액 ${formatNumber(snap.total_value)}원 · 미실현 ${formatNumber(snap.unrealized_pnl)}원`,
       });
-      await refreshCurrent();
+      try {
+        await refreshCurrent();
+      } catch (refreshErr) {
+        // 액션 자체는 성공했으나 재조회 실패 — 정확한 상태를 사용자에게 알림.
+        setBanner({
+          kind: 'error',
+          text: `스냅샷 저장 완료했지만 데이터 재조회 실패: ${(refreshErr as Error).message}`,
+        });
+      }
     } catch (err) {
       setBanner({ kind: 'error', text: `스냅샷 실패: ${(err as Error).message}` });
     } finally {
@@ -120,11 +133,16 @@ export default function PortfolioPage() {
     setBanner(null);
     try {
       const result = await syncFromKis(selected.id);
-      setBanner({
-        kind: 'info',
-        text: `KIS 동기화 완료: 신규 ${result.created_count} · 갱신 ${result.updated_count} · 그대로 ${result.unchanged_count}`,
-      });
-      await refreshCurrent();
+      const successMsg = `KIS 동기화 완료: 신규 ${result.created_count} · 갱신 ${result.updated_count} · 그대로 ${result.unchanged_count}`;
+      try {
+        await refreshCurrent();
+        setBanner({ kind: 'info', text: successMsg });
+      } catch (refreshErr) {
+        setBanner({
+          kind: 'error',
+          text: `${successMsg} — 단, 재조회 실패: ${(refreshErr as Error).message}`,
+        });
+      }
     } catch (err) {
       setBanner({ kind: 'error', text: `KIS 동기화 실패: ${(err as Error).message}` });
     } finally {

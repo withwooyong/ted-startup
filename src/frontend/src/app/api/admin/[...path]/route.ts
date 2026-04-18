@@ -9,6 +9,20 @@ const BACKEND_BASE = process.env.BACKEND_INTERNAL_URL || 'http://localhost:8000'
 // 요청 본문 크기 상한 — /api/admin/reports 같은 큰 페이로드는 없지만 DoS 방어.
 const MAX_BODY_BYTES = 64 * 1024;
 
+// 경로 세그먼트 allowlist. `..` 같은 트래버설을 차단해 /api/ 스코프 밖으로 못 나가게 한다.
+// undici/fetch 가 URL 해석 시 `..` 을 collapse 하면 BACKEND_INTERNAL_URL 루트에 도달할 수 있으므로
+// path.join 전에 각 세그먼트가 [a-zA-Z0-9_-] + dot 허용 범위인지 검증한다.
+const ALLOWED_SEGMENT = /^[A-Za-z0-9_\-.]+$/;
+
+function isSafePath(path: string[]): boolean {
+  if (path.length === 0) return false;
+  for (const seg of path) {
+    if (!seg || !ALLOWED_SEGMENT.test(seg)) return false;
+    if (seg === '.' || seg === '..') return false;
+  }
+  return true;
+}
+
 /**
  * 관리자 API Key를 서버 측에서만 보관하기 위한 제네릭 릴레이.
  *
@@ -31,6 +45,13 @@ async function relay(
   path: string[],
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
 ): Promise<NextResponse> {
+  if (!isSafePath(path)) {
+    return NextResponse.json(
+      { status: 400, message: '잘못된 경로 세그먼트' },
+      { status: 400 },
+    );
+  }
+
   const apiKey = process.env.ADMIN_API_KEY;
   if (!apiKey) {
     return NextResponse.json(

@@ -22,26 +22,47 @@ export default function ReportPage({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // refreshTick: 재생성 버튼 누를 때마다 증가 → useEffect 재실행 트리거.
+  const [refreshTick, setRefreshTick] = useState(0);
 
-  async function load(forceRefresh = false) {
-    setError(null);
-    if (forceRefresh) setRefreshing(true);
+  // render-phase state reset (React 공식 patterns: Storing information from previous renders).
+  // React 19 의 react-hooks/set-state-in-effect 룰을 피하면서 즉시 시각 피드백을 준다.
+  const currentKey = `${stockCode}:${refreshTick}`;
+  const [prevKey, setPrevKey] = useState(currentKey);
+  if (currentKey !== prevKey) {
+    setPrevKey(currentKey);
+    const force = refreshTick > 0;
+    if (force) setRefreshing(true);
     else setLoading(true);
-    try {
-      const r = await generateReport(stockCode, forceRefresh);
-      setReport(r);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+    setError(null);
   }
 
   useEffect(() => {
-    load(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stockCode]);
+    // cancelled 플래그: stockCode 빠르게 바뀔 때 stale 응답이 최신 상태 덮어쓰는 race 방어.
+    let cancelled = false;
+    const force = refreshTick > 0;
+    generateReport(stockCode, force)
+      .then(r => {
+        if (cancelled) return;
+        setReport(r);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setError((err as Error).message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+        setRefreshing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stockCode, refreshTick]);
+
+  function triggerRefresh() {
+    setRefreshTick(t => t + 1);
+  }
 
   return (
     <main className="max-w-4xl mx-auto px-4 sm:px-5 py-5 sm:py-7">
@@ -81,7 +102,7 @@ export default function ReportPage({
           </div>
           <button
             type="button"
-            onClick={() => load(true)}
+            onClick={triggerRefresh}
             disabled={loading || refreshing}
             className="px-4 py-2 rounded-lg text-[0.85rem] font-medium bg-[#6395FF] text-white hover:bg-[#7BA5FF] shadow-[0_2px_8px_rgba(99,149,255,0.3)] disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
           >
@@ -98,7 +119,7 @@ export default function ReportPage({
           <p className="text-sm text-[#FFB1BE]/80">{error}</p>
           <button
             type="button"
-            onClick={() => load(false)}
+            onClick={triggerRefresh}
             className="mt-4 px-3 py-1.5 rounded-lg text-xs bg-white/[0.04] border border-white/[0.06] text-[#E8ECF1]"
           >
             다시 시도
@@ -249,12 +270,28 @@ function PointsCard({
   );
 }
 
+// 프론트 defense-in-depth: 백엔드가 URL 스킴을 검증하지만, 만약 필터가 우회되어
+// javascript:/data:/file: 가 들어와도 브라우저에서 실행되지 않도록 href 를 무력화한다.
+// rel="noopener noreferrer" 는 opener 접근만 막을 뿐 javascript: 실행은 막지 못한다.
+function safeHref(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? url : '#';
+  } catch {
+    return '#';
+  }
+}
+
 function SourceRow({ source }: { source: ReportSourceItem }) {
+  const href = safeHref(source.url);
+  const unsafe = href === '#';
   return (
     <a
-      href={source.url}
-      target="_blank"
+      href={href}
+      target={unsafe ? undefined : '_blank'}
       rel="noopener noreferrer"
+      aria-label={`${source.label} (새 탭에서 열기)`}
+      aria-disabled={unsafe || undefined}
       className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors group"
     >
       <span
