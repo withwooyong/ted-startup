@@ -1,12 +1,12 @@
 # Session Handoff
 
-> Last updated: 2026-04-19 (KST, 낮 — β 시드 브라우저 확인 직후)
-> Branch: `master` (origin 대비 1 커밋 앞서 — 푸시 대기)
-> Latest commit: `a494863` — β: UI 회귀 검증용 stock + stock_price + portfolio_snapshot 시드
+> Last updated: 2026-04-19 (KST, 오후 — α 부분 성공 + KRX 어댑터 버그 수정 직후)
+> Branch: `master` (origin 대비 1 커밋 앞서 — 푸시 대기, 본 문서 커밋 포함 시 2)
+> Latest commit: `bb8d2f2` — fix(krx): fetch_stock_prices — pykrx 1.2.x 시가총액 충돌 + KOSDAQ 누락
 
 ## Current Status
 
-**UI 파생 지표(수익률/MDD)의 데이터 의존 블로커를 해소 완료.** 직전까지 `—` 로 표시되던 3M 수익률/MDD 카드가 **+5.31% / -10.23%** 로 실제 계산되어 렌더링됨을 실측 확인. 동일 세션에 E(KRX 교차 필터) 실측까지 병행해 DART 3,654 → KRX 교집합 2,538 건 축소도 검증. `.env.prod` 에 KRX 크리덴셜이 이미 존재함이 부수적으로 드러나, 차기 세션 이후 α(실 주가 데이터 복구) 경로가 곧바로 이어질 수 있음.
+**α(KRX 실데이터 배치) 를 "stock 마스터 코드·주가 레벨" 까지 실데이터로 복구.** 진행 중 발견한 pykrx 1.2.x 스키마 드리프트 2건(`시가총액` 컬럼 충돌·KOSDAQ 누락)을 어댑터 단에서 수정해 커밋. 배치 재실행 결과 `POST /api/batch/collect?date=2026-04-17` → HTTP 200, stocks/stock_prices 각 2,879건 upsert. 단 `stock_name` · `market_type` 은 pykrx OHLCV 응답에 포함되지 않아 2,874건이 공백/'KOSPI' 단일로 저장 — carry-over i 로 이관. β 재실행으로 5 핵심 종목 이름 긴급 복구해 UI 회귀 차단.
 
 ## Completed This Session (전 세션에서 이어지는 단일 세션 스트림)
 
@@ -19,9 +19,22 @@
 | 5 | P13-4 KRX 교차 필터 | `e6d79e6` | sync_dart_corp_mapping |
 | 6 | 운영 문서 현행화(2) | `85245c4` | HANDOFF, CHANGELOG |
 | 7 | β UI 회귀 검증 시드 | `a494863` | seed_ui_demo.py, 테스트 10건 |
+| 8 | 운영 문서 현행화(3) | `3c35295` | HANDOFF, CHANGELOG (β/Z 반영) |
+| 9 | α KRX 어댑터 버그 2건 수정 | `bb8d2f2` | krx_client.py, test_krx_client.py |
 
-**누적 규모(전체 세션)**: 7 커밋 / +1,500 라인 내외.
-**테스트**: 백엔드 **145/145 PASS** (기존 98 + 본 세션 신규 47). mypy strict 0, ruff 0 (신규 파일).
+**누적 규모(전체 세션)**: 9 커밋 / +1,600 라인 내외.
+**테스트**: 백엔드 **146/146 PASS** (기존 98 + 본 세션 신규 48). mypy strict 0, ruff 0 (신규 파일).
+
+### α 배치 실측 결과 (`POST /api/batch/collect?date=2026-04-17`)
+| 지표 | 값 | 비고 |
+|---|---|---|
+| `stocks_upserted` | 2,879 | KOSPI+KOSDAQ 합집합 |
+| `stock_prices_upserted` | 2,879 | 2026-04-17 종가 |
+| `short_selling_upserted` | 949 | KOSPI 만 (pykrx 제약) |
+| `lending_balance_upserted` | 0 | 기존 carry-over, fallback 동작 |
+| `elapsed_ms` | 5,302 | |
+| `stock_name` 채워진 건수 | 5 (β 복구) / 2,879 | **잔여 2,874건 공백 — carry-over i** |
+| `market_type` 고유 값 | `{KOSPI}` | **KOSDAQ 미매핑 — carry-over i** |
 
 ### 실측 스냅샷
 
@@ -41,14 +54,15 @@
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | **원격 푸시** | pending | `a494863` + 본 문서 업데이트 커밋 1건 |
-| 2 | **α: KRX 실데이터 복구** | 즉시 가능 | `.env.prod` 에 `KRX_ID=withwooyong` 이미 있음. 배치 스케줄러 또는 수동 `run/collect` 엔드포인트로 trigger |
-| 3 | **E2: DART 단축명 필터 보강** | 보류 | `맥쿼리인프라` 류가 통과되는 케이스. `"맥쿼리인프라"`, `"...스팩...호"` 패턴 정교화 |
-| 4 | **slowapi Redis 백엔드** | 보류 | multi-worker 확장 전까지 불필요 |
-| 5 | **force_refresh 조건부 rate limiting** | 보류 | 현재 엔드포인트 전체 30/min 으로 충분 |
-| 6 | **Frontend Playwright 회귀 테스트** | 보류 | UI 렌더링 실측은 했지만 자동화 없음 |
-| 7 | **`BrokerAdapter` Protocol 추출** | 보류 | 키움 합류 전까지 미필요 |
-| 8 | **Caddy unhealthy** | 관찰 | localhost self-signed 한정 |
+| 1 | **원격 푸시** | pending | `bb8d2f2` + 본 문서 커밋 2건 |
+| 2 | **i: stock_name·market_type 매핑 복구** | carry-over (α 잔여) | KOSPI/KOSDAQ 티커 리스트 별도 조회로 market_type 매핑 + `get_market_ticker_name` 루프 또는 batch API 로 이름 병합. 2,874건 영향. ~1시간 실행 예상(rate limit 영향) |
+| 3 | **E2: DART 단축명 필터 보강** | 보류 | `맥쿼리인프라` 류가 통과되는 케이스. 패턴 정교화 |
+| 4 | **과거 N일 주가 백필** | 보류 | 현재 2026-04-17 단일 날짜만 실데이터. 3M 범위 실데이터 지표를 보려면 과거 영업일 반복 collect 필요 |
+| 5 | **slowapi Redis 백엔드** | 보류 | multi-worker 확장 전까지 불필요 |
+| 6 | **force_refresh 조건부 rate limiting** | 보류 | 현재 엔드포인트 전체 30/min 으로 충분 |
+| 7 | **Frontend Playwright 회귀 테스트** | 보류 | UI 렌더링 실측은 했지만 자동화 없음 |
+| 8 | **`BrokerAdapter` Protocol 추출** | 보류 | 키움 합류 전까지 미필요 |
+| 9 | **Caddy unhealthy** | 관찰 | localhost self-signed 한정 |
 
 ## Key Decisions Made (본 세션 전체 누적)
 
@@ -69,11 +83,14 @@
 - `3e44ab6` AI 리포트 rate limiting
 - `e6d79e6` KRX 교차 필터
 - `a494863` UI 시드 (파생 지표 복구)
+- `bb8d2f2` KRX 어댑터 버그 2건(시가총액 충돌·KOSDAQ 누락)
 
 ### 본 세션 관찰(차후 개선)
 - **DART 단축명 매칭 누락** — 맥쿼리인프라(088980) 가 `"인프라투융자회사"` 패턴과 매칭 실패해 통과. 패턴 보강 필요(E2 작업).
 - **3M 기간의 기준 시점 불명확** — UI 가 `start=today-90일`로 호출하는지 확인 필요. β 시드 범위(2025-12-15~2026-04-17)가 UI 조회 범위와 일치해야 카드가 의미있는 값.
 - **허구 스냅샷 vs 실제 거래 이력 불일치** — β 는 현재 holdings 를 과거에도 유지했다고 가정. 실제 거래 replay 는 하지 않음. UI 검증 용도로만 허용.
+- **α 적재 이후 stock_name·market_type 대량 누락** — pykrx `get_market_ohlcv_by_ticker(market=ALL)` 반환 스키마 한계. 2,874건 공백. carry-over i 로 이관.
+- **과거 N일 백필 미수행** — 2026-04-17 단일 날짜만 실데이터. 3M 범위 실데이터를 보려면 영업일별 반복 collect 필요. 우선순위 낮음(β 시드로 회귀 차단 가능).
 
 ### Carry-over (부분 해소 또는 미해소)
 - **KRX 익명 차단** — α 가 즉시 가능함이 드러나 "실질 carry-over" 는 해소 임박. 실행 안 돼있을 뿐.

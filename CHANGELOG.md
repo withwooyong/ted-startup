@@ -7,6 +7,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-19 — 오후] α 부분 성공 + KRX 어댑터 버그 2건 긴급 수정 (`bb8d2f2`)
+
+α(KRX 실데이터 배치 실행 → stock 마스터 복구) 시도 중 pykrx 1.2.x 와 어댑터 간 스키마 드리프트 2건을 발견·수정. 배치 재실행으로 KOSPI+KOSDAQ stock 마스터 2,879건과 2026-04-17 주가를 실데이터로 적재. 단 `get_market_ohlcv_by_ticker(market=ALL)` 이 종목명·시장구분을 반환하지 않아 2,874건의 `stock_name` 이 공백·`market_type` 이 단일 'KOSPI' 로 저장되는 잔여 이슈 발생(carry-over i). β 재실행으로 5 핵심 종목 이름만 긴급 복구해 UI 회귀는 차단.
+
+### Fixed
+- **pykrx 1.2.x 시가총액 컬럼 충돌**(`bb8d2f2`): `fetch_stock_prices` 에서 `get_market_ohlcv_by_ticker` 가 이미 `시가총액` 컬럼을 반환하는 상황에서 `get_market_cap_by_ticker` 결과를 무조건 join 해 `pandas.merge` 가 `ValueError: columns overlap` 으로 실패. `ohlcv.columns` 에 `시가총액` 이 있으면 cap 조회 자체를 건너뛰도록 조건부 분기. HANDOFF carry-over "KRX pykrx 스키마 불일치" 의 일부.
+- **KOSDAQ 누락**(`bb8d2f2`): `get_market_ohlcv_by_ticker` 의 `market` 기본값 `"KOSPI"` 때문에 KOSDAQ/KONEX 가 통째로 빠져 `stocks_upserted` 가 949(KOSPI만)에 머물렀음. `market="ALL"` 명시로 2,879건으로 확대.
+
+### Verified (실측)
+- **배치 재실행 결과**: `POST /api/batch/collect?date=2026-04-17` HTTP 200. `stocks_upserted=2879 · stock_prices_upserted=2879 · short_selling_upserted=949 · lending_balance_upserted=0 · elapsed_ms=5302`.
+- **5 핵심 종목 이름 복구**: β 재실행으로 005930/000660/035420/035720/068270 의 `stock_name` 복구 확인. 나머지 2,874건은 공백 유지.
+- **신규 테스트 1건**: inline `시가총액` 케이스에서 `get_market_cap_by_ticker` 호출 0회 확인. KRX 테스트 4 → 5로 확장.
+
+### Known Issues (carry-over)
+- **i. stock_name·market_type 대량 누락** — `get_market_ohlcv_by_ticker(market=ALL)` 이 DataFrame 에 종목명/시장구분을 포함하지 않음. `get_market_ticker_list(market=KOSPI|KOSDAQ)` 로 시장별 티커 집합을 얻어 market_type 을 매핑하고, `get_market_ticker_name(ticker)` 루프 또는 batch API 로 이름을 병합해야 한다. 2,874건 영향. 별도 작업으로 이관.
+
+---
+
 ## [2026-04-19 — 낮] Z(E 실측) + β(UI 시드) 병렬 수행 — UI 파생 지표 복구 (`a494863`)
 
 직전 커밋에서 구현한 E(KRX 교차 필터)의 실측과, 데이터 부재로 `—` 를 표시하던 포트폴리오 UI 의 수익률/MDD 카드를 복구하기 위한 데모 시드를 병렬로 처리. backend 재빌드 → Z 실측 → β 스크립트 구현 → DB 적재 → 브라우저 확인까지 한 트랙에서 완결.
