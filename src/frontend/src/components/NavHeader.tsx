@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 
 const NAV_ITEMS = [
   { href: '/', label: '대시보드' },
+  { href: '/portfolio', label: '포트폴리오' },
   { href: '/backtest', label: '백테스트' },
   { href: '/settings', label: '설정' },
 ];
@@ -33,8 +34,13 @@ export default function NavHeader() {
 
   // exact match만 aria-current="page", sub-route 포함은 시각적 강조만
   const isExact = (href: string) => pathname === href;
-  const isRelated = (href: string) =>
-    href === '/' ? pathname === '/' || pathname.startsWith('/stocks') : pathname.startsWith(href);
+  const isRelated = (href: string) => {
+    if (href === '/') return pathname === '/' || pathname.startsWith('/stocks');
+    // '포트폴리오' 는 자식(/portfolio/[id]/alignment) 및 /reports(종목 상세 내 AI 리포트)도 커버.
+    if (href === '/portfolio')
+      return pathname.startsWith('/portfolio') || pathname.startsWith('/reports');
+    return pathname.startsWith(href);
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#0B0E11]/80 backdrop-blur">
