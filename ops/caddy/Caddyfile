@@ -27,15 +27,20 @@
 		header_up X-Forwarded-Proto {scheme}
 	}
 
-	# 보안 헤더
+	# 공통 보안 헤더 (모든 호스트)
 	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		# Caddy 기본 Server 헤더 제거
 		-Server
 	}
+
+	# HSTS 는 실도메인에만 적용한다.
+	# localhost 에 HSTS 를 걸면 브라우저가 1년간 HTTP 요청을 차단해
+	# 로컬 개발이 단절될 수 있다 (복구는 chrome://net-internals/#hsts 수동 삭제).
+	@publichost not host localhost
+	header @publichost Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	log {
 		output stdout
