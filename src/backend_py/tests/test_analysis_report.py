@@ -43,6 +43,7 @@ from app.application.port.out.llm_provider import (
     ReportSource,
     Tier1Payload,
     Tier2QualitativeItem,
+    is_safe_public_url,
 )
 from app.application.service.analysis_report_service import (
     AnalysisReportService,
@@ -222,15 +223,74 @@ async def test_openai_provider_analyze_parses_json_schema_output() -> None:
 @pytest.mark.asyncio
 async def test_openai_provider_raises_on_http_error() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="server error")
+        return httpx.Response(500, text="server error with secret-ish sk-FAKEPATTERN")
 
     transport = httpx.MockTransport(handler)
     async with OpenAIProvider(_openai_settings(), transport=transport) as provider:
-        with pytest.raises(OpenAIProviderError):
+        with pytest.raises(OpenAIProviderError) as exc_info:
             await provider.analyze(
                 tier1=Tier1Payload(stock_code="005930", stock_name="X", company=None),
                 tier2=[],
             )
+    # 응답 body 가 예외 메시지로 누설되면 안 됨 (외부 detail 에 흘러가지 않도록 상태코드만)
+    msg = str(exc_info.value)
+    assert "secret-ish" not in msg
+    assert "sk-FAKEPATTERN" not in msg
+    assert "500" in msg
+
+
+def test_is_safe_public_url_rejects_non_http_schemes() -> None:
+    assert is_safe_public_url("https://dart.fss.or.kr/x")
+    assert is_safe_public_url("http://krx.co.kr/y")
+    # 스킴 차단
+    assert not is_safe_public_url("javascript:alert(1)")
+    assert not is_safe_public_url("file:///etc/passwd")
+    assert not is_safe_public_url("ftp://example.com")
+    assert not is_safe_public_url("data:text/html,<script>alert(1)</script>")
+    # 빈 값·비문자열·스킴 누락
+    assert not is_safe_public_url("")
+    assert not is_safe_public_url("no-scheme-just-text")
+    assert not is_safe_public_url("https://")  # hostname 부재
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_filters_unsafe_source_urls() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        content = {
+            "summary": "요약",
+            "strengths": ["S"],
+            "risks": ["R"],
+            "outlook": "전망",
+            "opinion": "HOLD",
+            "disclaimer": DEFAULT_DISCLAIMER,
+            "sources": [
+                {"tier": 1, "type": "dart", "url": "https://dart.fss.or.kr/ok", "label": "공시"},
+                {"tier": 1, "type": "dart", "url": "javascript:alert(1)", "label": "악성"},
+                {"tier": 2, "type": "news", "url": "ftp://example.com/x", "label": "비허용 스킴"},
+            ],
+        }
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": json.dumps(content)}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+        })
+
+    transport = httpx.MockTransport(handler)
+    async with OpenAIProvider(_openai_settings(), transport=transport) as provider:
+        report = await provider.analyze(
+            tier1=Tier1Payload(stock_code="005930", stock_name="X", company=None),
+            tier2=[],
+        )
+    # javascript: / ftp: URL 은 버려지고 https 만 통과
+    assert [s.url for s in report.sources] == ["https://dart.fss.or.kr/ok"]
+
+
+def test_openai_provider_rejects_http_base_url() -> None:
+    # SSRF 방어: http://169.254.169.254 같은 메타데이터 엔드포인트 진입 차단
+    with pytest.raises(OpenAIProviderError):
+        OpenAIProvider(Settings(
+            openai_api_key="sk-x",
+            openai_base_url="http://169.254.169.254/latest",
+        ))
 
 
 @pytest.mark.asyncio

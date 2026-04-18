@@ -57,7 +57,10 @@ select = [
     "N",   # pep8-naming
     "SIM", # flake8-simplify
 ]
-ignore = ["E501"]  # line length handled by formatter
+ignore = [
+    "E501",  # line length handled by formatter
+    "B008",  # Depends()/Query()/Path() in argument defaults — FastAPI 의 공식 DI 패턴
+]
 
 [tool.ruff.format]
 quote-style = "double"

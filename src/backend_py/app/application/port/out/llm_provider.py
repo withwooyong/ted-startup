@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from typing import Any, Protocol
-
+from urllib.parse import urlparse
 
 # ---------- Tier 1 (공식 출처 원문) ----------
 
@@ -209,3 +209,20 @@ REPORT_JSON_SCHEMA: dict[str, Any] = {
 
 
 DEFAULT_DISCLAIMER = "본 리포트는 공시·시세 기반 자동 생성물로 투자 참고용이며, 투자 책임은 본인에게 있습니다."
+
+
+def is_safe_public_url(url: str) -> bool:
+    """http/https 스킴 + 유효한 hostname 만 통과. javascript:/ftp://file:/사설 IP
+    대역은 별도 필터링 단계에서 추가 가능하지만 여기서는 스킴 경계만 강제한다.
+
+    왜: LLM 응답 및 외부 API 가 돌려준 URL 을 그대로 DB/응답에 흘리면 프론트
+    렌더링 시 open-redirect·javascript: XSS·phishing 위험. 저장 전 이 함수로
+    1차 필터링.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.hostname)

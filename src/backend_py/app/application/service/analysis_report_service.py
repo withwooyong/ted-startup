@@ -40,12 +40,14 @@ from app.application.port.out.llm_provider import (
     DEFAULT_DISCLAIMER,
     GeneratedReport,
     LLMProvider,
+    ReportSource,
     Tier1CompanyInfo,
     Tier1DisclosureItem,
     Tier1FinancialItem,
     Tier1Payload,
     Tier1PricePoint,
     Tier1SignalItem,
+    is_safe_public_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -283,21 +285,28 @@ class AnalysisReportService:
 
     def _merge_tier1_sources(
         self, generated: GeneratedReport, tier1: Tier1Payload
-    ) -> list:
-        """모델이 빠뜨린 공식 링크를 Tier1 최상단 공시 / 기업홈 / DART 기업개황 순으로 보강."""
-        auto: list = []
+    ) -> list[ReportSource]:
+        """모델이 빠뜨린 공식 링크를 Tier1 최상단 공시 / 기업홈 순으로 보강.
+        저장 직전 is_safe_public_url 로 스킴 재검증해 javascript:/file: 등 차단.
+        """
+        auto: list[ReportSource] = []
         if tier1.company is not None and tier1.company.hm_url:
-            url = tier1.company.hm_url
-            if not url.startswith("http"):
-                url = f"http://{url}"
-            auto.append(_official_source(url, f"{tier1.company.corp_name} 공식 홈페이지"))
+            url = tier1.company.hm_url.strip()
+            # DART 기업개황 hm_url 은 종종 스킴이 생략된 "www.samsung.com" 형태 → https 우선 prepend.
+            if not url.startswith(("http://", "https://")):
+                url = f"https://{url}"
+            if is_safe_public_url(url):
+                auto.append(_official_source(url, f"{tier1.company.corp_name} 공식 홈페이지"))
         # 최근 공시 최대 3건
         for d in tier1.disclosures[:3]:
-            auto.append(_dart_source(d.viewer_url, f"{d.report_nm} ({d.rcept_dt})", d.rcept_dt))
-        # 기존 sources + 자동보강 합쳐 URL 중복 제거
+            if is_safe_public_url(d.viewer_url):
+                auto.append(_dart_source(d.viewer_url, f"{d.report_nm} ({d.rcept_dt})", d.rcept_dt))
+        # 기존 sources + 자동보강 합쳐 URL 중복 제거 + 스킴 최종 필터
         seen: set[str] = set()
-        merged: list = []
+        merged: list[ReportSource] = []
         for s in [*generated.sources, *auto]:
+            if not is_safe_public_url(s.url):
+                continue
             if s.url in seen:
                 continue
             seen.add(s.url)
@@ -319,11 +328,9 @@ class AnalysisReportService:
         )
 
 
-def _dart_source(url: str, label: str, published_at: str | None = None):
-    from app.application.port.out.llm_provider import ReportSource
+def _dart_source(url: str, label: str, published_at: str | None = None) -> ReportSource:
     return ReportSource(tier=1, type="dart", url=url, label=label, published_at=published_at)
 
 
-def _official_source(url: str, label: str):
-    from app.application.port.out.llm_provider import ReportSource
+def _official_source(url: str, label: str) -> ReportSource:
     return ReportSource(tier=1, type="official", url=url, label=label)
