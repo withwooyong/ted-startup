@@ -8,8 +8,9 @@
 #
 # 외부 → Caddy(:80/:443) → frontend(:3000) 단일 경로.
 # backend(:8000, FastAPI) 는 내부망 전용 — 브라우저는 frontend 의 proxy.ts / Route
-# Handler 를 통해서만 접근한다. 관측 목적의 /metrics 는 운영자가
-# `docker compose exec backend curl ...` 로 내부 접근한다.
+# Handler 를 통해서만 접근한다. 관측 목적의 /metrics 와 상세 헬스체크 /internal/*
+# 는 Caddy 에서 외부 접근을 원천 차단하며, 운영자는 Docker 네트워크 내부에서
+# `docker compose exec backend curl localhost:8000/metrics` 로 접근한다.
 ################################################################################
 
 {$DOMAIN} {
@@ -20,9 +21,20 @@
 	# - ACME_EMAIL=real@example.com  → Let's Encrypt 로 공식 발급
 	tls {$ACME_EMAIL}
 
+	# M1/M2 — 관측/진단 엔드포인트 외부 노출 차단. frontend 가 실수로 프록시하더라도
+	# Caddy 가 먼저 404 로 떨어뜨려 defense-in-depth 로 동작.
+	#   /metrics       : Prometheus 메트릭 (FastAPI Instrumentator)
+	#   /internal/*    : /internal/info 등 상세 헬스체크 (app/env 노출)
+	@blocked path /metrics /metrics/* /internal /internal/*
+	handle @blocked {
+		respond 404
+	}
+
 	# Next.js 앞단: SSR + static + /api 라우팅 모두 frontend 가 처리
 	# X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host 는 Caddy 가 기본 부착
-	reverse_proxy frontend:3000
+	handle {
+		reverse_proxy frontend:3000
+	}
 
 	# 공통 보안 헤더 (모든 호스트)
 	header {

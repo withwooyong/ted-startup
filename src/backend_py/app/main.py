@@ -59,8 +59,15 @@ def create_app() -> FastAPI:
 
     Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
+    # 외부 공개용 — 상태 코드만 반환. app/env 같은 런타임 메타는 노출하지 않는다.
+    # Caddyfile 은 /metrics 와 /internal/* 를 404 로 막으므로, 상세 진단은
+    # Docker 내부에서 `curl backend:8000/internal/info` 로 접근한다.
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:
+        return {"status": "UP"}
+
+    @app.get("/internal/info", tags=["meta"], include_in_schema=False)
+    def internal_info() -> dict[str, str]:
         return {"status": "UP", "app": settings.app_name, "env": settings.app_env}
 
     register_exception_handlers(app)

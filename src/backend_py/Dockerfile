@@ -6,7 +6,11 @@ ENV UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+# uv 바이너리는 digest 로 고정해 공급망 공격(태그 재지정) 방어.
+# 업그레이드 시 `docker buildx imagetools inspect ghcr.io/astral-sh/uv:<ver>` 로
+# Index digest 를 확인해 교체한다. 이 digest 는 multi-arch index 이므로 amd64/arm64
+# 모두 검증된 단일 매니페스트를 가리킨다.
+COPY --from=ghcr.io/astral-sh/uv:0.11@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -28,7 +32,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"
 
-RUN useradd --create-home --shell /bin/bash --uid 1001 appuser
+# 애플리케이션은 Python 만 실행. 인터랙티브 셸 진입 경로를 원천 차단하기 위해
+# 로그인 셸을 /usr/sbin/nologin 으로 설정. 컨테이너 내부 진단은
+# `docker compose exec -u root backend /bin/sh` 로 root 진입 후 수행.
+RUN useradd --create-home --shell /usr/sbin/nologin --uid 1001 appuser
 
 WORKDIR /app
 
