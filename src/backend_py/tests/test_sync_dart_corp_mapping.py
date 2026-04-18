@@ -12,6 +12,8 @@ from app.config.settings import Settings
 from scripts.sync_dart_corp_mapping import (
     CorpRow,
     extract_xml_from_zip,
+    fetch_krx_listed_codes,
+    filter_by_krx_listing,
     filter_listed_common_stocks,
     is_common_stock_code,
     is_excluded_by_name,
@@ -78,6 +80,62 @@ def test_is_excluded_by_name(corp_name: str, excluded: bool) -> None:
 # ---------------------------------------------------------------------------
 # filter_listed_common_stocks
 # ---------------------------------------------------------------------------
+
+
+def test_filter_by_krx_listing_keeps_intersection() -> None:
+    rows = [
+        CorpRow(corp_code="00126380", corp_name="삼성전자", stock_code="005930"),
+        CorpRow(corp_code="00164779", corp_name="SK하이닉스", stock_code="000660"),
+        CorpRow(corp_code="99999999", corp_name="상폐기업", stock_code="111110"),
+    ]
+    # 상폐기업은 KRX 현재 상장 리스트에 없음
+    krx_codes = {"005930", "000660", "035420"}
+    kept = filter_by_krx_listing(rows, krx_codes)
+    assert [r.stock_code for r in kept] == ["005930", "000660"]
+
+
+def test_filter_by_krx_listing_passes_through_on_empty_set() -> None:
+    """KRX 조회 실패(=빈 집합) 시 원본 그대로 fallback."""
+    rows = [
+        CorpRow(corp_code="00126380", corp_name="삼성전자", stock_code="005930"),
+        CorpRow(corp_code="99999999", corp_name="상폐기업", stock_code="111110"),
+    ]
+    kept = filter_by_krx_listing(rows, set())
+    assert len(kept) == 2
+
+
+def test_fetch_krx_listed_codes_returns_union_of_kospi_kosdaq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pykrx import stock as pykrx_stock
+
+    def fake_list(market: str) -> list[str]:
+        if market == "KOSPI":
+            return ["005930", "000660"]
+        if market == "KOSDAQ":
+            return ["035420", "251270"]
+        return []
+
+    monkeypatch.setattr(pykrx_stock, "get_market_ticker_list", fake_list)
+    codes = fetch_krx_listed_codes()
+    assert codes == {"005930", "000660", "035420", "251270"}
+
+
+def test_fetch_krx_listed_codes_returns_empty_on_exception(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """pykrx 가 KRX 익명 차단 등으로 실패하면 빈 집합 + 경고 메시지."""
+    from pykrx import stock as pykrx_stock
+
+    def broken(*_args: object, **_kwargs: object) -> list[str]:
+        raise RuntimeError("KRX anonymous access blocked")
+
+    monkeypatch.setattr(pykrx_stock, "get_market_ticker_list", broken)
+    codes = fetch_krx_listed_codes()
+    assert codes == set()
+    captured = capsys.readouterr()
+    assert "KRX 상장 리스트 조회 실패" in captured.err
+    assert "fallback" in captured.err
 
 
 def test_filter_listed_common_stocks_applies_both_rules() -> None:

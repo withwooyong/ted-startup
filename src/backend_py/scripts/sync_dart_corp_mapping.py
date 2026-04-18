@@ -8,17 +8,26 @@ KOSPI+KOSDAQ 보통주만 필터한 뒤 `dart_corp_mapping` 테이블에 upsert.
   1) stock_code 가 6자리 숫자이고 끝자리가 '0' → 보통주
      (우선주는 끝자리 5/7/9, KONEX 일부도 0 이 아님)
   2) corp_name 에 스팩/리츠/ETF/ETN/인프라투융자회사 키워드 없음
+  3) KRX 현재 상장 종목과 교차 (옵션, 기본 ON) — 과거 상장폐지 종목 배제
 
 ETF/ETN 은 펀드 상품이라 법인 등록이 없어 대부분 자연 제외되지만,
 corpCode.xml 에 예외적으로 노출되는 경우를 대비해 방어 필터 유지.
 리츠와 스팩은 법인으로 등록되므로 반드시 이름 기반 필터가 필요하다.
 
+DART corpCode.xml 은 상장폐지 이력도 stock_code 를 유지하므로(최초 실측에서
+전체 통과 3,654건 중 과거 폐지 종목 다수 관찰) pykrx 의 현재 상장 리스트와
+교차 필터링해 실사용 가치가 있는 종목만 남긴다. KRX 익명 차단 상황에서는
+경고 후 DART 필터 결과로 fallback.
+
 사용 예:
-  # 컨테이너 내부 (운영 환경과 동일)
+  # 컨테이너 내부 (운영 환경과 동일) — 기본 교차 필터 ON
   docker compose exec backend python -m scripts.sync_dart_corp_mapping
 
-  # 로컬 (dry-run 으로 DB 변경 없이 결과만 확인)
+  # dry-run 으로 필터 결과만 확인
   python -m scripts.sync_dart_corp_mapping --dry-run
+
+  # KRX 교차 필터 없이 DART 기준으로만 upsert
+  python -m scripts.sync_dart_corp_mapping --no-cross-filter-krx
 """
 from __future__ import annotations
 
@@ -128,12 +137,51 @@ def filter_listed_common_stocks(rows: Iterable[CorpRow]) -> list[CorpRow]:
     return kept
 
 
+def fetch_krx_listed_codes() -> set[str]:
+    """KOSPI + KOSDAQ 현재 상장 종목코드 집합.
+
+    pykrx 가 KRX 익명 차단(carry-over) 등으로 실패하면 빈 집합 반환.
+    호출부는 빈 집합이면 교차 필터 생략하고 DART 결과로 fallback 한다.
+    KONEX 는 거래량/유동성이 낮아 AI 리포트 대상에서 제외.
+    """
+    try:
+        from pykrx import stock as pykrx_stock
+        kospi = set(pykrx_stock.get_market_ticker_list(market="KOSPI"))
+        kosdaq = set(pykrx_stock.get_market_ticker_list(market="KOSDAQ"))
+        return kospi | kosdaq
+    except Exception as exc:  # pykrx 네트워크/인증 실패 전반
+        print(
+            f"[sync] WARN: KRX 상장 리스트 조회 실패 "
+            f"({exc.__class__.__name__}: {exc})",
+            file=sys.stderr,
+        )
+        print(
+            "[sync]        → KRX 교차 필터 생략, DART 필터 결과로 fallback",
+            file=sys.stderr,
+        )
+        return set()
+
+
+def filter_by_krx_listing(
+    rows: Iterable[CorpRow], krx_codes: set[str]
+) -> list[CorpRow]:
+    """KRX 현재 상장 리스트에 존재하는 종목만 통과. 빈 집합이면 전체 통과."""
+    if not krx_codes:
+        return list(rows)
+    return [r for r in rows if r.stock_code in krx_codes]
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
 
-async def run(*, dry_run: bool = False, batch_size: int = 500) -> int:
+async def run(
+    *,
+    dry_run: bool = False,
+    batch_size: int = 500,
+    cross_filter_krx: bool = True,
+) -> int:
     settings = get_settings()
     if not settings.dart_api_key:
         print("[sync] DART_API_KEY 미설정 — 중단", file=sys.stderr)
@@ -152,6 +200,26 @@ async def run(*, dry_run: bool = False, batch_size: int = 500) -> int:
     print(f"[sync] 전체 corpCode 항목    : {len(all_rows):,}", flush=True)
     print(f"[sync]   stock_code 보유    : {len(with_stock):,}", flush=True)
     print(f"[sync]   → 보통주·비펀드 통과: {len(kept):,}", flush=True)
+
+    if cross_filter_krx:
+        print("[sync] KRX 현재 상장 리스트 조회 중 (pykrx)...", flush=True)
+        krx_codes = fetch_krx_listed_codes()
+        if krx_codes:
+            print(
+                f"[sync]   KRX 상장 종목 수(KOSPI+KOSDAQ): {len(krx_codes):,}",
+                flush=True,
+            )
+            before = len(kept)
+            kept = filter_by_krx_listing(kept, krx_codes)
+            print(
+                f"[sync]   → KRX 교차 필터: {before:,} → {len(kept):,} 건",
+                flush=True,
+            )
+        else:
+            print(
+                "[sync]   (KRX 조회 실패 — 교차 필터 생략, DART 필터 결과 유지)",
+                flush=True,
+            )
 
     if dry_run:
         print("[sync] --dry-run 모드 — DB upsert 생략. 샘플 10건:", flush=True)
@@ -192,8 +260,18 @@ def main() -> None:
         "--batch-size", type=int, default=500,
         help="upsert 배치 크기 (기본 500)",
     )
+    parser.add_argument(
+        "--no-cross-filter-krx",
+        dest="cross_filter_krx", action="store_false",
+        help="KRX 현재 상장 리스트와의 교차 필터 비활성 (DART 기준만 사용)",
+    )
+    parser.set_defaults(cross_filter_krx=True)
     args = parser.parse_args()
-    rc = asyncio.run(run(dry_run=args.dry_run, batch_size=args.batch_size))
+    rc = asyncio.run(run(
+        dry_run=args.dry_run,
+        batch_size=args.batch_size,
+        cross_filter_krx=args.cross_filter_krx,
+    ))
     sys.exit(rc)
 
 
