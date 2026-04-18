@@ -33,6 +33,18 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=5)
     database_max_overflow: int = Field(default=10)
 
+    # ---- KRX (pykrx 로그인) ----
+    # 값이 비어 있으면 인증 필요 엔드포인트(공매도/대차잔고)는 실패함.
+    # 시가총액/OHLCV 류는 익명 접근 가능.
+    krx_id: str = Field(default="", description="data.krx.co.kr 회원 ID")
+    krx_pw: str = Field(default="", description="data.krx.co.kr 회원 비밀번호")
+    krx_request_interval_seconds: float = Field(default=2.0, description="KRX 요청 간 최소 간격(초)")
+
+    # ---- Telegram Bot ----
+    # 둘 중 하나라도 비어 있으면 TelegramClient 는 no-op 으로 동작.
+    telegram_bot_token: str = Field(default="", description="BotFather 발급 토큰")
+    telegram_chat_id: str = Field(default="", description="수신 채팅/채널 ID")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
