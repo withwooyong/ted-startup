@@ -190,7 +190,9 @@ REPORT_JSON_SCHEMA: dict[str, Any] = {
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["tier", "type", "url", "label"],
+                    # OpenAI strict mode 는 `required` 에 모든 properties 키를 포함해야 한다.
+                    # published_at 은 nullable 이지만 required 엔 들어가야 함 (type: [string, null]).
+                    "required": ["tier", "type", "url", "label", "published_at"],
                     "properties": {
                         "tier": {"type": "integer", "enum": [1, 2]},
                         "type": {
