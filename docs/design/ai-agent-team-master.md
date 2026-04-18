@@ -53,15 +53,22 @@
 ## 🎯 핵심 의사결정 요약
 
 ### 기술 스택 확정
+> **⚠ 2026-04 갱신**: Backend 스택을 **Spring Boot/Java → FastAPI/Python 3.12** 로 전환 완료 (Phase 1~9).
+> 전환 근거·매핑·단계별 작업은 `docs/migration/java-to-python-plan.md` 참조.
+> Part V(부록 I~L)의 Java 21 패턴/JPA 3단계 전략은 **역사적 기록**으로 보존하며, 본 프로젝트의 현재 백엔드 컨벤션은 아래 표 + `agents/08-backend/AGENT.md` 가 권위 있는 출처다.
+
 | 영역 | 선택 | 근거 |
 |------|------|------|
-| Backend | **Spring Boot 3.4 + Java 21** | 안정성, 생태계 성숙도, Virtual Threads |
+| Backend | **FastAPI + Python 3.12** (Hexagonal) | pandas/numpy/vectorbt 데이터 생태계, async 일급, Pydantic 타입 안전 |
+| ORM | **SQLAlchemy 2.0 async** (asyncpg) + **Alembic**(psycopg2) | 런타임/마이그레이션 드라이버 분리로 다중 statement 제약 회피 |
+| 수치/백테스트 | **pandas + vectorbt** | Java TreeMap 순회를 피벗 테이블 + shift(-N) 행렬 연산으로 대체 |
+| 배치 | **APScheduler** (AsyncIOScheduler) | Spring Batch 3-Step 대응. 복잡도 상승 시 Prefect 검토 |
+| 패키지 매니저 | **uv** | 설치/잠금/가상환경 단일 도구 |
 | Frontend | **Next.js 15 + TypeScript** | App Router, SSR, SEO |
 | DB | **PostgreSQL 16** | JSONB, 풀텍스트 검색, 생태계 |
-| 쿼리 | **Spring Data JPA 3단계 (QueryDSL 미사용)** | 1인 운영에서 설정 복잡도 회피 |
 | 컨텍스트 | **1M Token (Opus 4.7)** | Full Context + Selective Loading 하이브리드 |
 | 멀티에이전트 | **Agent Teams** (Build/Verify 단계) | 2.5주 → 1~1.5주 단축 |
-| 한국 특화 | **네이버(백엔드) + 토스(디자인) + 카카오(인증)** | 한국 생태계 표준 조합 |
+| 한국 특화 | **PEP 8 + ruff + mypy strict(백엔드)** + 토스(디자인) + 카카오(인증) | Python 생태계 표준 + 한국 디자인/인증 조합 |
 
 ### 플랫폼 개요
 ```
@@ -2364,7 +2371,7 @@ parallel_zones:
 
 ### 팀 구성
 Team Lead: Build Orchestrator (API 계약 조율 + 통합 검증)
-Teammate 1: Backend Engineer — Spring Boot + Java 21 백엔드 구현
+Teammate 1: Backend Engineer — FastAPI + Python 3.12 백엔드 구현 (SQLAlchemy 2.0 async · Alembic · APScheduler)
 Teammate 2: Frontend Engineer — Next.js 프론트엔드 구현
 Teammate 3: QA Engineer — 구현과 동시에 테스트 코드 작성 (TDD 지원)
 
@@ -2615,15 +2622,15 @@ docs,conventions}
 ✅ AI Agent Team Scaffolding 생성 완료!
 
 프로젝트: petcare-saas
-기술스택: Spring Boot + Java 21 / Next.js / PostgreSQL / AWS
-컨벤션: 네이버 Java 컨벤션
+기술스택: FastAPI + Python 3.12 / Next.js / PostgreSQL / AWS
+컨벤션: PEP 8 + ruff + mypy strict
 
 생성된 파일:
 ├── CLAUDE.md (글로벌 오케스트레이터)
 ├── agents/ (16개 에이전트 AGENT.md)
 ├── pipeline/ (프로토콜 + 상태관리)
 ├── .claude/commands/ (7개 슬래시 커맨드)
-└── conventions/ (네이버 Java 컨벤션 레퍼런스)
+└── conventions/ (PEP 8 + FastAPI 컨벤션 레퍼런스)
 
 총 72개 파일 생성
 
@@ -3200,10 +3207,13 @@ convention_config:
 
 ---
 
-# Part V. Java 21 & 쿼리 전략
+# Part V. Java 21 & 쿼리 전략 (⚠ 역사적 기록 — 2026-04 Python 전환 이후 비활성)
 
+> **상태**: 본 파트(부록 I~L)는 초기 Java/Spring Boot 선택 시점(2026-03)의 설계 판단을 보존한다.
+> 2026-04 **Java→Python 전면 이전**(`docs/migration/java-to-python-plan.md`) 이후 본 프로젝트의 백엔드는 **FastAPI + Python 3.12** 이며, Virtual Threads / Spring Data JPA / QueryDSL 섹션은 **현재 백엔드 구현과 무관**하다.
+> 현재 백엔드 컨벤션의 권위 있는 출처: 본 문서 상단 "기술 스택 확정" 표 + `agents/08-backend/AGENT.md` + `CLAUDE.md`.
 
-# 부록 I. Virtual Threads (Project Loom) 에이전트 규칙
+# 부록 I. Virtual Threads (Project Loom) 에이전트 규칙 (⚠ Java 21 전용, 비활성)
 
 ## 왜 Virtual Threads인가
 

@@ -14,7 +14,8 @@ updated: 2026-04-18
 - Compose 파일: `docker-compose.prod.yml` (repo 루트)
 - 환경변수: `.env.prod` (git 제외, 권한 600)
 - 외부 노출: `80/tcp`, `443/tcp`, `443/udp` (Caddy만 — HTTP/2 + HTTP/3)
-- 내부망 전용: backend:8080, frontend:3000, db:5432
+- 내부망 전용: backend:8000 (FastAPI/uvicorn), frontend:3000, db:5432
+- 스택: **FastAPI + Python 3.12 + SQLAlchemy 2.0 async + Alembic** (2026-04 Java→Python 이전 완료)
 
 ---
 
@@ -51,7 +52,13 @@ chmod 600 .env.prod          # 운영자만 읽기/쓰기
 - `POSTGRES_PASSWORD` — `openssl rand -base64 24`
 - `ADMIN_API_KEY` — `openssl rand -hex 32`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-- `KRX_AUTH_KEY`
+- `KRX_ID`, `KRX_PW` — 2026-04 KRX 전면 인증화 이후 필수 (익명 요청 거부)
+
+선택(§11 신규 도메인 착수 시):
+
+- `DART_API_KEY` — opendart.fss.or.kr 무료 발급 (Tier1 공식 재무 출처)
+- `OPENAI_API_KEY` — AI 분석 리포트 (gpt-5.4 mini/flagship/nano)
+- `KIS_APP_KEY_MOCK`, `KIS_APP_SECRET_MOCK`, `KIS_ACCOUNT_NO_MOCK` — 한국투자증권 모의투자 REST
 
 TLS / 도메인 설정 (Caddy):
 
@@ -87,16 +94,25 @@ docker compose -f docker-compose.prod.yml ps
 
 ### 2.4 DB 스키마 초기화 확인
 
-현재 Flyway 미도입 상태이므로, **Postgres 볼륨이 비어 있을 때만** `/docker-entrypoint-initdb.d/` 로 마운트된 V1/V2 SQL 이 자동 실행된다.
+**Alembic 기반**. 백엔드 컨테이너의 `scripts/entrypoint.py` 가 부팅 시 자동 판단:
+
+1. `alembic_version` 테이블 없음 + `stock` 테이블 있음 → `alembic stamp head` (레거시 Java 스키마에 메타 부착)
+2. 그 외 → `alembic upgrade head` (신규/누락 리비전 자동 적용)
+3. 이후 `os.execvp` 로 uvicorn 으로 PID 1 전환
 
 ```bash
+# 테이블 확인
 docker compose -f docker-compose.prod.yml exec db \
   psql -U signal -d signal_db -c "\dt"
+
+# Alembic 현재 리비전
+docker compose -f docker-compose.prod.yml exec backend \
+  alembic current
 ```
 
-주요 테이블(`short_interest_daily`, `signal`, `notification_preference` 등)이 보이면 정상.
+주요 테이블(`short_interest_daily`, `signal`, `notification_preference`, `alembic_version` 등)이 보이면 정상.
 
-> 이후 마이그레이션(V3+)은 자동 적용되지 않음 — 아래 "스키마 변경" 섹션 참조.
+> **이전 Flyway 미도입 상태는 해소됨** — 이후 리비전(V3+) 은 Alembic 이 자동 적용.
 
 ### 2.5 스모크 테스트
 
@@ -116,9 +132,9 @@ curl $CURL_OPTS "$BASE/" | head -c 200
 # 2) HTTP → HTTPS 자동 리다이렉트 확인 (Caddy 기본 동작)
 curl -sSI http://localhost/ | head -n 1   # HTTP/1.1 308 Permanent Redirect
 
-# 3) 백엔드 actuator/health (내부망 전용 — 컨테이너 내부에서)
+# 3) 백엔드 헬스체크 (내부망 전용 — 컨테이너 내부에서)
 docker compose -f docker-compose.prod.yml exec backend \
-  curl -fsS http://localhost:8080/actuator/health
+  python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
 
 # 4) 시그널 조회 API (HTTPS)
 curl $CURL_OPTS "$BASE/api/signals" | head -c 500
@@ -145,7 +161,7 @@ curl $CURL_OPTS -X PUT \
 
 # 7) Prometheus 메트릭 (내부망 전용, 운영자 접근)
 docker compose -f docker-compose.prod.yml exec backend \
-  curl -fsS http://localhost:8080/actuator/prometheus | head -n 30
+  python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/metrics').read().decode()[:3000])"
 ```
 
 모두 2xx 응답이면 배포 완료. TLS 경로 검증이 포함된 풀 스모크.
@@ -270,20 +286,30 @@ gunzip -c backups/signal_20260401.sql.gz | \
 
 ---
 
-## 7. 스키마 변경 (Flyway 미도입 상태)
+## 7. 스키마 변경 (Alembic)
 
-V2 이후 신규 마이그레이션 SQL 을 추가하려면:
+신규 리비전을 추가하려면:
 
-1. `src/backend/src/main/resources/db/migration/V3__<desc>.sql` 생성
-2. 배포 전 **백업 먼저** (위 6.1)
-3. 수동 적용:
+1. 로컬에서 리비전 생성:
    ```bash
-   docker compose -f docker-compose.prod.yml exec -T db \
-     psql -U signal -d signal_db < src/backend/src/main/resources/db/migration/V3__xxx.sql
+   cd src/backend_py
+   uv run alembic revision -m "add_<desc>"
+   # 또는 모델에서 자동 생성 (검토 후 사용)
+   uv run alembic revision --autogenerate -m "add_<desc>"
    ```
-4. 애플리케이션 재기동
+2. `src/backend_py/migrations/versions/<hash>_add_<desc>.py` 의 `upgrade()` / `downgrade()` 를 검토·편집
+3. 배포 전 **백업 먼저** (위 6.1)
+4. 코드 머지 후 재배포 — entrypoint 가 부팅 시 `alembic upgrade head` 자동 실행
 
-**Followup**: Flyway 도입 (`build.gradle` 에 `org.flywaydb:flyway-core` + `flyway-database-postgresql` 추가) → 부팅 시 자동 적용으로 전환.
+수동 적용이 필요하다면:
+```bash
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+```
+
+롤백:
+```bash
+docker compose -f docker-compose.prod.yml exec backend alembic downgrade -1
+```
 
 ---
 
@@ -303,18 +329,19 @@ V2 이후 신규 마이그레이션 SQL 을 추가하려면:
 
 ### 9.1 현재 (MVP)
 
-- `docker logs` 수동 확인
-- `/actuator/health` 엔드포인트 헬스체크
-- `/actuator/prometheus` 메트릭 노출 (내부망 — JVM/HTTP 요청/배치 메트릭)
+- `docker logs` 수동 확인 (structlog JSON 포맷)
+- `/health` 엔드포인트 헬스체크 (FastAPI)
+- `/metrics` 메트릭 노출 (내부망 — prometheus-fastapi-instrumentator, HTTP 요청/프로세스 메트릭)
 - Caddy `access log` stdout 출력 (TLS 연결, 4xx/5xx 카운트)
-- 장애 감지는 **텔레그램 알림 실패 시 운영자 직접 인지** (스케줄 작업이 조용히 죽을 경우 리스크)
+- 장애 감지는 **텔레그램 알림 실패 시 운영자 직접 인지** (APScheduler 잡이 조용히 죽을 경우 리스크)
 
 **Prometheus 메트릭 샘플 조회**:
 
 ```bash
 # 컨테이너 내부에서 직접 (운영자)
 docker compose -f docker-compose.prod.yml exec backend \
-  curl -fsS http://localhost:8080/actuator/prometheus | grep -E '^(jvm_memory|http_server_requests_seconds_count|spring_batch)'
+  python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/metrics').read().decode())" \
+  | grep -E '^(http_request_duration|http_requests_total|process_resident_memory)'
 ```
 
 ### 9.2 권장 보강 (v1.1)
@@ -343,9 +370,9 @@ docker compose -f docker-compose.prod.yml exec backend \
 
 1. **컨테이너 레지스트리** — ECR 생성 → CI 에 `aws ecr get-login-password` 스텝 추가, 이미지 푸시
 2. **DB** — Aurora PostgreSQL Serverless v2 (ACU 0.5~2) 로 마이그레이션, `pg_dump`/`pg_restore` 로 데이터 이관, Secrets Manager 에 접속정보 저장
-3. **컴퓨트** — ECS Fargate Service 2개 (backend/frontend), 각각 Target Group + ALB, 헬스체크는 기존 `/actuator/health`, `/` 그대로 사용
+3. **컴퓨트** — ECS Fargate Service 2개 (backend/frontend), 각각 Target Group + ALB, 헬스체크는 `/health`(FastAPI), `/` 그대로 사용
 4. **CDN & 엣지** — CloudFront → ALB + `public/` 정적 S3 오리진, 커스텀 도메인 + ACM 인증서
-5. **관측 & 시크릿** — CloudWatch Logs (retention 30d), CloudWatch Alarms (5xx/p99), Secrets Manager 로 `ADMIN_API_KEY`/`TELEGRAM_*`/`KRX_AUTH_KEY` 이관
+5. **관측 & 시크릿** — CloudWatch Logs (retention 30d, structlog JSON 파싱), CloudWatch Alarms (5xx/p99), Secrets Manager 로 `ADMIN_API_KEY`/`TELEGRAM_*`/`KRX_ID`/`KRX_PW`/`DART_API_KEY`/`OPENAI_API_KEY`/`KIS_*` 이관
 
 ---
 

@@ -5,6 +5,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- **Phase 8 — Java 스택 물리 제거** (본 세션): `src/backend/` 디렉토리 전량 삭제 (Spring Boot 3.5 + Java 21 + Gradle 설정 + 테스트 69개 포함). 이로써 2026-04 Java→Python big-bang 이전이 완결. 기능·테스트 공백 없음(Python 52/52 PASS 로 대체 검증 완료).
+
+### Changed
+- **Phase 9 — 문서·에이전트 갱신** (본 세션):
+  - `CLAUDE.md` Tech Stack 표 + Backend Conventions 섹션 Python(PEP 8 + ruff + mypy strict, Pydantic v2, SQLAlchemy 2.0 async, APScheduler) 기준으로 재작성. Key Design Decisions 도 asyncio / Pydantic / vectorbt / Alembic 기준으로 갱신
+  - `docs/design/ai-agent-team-master.md` "기술 스택 확정" 표를 FastAPI/Python 으로 갱신하고 전환 근거 박스 추가. Part V (부록 I~L, Java 21 Virtual Threads / JPA / QueryDSL) 헤더에 **역사적 기록 · 비활성** 배너 부착. Teammate 1 / scaffolding 출력 예시 Python 으로 치환
+  - `agents/08-backend/AGENT.md` 전면 재작성 — 페르소나·스택·컨벤션·쿼리 전략·리뷰 체크리스트 를 FastAPI + SQLAlchemy 2.0 async 기준으로 교체. `src/backend_py/app/` 디렉토리 트리 반영, `in` 예약어 회피(`adapter/web/`) 명시
+  - `pipeline/artifacts/10-deploy-log/runbook.md` — 내부 포트 8080 → 8000, `/actuator/health` → `/health`, `/actuator/prometheus` → `/metrics`, Flyway 미도입 언급 → Alembic + entrypoint 자동 마이그레이션, 스키마 변경 절차 `alembic revision/upgrade/downgrade` 기준으로 재작성, KRX_AUTH_KEY → KRX_ID/KRX_PW, §11 선택 시크릿(DART/OPENAI/KIS) 명시, AWS 이관 Secrets Manager 항목 확장
+  - `docs/migration/java-to-python-plan.md` 진척도 표 Phase 8/9 ✅ 마킹, 대상 저장소 표기 업데이트
+
+---
+
+## [2026-04-18 — 오후~저녁] Java→Python 전면 이전 Phase 1~7 일괄 완료 (`c417977` … `610918a`)
+
+본 세션의 주제: **Spring Boot 3.5 + Java 21** 백엔드를 **FastAPI + Python 3.12** 로 전면 이전.
+사전-운영 단계라는 결정적 이점으로 big-bang 재작성 경로를 선택. 18 영업일 추정 중 ~7일 분량을 진행.
+전체 52/52 PASS · 로컬 Docker 스모크 확인 · 커밋 13회 · 약 7,400+ 라인 신규.
+
+### Added
+- **작업계획서 확정**(`f66cfdd`): `docs/migration/java-to-python-plan.md` — 9 결정 잠금, §11 포트폴리오 + AI 분석 스코프, Perplexity+Claude Plan A / OpenAI GPT-5.4 단독 Plan B 구분, DART+KRX+ECOS Tier1 / web_search 화이트리스트 Tier2 신뢰 출처 3-Tier 설계. 루트 `.env.prod.example` DOMAIN/ACME_EMAIL/DART/OPENAI/KIS 변수 확장.
+- **환경변수 검증 스크립트**(`cb5bd24`): `scripts/validate_env.py` — `.env.prod` 의 DART/OpenAI/KIS 키를 API 실호출로 검증. 키 값 절대 로그에 노출되지 않도록 pykrx 내부 print 까지 `contextlib.redirect` 로 차폐.
+- **KRX 계정 유효성 검증 스크립트**(`127625d`): `scripts/validate_krx.py` — pykrx 로그인 + OHLCV·공매도·대차잔고 수신 실측.
+- **픽스처 베이스**(`cb5bd24`): `pipeline/artifacts/fixtures/` — `capture_krx.py` + 합성 JSON 3종 + Telegram 모의본 + KRX 익명 차단 블로커 문서.
+- **Phase 1 Python 백엔드 스캐폴딩**(`e669fed`): `src/backend_py/` Hexagonal 구조, uv + FastAPI + pydantic-settings + prometheus-fastapi-instrumentator + structlog + pytest + ruff + mypy strict, Dockerfile (python:3.12-slim 멀티스테이지 + 비루트 uid 1001). Health/CORS 테스트 6종.
+- **Phase 2 DB 계층**(`f00b2cf`): SQLAlchemy 2.0 async + asyncpg(런타임) + psycopg2(마이그레이션), Alembic V1/V2 리비전 이식, 모델 7종(Stock/StockPrice/ShortSelling/LendingBalance/Signal/BacktestResult/NotificationPreference) + Repository 7종, testcontainers PG16 통합 테스트 7종, macOS Docker Desktop 소켓 자동 감지.
+- **Phase 3 외부 어댑터**(`e9f3c75`): `KrxClient` (pykrx async 래퍼 + asyncio.Lock + 2초 rate limit + stdout 차폐 + tenacity 재시도), `TelegramClient` (httpx AsyncClient + HTML parse_mode + no-op fallback). 어댑터 테스트 8종.
+- **Phase 4 UseCase/서비스**(`3724d1e`): `MarketDataCollectionService`, `SignalDetectionService` (pandas rolling MA 벡터화), `BacktestEngineService` (피벗 테이블 + shift(-N) 벡터 리라이트 — Java TreeMap 순회를 행렬 1회 연산으로 대체), `NotificationService`. Port Protocol 정의. pandas/numpy/vectorbt 의존성 추가. 서비스 통합 테스트 5종.
+- **Phase 5 API 계층**(`31ea518`): `app/adapter/web/` — FastAPI 라우터 8개(GET `/api/signals`, GET `/api/stocks/{code}`, POST `/api/signals/detect`, GET·POST `/api/backtest`, GET·PUT `/api/notifications/preferences`, POST `/api/batch/collect`), Admin API Key `hmac.compare_digest` timing-safe 검증, RequestValidationError → 400 통일 응답. 라우터 통합 테스트 14종.
+- **Phase 6 배치**(`65b4bb6`): `app/batch/trading_day.py` (주말 제외), `market_data_job.py` (3-Step 오케스트레이션 — collect → detect → notify, 각 Step 독립 세션·트랜잭션), `scheduler.py` (AsyncIOScheduler CronTrigger mon-fri KST 06:00, max_instances=1, coalesce=True), FastAPI lifespan 연동. 배치 테스트 7종.
+- **Phase 7 컨테이너 전환**(`b5e3cc8`): `scripts/entrypoint.py` — alembic_version/stock 테이블 존재 여부로 `stamp head` vs `upgrade head` 분기 후 `os.execvp` 로 uvicorn 전환(PID 1 유지). E2E 플로우 테스트 2종(`/api/batch/collect` → `/api/signals/detect` → GET `/api/signals` 체인).
+
+### Changed
+- **운영 설정 소소한 정리**(`c417977`): `ops/caddy/Caddyfile` X-Forwarded-* header_up 중복 제거, `docker-compose.prod.yml` Caddy 헬스체크 `localhost:2019/config/` 로 단순화, `src/backend/src/main/resources/application.yml` management.endpoint.health.show-details 및 management.prometheus.* 중복 설정 제거.
+- **docker-compose.prod.yml Python 전환**(`b5e3cc8`): backend 서비스 build context `./src/backend` → `./src/backend_py`, 환경변수 Spring 계열 제거 + DATABASE_URL(asyncpg DSN) / KRX_ID/KRX_PW / DART/OPENAI/KIS / SCHEDULER_ENABLED=true 추가, healthcheck `/actuator/health` → `/health` 전환(curl 대신 python urllib), frontend BACKEND_INTERNAL_URL 포트 8080→8000, db initdb Java migration mount 제거(Alembic 전담), Caddyfile 주석 포트 8080→8000.
+- **CORS 보안 설계**(`e669fed` 이후 유지): 빈 화이트리스트면 미들웨어 미탑재, `"*"` + credentials 조합 코드상 차단.
+- **NotificationPreferenceRepository**(`31ea518`): `save()` 이후 `session.refresh()` 로 server_default `updated_at` 동기화 — Pydantic model_validate 중 MissingGreenlet 회피.
+- **app/adapter/in/web/** → **app/adapter/web/**(`31ea518`): Python 예약어 `in` 때문에 `from app.adapter.in.web...` 파싱 실패 → 경로 평탄화.
+
+### Fixed
+- **코드 리뷰 H1·M1·M4 (Phase 4 후)**(`bda6e42`): NotificationService N+1 쿼리 제거(`StockRepository.list_by_ids` IN 쿼리 1회), SignalDetectionService `_trend_reversal` 의 `is None` 죽은 조건 제거(pd.isna 일원화), Telegram 메시지에 `html.escape` 적용 + 영문 enum → 한글 라벨("대차잔고 급감"/"추세전환"/"숏스퀴즈"). 회귀 테스트 3종 추가.
+- **코드 리뷰 M1·M2·M3 (Phase 7 후)**(`610918a`): entrypoint uvicorn `--forwarded-allow-ips "*"` → Docker 사설 대역(127.0.0.1,10/8,172.16/12,192.168/16), `FORWARDED_ALLOW_IPS` env 로 오버라이드 가능. 스케줄러 `date.today()` → `datetime.now(KST).date()` 로 TZ 명시화. market_data_job 의 죽은 코드 `detected_signal_ids` 블록 삭제(DB 쿼리 1회 절감).
+
+### Known Issues (Carry-over)
+- **KRX 익명 접근 차단(2026-04 확인)**: `data.krx.co.kr` 가 익명 요청을 `HTTP 400 LOGOUT` 으로 거부. pykrx 도 `KRX_ID/KRX_PW` 요구로 전환 완료. 프로덕션 Java 배치가 수개월간 실제 데이터를 못 가져오고 있었음(DB 3개 테이블 0 rows 로 확인). 사용자가 회원가입 후 `.env.prod` 에 `KRX_ID/KRX_PW` 주입, `scripts/validate_krx.py` 로 OHLCV 2879종목 + 공매도 949종목 수신 확인. 대차잔고는 pykrx 스키마 불일치로 0 rows → Phase 3 어댑터에서 예외 격리 + fallback 경고 로그, 본격 복구는 후속 작업.
+- **Phase 8/9 미완**: `src/backend/` Java 스택 물리 제거, `docs/design/ai-agent-team-master.md` 기술스택 표, `CLAUDE.md` Backend Conventions, `agents/08-backend/AGENT.md`, `pipeline/artifacts/10-deploy-log/runbook.md` 갱신이 남아 있음.
+
 ---
 
 ## [2026-04-18 — 새벽] 로컬 Docker Desktop 첫 배포 스모크 테스트 + runbook 정정 + MCP lockdown (`4a9d448`, `a89c6fe`)

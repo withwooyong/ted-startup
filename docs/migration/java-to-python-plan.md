@@ -1,10 +1,27 @@
-# Java → Python 전환 작업계획서 (Draft)
+# Java → Python 전환 작업계획서
 
-- **문서 상태**: Decisions locked — 착수 대기
+- **문서 상태**: **Phase 1~9 완료 · §11(P10~P15) 대기** (최종 갱신 2026-04-18)
 - **작성일**: 2026-04-18
-- **대상 저장소**: `src/backend/` (Spring Boot 3.5.0 + Java 21)
-- **결정 필요 시점**: 구현 착수 전, 인간 승인 #2(설계) 단계에서 재승인
+- **대상 저장소**: `src/backend_py/` (FastAPI + Python 3.12). `src/backend/`(Spring Boot)는 Phase 8에서 물리 제거됨.
 - **운영 상태**: **사전-운영(pre-production)** — 실사용자 없음, 데이터 보존 의무 없음
+
+## 진척도
+
+| Phase | 내용 | 상태 | 커밋 |
+|-------|------|------|------|
+| 0 | 결정 잠금 | ✅ | `f66cfdd` |
+| 1 | 스캐폴딩(FastAPI + uv + Docker) | ✅ | `e669fed` |
+| 2 | DB 계층(SQLAlchemy 2.0 async + Alembic) | ✅ | `f00b2cf` |
+| 3 | 외부 어댑터(KrxClient + TelegramClient) | ✅ | `e9f3c75` |
+| 4 | UseCase/서비스(vectorbt + pandas 벡터화) | ✅ | `3724d1e`, `bda6e42` |
+| 5 | API 계층(FastAPI 라우터 8종 + Admin Key) | ✅ | `31ea518` |
+| 6 | 배치(APScheduler 일일 파이프라인) | ✅ | `65b4bb6`, `610918a` |
+| 7 | 컨테이너 전환(docker-compose.prod.yml) + E2E | ✅ | `b5e3cc8` |
+| 8 | Java 스택 물리 제거(`src/backend/` 전량 삭제) | ✅ | _본 세션_ |
+| 9 | 마스터 설계서·CLAUDE.md·AGENT.md·runbook 갱신 | ✅ | _본 세션_ |
+
+**테스트 누적**: 52/52 passed. 로컬 Docker 스모크(alembic migrate + /health + /api 응답) 검증 완료.
+**남은 스코프(§11)**: 포트폴리오(KIS 모의) + AI 분석 리포트(DART + OpenAI GPT-5.4). 이제 P10~P15로 진행 가능.
 
 ---
 

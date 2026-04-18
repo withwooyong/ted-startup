@@ -11,7 +11,7 @@ AI Agent Team Platform — Claude Code 기반 멀티에이전트 SDLC 자동화 
 
 - **Repository**: github.com/withwooyong/ted-startup
 - **기본 브랜치**: master
-- **현재 상태**: Phase 3 Build Sprint 3 완료 (백테스팅 엔진 + 텔레그램 + 통합 테스트)
+- **현재 상태**: Java→Python 전면 이전 완료 (Phase 1~9). FastAPI + SQLAlchemy 2.0 async 스택. §11 포트폴리오·AI 분석 리포트 도메인(P10~P15) 착수 대기.
 
 ## 핵심 참조 문서
 
@@ -42,12 +42,15 @@ AI Agent Team Platform — Claude Code 기반 멀티에이전트 SDLC 자동화 
 
 | 영역 | 선택 |
 |------|------|
-| Backend | Spring Boot 3.5.0 + Java 21 (Hexagonal Architecture) |
+| Backend | FastAPI + Python 3.12 (Hexagonal Architecture, `src/backend_py/`) |
+| ORM | SQLAlchemy 2.0 (async, asyncpg 런타임) + Alembic (psycopg2 마이그레이션) |
+| 수치/분석 | pandas, numpy, pandas-ta, vectorbt |
+| 배치 | APScheduler (AsyncIOScheduler + CronTrigger, KST 06:00 mon-fri) |
 | Frontend | Next.js 15 + TypeScript (App Router) |
 | DB | PostgreSQL 16 |
-| 쿼리 전략 | Spring Data JPA 3단계 (QueryDSL 미사용) |
-| 인증 | 카카오 OAuth 2.0 |
-| 컨벤션 | 네이버(백엔드) + 토스(디자인) + 카카오(인증) |
+| 인증 | 카카오 OAuth 2.0 + Admin API Key(`hmac.compare_digest`) |
+| 컨벤션 | PEP 8 + ruff + mypy strict (백엔드) + 토스(디자인) + 카카오(인증) |
+| 패키지 매니저 | uv |
 
 ## Pipeline (5 Phases)
 
@@ -85,9 +88,9 @@ Phase 5: Ship — devops → analytics
 - Phase 4: 소스코드 전체 원본 로드 (Full Context Mode)
 
 ### 코드 생성 전략 (128K Output)
-1. **Scaffolding Pass** (1회) — Entity, Repository, UseCase, DTO, Controller 스켈레톤 일괄 생성
-2. **Domain Pass** (도메인당 1회) — 비즈니스 로직 개별 구현
-3. **Integration Pass** (1회) — Security, 예외 핸들러, 통합 테스트, Docker
+1. **Scaffolding Pass** (1회) — SQLAlchemy 모델, Repository, UseCase Protocol, Pydantic DTO, FastAPI Router 스켈레톤 일괄 생성
+2. **Domain Pass** (도메인당 1회) — 비즈니스 로직 개별 구현 (pandas 벡터화 우선)
+3. **Integration Pass** (1회) — 인증 의존성, 예외 핸들러(RequestValidationError → 400), testcontainers 통합 테스트, Docker + entrypoint
 
 ## Quality Gates
 
@@ -98,21 +101,27 @@ Phase 5: Ship — devops → analytics
 
 ## Key Design Decisions
 
-- QueryDSL 미사용: 1인 운영에서 설정 복잡도 > 이점
-- Virtual Threads 활성화 (`spring.threads.virtual.enabled: true`)
-- synchronized 대신 ReentrantLock (Virtual Thread pinning 방지)
-- DTO는 Java record 클래스
-- 에러 타입은 sealed interface
+- Java→Python 전면 이전 (Phase 1~9 완료, 2026-04): 사전-운영 단계에서 big-bang 재작성 채택
+- 동시성: asyncio 일급 (Virtual Thread 개념 없음). CPU 바운드는 `run_in_executor` 로 분리
+- 상호배제: `asyncio.Lock` (KRX 2초 rate limit 직렬화)
+- DTO: Pydantic v2 `BaseModel` (Java record 대체)
+- 에러 타입: Python `Exception` 계층 + FastAPI Exception Handler
+- 백테스트: vectorbt + pandas 피벗 테이블 + shift(-N) 행렬 연산
+- Alembic 마이그레이션은 동기 psycopg2, 앱 런타임은 asyncpg (다중 statement 제약 회피)
 - MVP는 4~6주 내 런칭 가능한 범위로 제한
 - 앱은 v1에서 PWA로 대체 권장
 
-## Backend Conventions (네이버 캠퍼스 핵데이)
+## Backend Conventions (Python 3.12 + FastAPI)
 
-- 하드탭 4스페이스, 줄 너비 120자
-- null 반환 지양, Optional 활용
-- `@Transactional(readOnly = true)` 읽기 기본
-- Lombok: `@Getter`, `@Builder`, `@RequiredArgsConstructor` (Entity에 `@Setter` 금지)
-- JPA 쿼리 3단계: 메서드 이름 쿼리 → `@Query` JPQL → Native Query
+- PEP 8 준수, 4스페이스 들여쓰기, 줄 너비 120자
+- `ruff`(lint + format) + `mypy --strict` 적용
+- `None` 반환 지양, `Optional[T]` 또는 명시적 예외
+- DB 트랜잭션: `async with session.begin():` 컨텍스트 매니저, 읽기는 `session.execute(select(...))`
+- DTO/스키마: Pydantic v2 `BaseModel` (요청/응답 둘 다)
+- Repository: async 메서드, `session.refresh()` 로 server_default 동기화
+- 외부 I/O: httpx AsyncClient + tenacity 재시도 + 2초 rate limit (KRX)
+- 로깅: structlog JSON, 비밀키 값은 절대 로그에 노출 금지
+- 테스트: pytest + pytest-asyncio + testcontainers-python PG16
 
 ## Frontend Conventions (토스 + NHN)
 
