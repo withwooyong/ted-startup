@@ -8,6 +8,7 @@ from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.external import KisClient
 from app.adapter.out.persistence.repositories import (
     BrokerageAccountRepository,
     PortfolioHoldingRepository,
@@ -15,13 +16,14 @@ from app.adapter.out.persistence.repositories import (
     PortfolioTransactionRepository,
     StockRepository,
 )
-from app.adapter.web._deps import get_session, require_admin_key
+from app.adapter.web._deps import get_kis_client, get_session, require_admin_key
 from app.adapter.web._schemas import (
     AccountCreateRequest,
     AccountResponse,
     HoldingResponse,
     PerformanceResponse,
     SnapshotResponse,
+    SyncResponse,
     TransactionCreateRequest,
     TransactionResponse,
 )
@@ -36,7 +38,10 @@ from app.application.service.portfolio_service import (
     RecordTransactionUseCase,
     RegisterAccountUseCase,
     StockNotFoundError,
+    SyncError,
+    SyncPortfolioFromKisUseCase,
     TransactionRecord,
+    UnsupportedConnectionError,
 )
 
 router = APIRouter(
@@ -217,6 +222,32 @@ async def get_performance(
         account_id=account_id, start=start_d, end=end_d
     )
     return PerformanceResponse.model_validate(asdict(report))
+
+
+@router.post(
+    "/accounts/{account_id}/sync",
+    response_model=SyncResponse,
+)
+async def sync_from_kis(
+    account_id: int,
+    session: AsyncSession = Depends(get_session),
+    kis: KisClient = Depends(get_kis_client),
+) -> SyncResponse:
+    try:
+        result = await SyncPortfolioFromKisUseCase(session, kis_client=kis).execute(
+            account_id=account_id
+        )
+    except AccountNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnsupportedConnectionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except InvalidRealEnvironmentError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except SyncError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except PortfolioError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return SyncResponse.model_validate(asdict(result))
 
 
 @router.get(

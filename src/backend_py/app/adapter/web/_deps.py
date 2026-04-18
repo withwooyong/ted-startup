@@ -8,7 +8,7 @@ from functools import lru_cache
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.external import KrxClient, TelegramClient
+from app.adapter.out.external import KisClient, KrxClient, TelegramClient
 from app.adapter.out.persistence.session import get_sessionmaker
 from app.config.settings import Settings, get_settings
 
@@ -28,6 +28,19 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 @lru_cache(maxsize=1)
 def get_krx_client() -> KrxClient:
     return KrxClient()
+
+
+async def get_kis_client() -> AsyncIterator[KisClient]:
+    """요청 스코프 KIS 클라이언트 — httpx 커넥션 풀은 요청 종료 시 정리.
+
+    토큰 캐시는 인스턴스 단위라 요청마다 재발급되지만, /sync 가 저빈도 관리자
+    엔드포인트라 수용 가능. 고빈도화 시점에 프로세스 공유 인스턴스로 전환.
+    """
+    client = KisClient()
+    try:
+        yield client
+    finally:
+        await client.close()
 
 
 def get_telegram_client() -> TelegramClient:

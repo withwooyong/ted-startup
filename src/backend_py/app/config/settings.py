@@ -57,6 +57,20 @@ class Settings(BaseSettings):
     scheduler_hour_kst: int = Field(default=6, ge=0, le=23, description="일일 실행 시각(KST 24h)")
     scheduler_minute_kst: int = Field(default=0, ge=0, le=59)
 
+    # ---- KIS (한국투자증권) 모의투자 REST ----
+    # MVP 는 모의 전용. 실거래 URL/키는 코드 레벨에서 진입 차단.
+    kis_base_url_mock: str = Field(
+        default="https://openapivts.koreainvestment.com:29443",
+        description="KIS 모의투자 OpenAPI Base URL (실거래로 바꾸지 말 것)",
+    )
+    kis_app_key_mock: str = Field(default="", description="KIS 모의 APP Key")
+    kis_app_secret_mock: str = Field(default="", description="KIS 모의 APP Secret")
+    kis_account_no_mock: str = Field(
+        default="",
+        description="KIS 모의 계좌번호 — 10자리(CANO 8 + ACNT_PRDT_CD 2). 하이픈 허용",
+    )
+    kis_request_timeout_seconds: float = Field(default=15.0)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -11,6 +11,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.external import KisClient
 from app.adapter.out.persistence.models import (
     BrokerageAccount,
     PortfolioHolding,
@@ -26,6 +27,7 @@ from app.adapter.out.persistence.repositories import (
     StockPriceRepository,
     StockRepository,
 )
+from app.adapter.web._deps import get_kis_client as prod_get_kis_client
 from app.adapter.web._deps import get_session as prod_get_session
 from app.application.service.portfolio_service import (
     AccountAliasConflictError,
@@ -35,9 +37,11 @@ from app.application.service.portfolio_service import (
     InvalidRealEnvironmentError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
+    SyncPortfolioFromKisUseCase,
     TransactionRecord,
+    UnsupportedConnectionError,
 )
-from app.config.settings import get_settings
+from app.config.settings import Settings, get_settings
 from app.main import create_app
 
 
@@ -367,3 +371,172 @@ async def test_transaction_with_unknown_stock_returns_404(
         },
     )
     assert resp.status_code == 404
+
+
+# -----------------------------------------------------------------------------
+# P11 — KIS 모의 동기화
+# -----------------------------------------------------------------------------
+
+
+def _kis_settings() -> Settings:
+    return Settings(
+        kis_app_key_mock="MOCK-KEY",
+        kis_app_secret_mock="MOCK-SECRET",
+        kis_account_no_mock="12345678-01",
+    )
+
+
+def _build_mock_kis_client(rows: list[dict[str, object]]) -> KisClient:
+    """고정 응답을 내보내는 KIS 클라이언트 — httpx MockTransport 주입."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(
+                200, json={"access_token": "FAKE", "expires_in": 86400}
+            )
+        if request.url.path.endswith("/inquire-balance"):
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "OK",
+                    "output1": rows,
+                    "output2": [],
+                },
+            )
+        return httpx.Response(500)
+
+    transport = httpx.MockTransport(handler)
+    return KisClient(_kis_settings(), transport=transport)
+
+
+@pytest.mark.asyncio
+async def test_sync_from_kis_creates_holdings_and_upserts_stock(
+    session: AsyncSession,
+) -> None:
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="kis-main",
+        broker_code="kis",
+        connection_type="kis_rest_mock",
+    )
+    kis = _build_mock_kis_client([
+        {
+            "pdno": "005930",
+            "prdt_name": "삼성전자",
+            "hldg_qty": "10",
+            "pchs_avg_pric": "70000",
+        },
+        {
+            "pdno": "000660",
+            "prdt_name": "SK하이닉스",
+            "hldg_qty": "3",
+            "pchs_avg_pric": "215000",
+        },
+    ])
+
+    async with kis as client:
+        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
+            account_id=account.id
+        )
+
+    assert result.fetched_count == 2
+    assert result.created_count == 2
+    assert result.updated_count == 0
+    assert result.stock_created_count == 2
+
+    holdings = await PortfolioHoldingRepository(session).list_by_account(account.id)
+    assert {h.quantity for h in holdings} == {10, 3}
+
+
+@pytest.mark.asyncio
+async def test_sync_from_kis_updates_existing_holding(session: AsyncSession) -> None:
+    stocks = await _seed_stocks(session)
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="kis-upd",
+        broker_code="kis",
+        connection_type="kis_rest_mock",
+    )
+    # 수동으로 먼저 등록된 보유 (수량 5, 평단 65000)
+    await RecordTransactionUseCase(session).execute(TransactionRecord(
+        account_id=account.id, stock_id=stocks["samsung"].id,
+        transaction_type="BUY", quantity=5, price=Decimal("65000"),
+        executed_at=date(2026, 3, 1), source="manual",
+    ))
+
+    # KIS 에서는 수량 10, 평단가 70000 으로 반환
+    kis = _build_mock_kis_client([
+        {
+            "pdno": "005930",
+            "prdt_name": "삼성전자",
+            "hldg_qty": "10",
+            "pchs_avg_pric": "70000",
+        },
+    ])
+    async with kis as client:
+        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
+            account_id=account.id
+        )
+    assert result.updated_count == 1
+    assert result.created_count == 0
+
+    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(
+        account.id, stocks["samsung"].id
+    )
+    assert holding.quantity == 10
+    assert holding.avg_buy_price == Decimal("70000.00")
+
+
+@pytest.mark.asyncio
+async def test_sync_rejects_manual_connection_type(session: AsyncSession) -> None:
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="manual-only",
+        broker_code="manual",
+        connection_type="manual",
+    )
+    kis = _build_mock_kis_client([])
+    async with kis as client:
+        with pytest.raises(UnsupportedConnectionError):
+            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
+                account_id=account.id
+            )
+
+
+@pytest.mark.asyncio
+async def test_sync_endpoint_returns_summary(
+    app_with_session: FastAPI, session: AsyncSession
+) -> None:
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="kis-http",
+        broker_code="kis",
+        connection_type="kis_rest_mock",
+    )
+
+    async def _kis_override():
+        kis = _build_mock_kis_client([
+            {
+                "pdno": "005930",
+                "prdt_name": "삼성전자",
+                "hldg_qty": "7",
+                "pchs_avg_pric": "68000",
+            },
+        ])
+        try:
+            yield kis
+        finally:
+            await kis.close()
+
+    app_with_session.dependency_overrides[prod_get_kis_client] = _kis_override
+
+    transport = httpx.ASGITransport(app=app_with_session)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"X-API-Key": "test-admin-key"},
+    ) as c:
+        resp = await c.post(f"/api/portfolio/accounts/{account.id}/sync")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["account_id"] == account.id
+    assert body["connection_type"] == "kis_rest_mock"
+    assert body["fetched_count"] == 1
+    assert body["created_count"] == 1

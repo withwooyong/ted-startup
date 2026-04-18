@@ -178,3 +178,13 @@ class PerformanceResponse(BaseModel):
     sharpe_ratio: Decimal | None = None
     first_value: Decimal | None = None
     last_value: Decimal | None = None
+
+
+class SyncResponse(BaseModel):
+    account_id: int
+    connection_type: str
+    fetched_count: int
+    created_count: int
+    updated_count: int
+    unchanged_count: int
+    stock_created_count: int

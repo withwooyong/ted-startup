@@ -18,11 +18,13 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.external import KisClient, KisClientError
 from app.adapter.out.persistence.models import (
     BrokerageAccount,
     PortfolioHolding,
     PortfolioSnapshot,
     PortfolioTransaction,
+    Stock,
 )
 from app.adapter.out.persistence.models.portfolio import (
     VALID_BROKER_CODES,
@@ -69,6 +71,14 @@ class InvalidRealEnvironmentError(PortfolioError):
     """MVP: environment='real' 진입 차단."""
 
 
+class UnsupportedConnectionError(PortfolioError):
+    """연결방식이 동기화를 지원하지 않을 때."""
+
+
+class SyncError(PortfolioError):
+    """외부 API 동기화 중 오류(업스트림 장애 포함)."""
+
+
 # ---------- DTOs ----------
 
 
@@ -106,6 +116,17 @@ class PerformanceReport:
     sharpe_ratio: Decimal | None
     first_value: Decimal | None
     last_value: Decimal | None
+
+
+@dataclass(slots=True)
+class SyncResult:
+    account_id: int
+    connection_type: str
+    fetched_count: int  # KIS 응답 보유 종목 수
+    created_count: int  # 새로 보유로 추가된 종목 수
+    updated_count: int  # 기존 보유 수량/평단가 갱신된 종목 수
+    unchanged_count: int  # 변경 없음
+    stock_created_count: int  # 신규 stock 마스터 upsert 수
 
 
 # ---------- UseCases ----------
@@ -371,4 +392,95 @@ class ComputePerformanceUseCase:
             sharpe_ratio=_q(float(sharpe) if sharpe is not None else None),
             first_value=Decimal(str(first)),
             last_value=Decimal(str(last)),
+        )
+
+
+class SyncPortfolioFromKisUseCase:
+    """KIS 모의 잔고 → portfolio_holding 직접 동기화.
+
+    - connection_type='kis_rest_mock' 계좌만 허용
+    - KIS 잔고 응답은 종목별 (수량, 평단가) 스냅샷 → 거래 이력 재구성 불가
+    - 따라서 holding 을 직접 upsert: 수량/평단가를 KIS 값으로 덮어쓰기
+    - 신규 종목은 stock 마스터에 `manual` market_type 으로 등록 (실제 시장 구분은
+      P13 DART 또는 후속 보강)
+    """
+
+    DEFAULT_MARKET_TYPE = "KOSPI"  # KIS 는 시장구분을 반환하지 않음 — 기본값
+
+    def __init__(self, session: AsyncSession, *, kis_client: KisClient) -> None:
+        self._session = session
+        self._kis = kis_client
+        self._account_repo = BrokerageAccountRepository(session)
+        self._holding_repo = PortfolioHoldingRepository(session)
+        self._stock_repo = StockRepository(session)
+
+    async def execute(self, *, account_id: int, asof: date | None = None) -> SyncResult:
+        account = await self._account_repo.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(f"account_id={account_id} 없음")
+        if account.connection_type != "kis_rest_mock":
+            raise UnsupportedConnectionError(
+                f"connection_type={account.connection_type} 는 동기화 비지원"
+            )
+        if account.environment != "mock":
+            raise InvalidRealEnvironmentError("모의 계좌만 동기화 허용")
+
+        try:
+            rows = await self._kis.fetch_balance()
+        except KisClientError as exc:
+            raise SyncError(f"KIS 잔고 조회 실패: {exc}") from exc
+
+        today = asof or date.today()
+        created = 0
+        updated = 0
+        unchanged = 0
+        stock_created = 0
+
+        for row in rows:
+            if not row.stock_code:
+                continue
+            stock = await self._stock_repo.find_by_code(row.stock_code)
+            if stock is None:
+                stock = await self._stock_repo.upsert_by_code(
+                    stock_code=row.stock_code,
+                    stock_name=row.stock_name or row.stock_code,
+                    market_type=self.DEFAULT_MARKET_TYPE,
+                )
+                stock_created += 1
+
+            holding = await self._holding_repo.find_by_account_and_stock(
+                account_id, stock.id
+            )
+            if holding is None:
+                holding = PortfolioHolding(
+                    account_id=account_id,
+                    stock_id=stock.id,
+                    quantity=row.quantity,
+                    avg_buy_price=row.avg_buy_price,
+                    first_bought_at=today,
+                    last_transacted_at=today,
+                )
+                await self._holding_repo.upsert(holding)
+                created += 1
+                continue
+
+            qty_changed = holding.quantity != row.quantity
+            price_changed = holding.avg_buy_price != row.avg_buy_price
+            if not (qty_changed or price_changed):
+                unchanged += 1
+                continue
+            holding.quantity = row.quantity
+            holding.avg_buy_price = row.avg_buy_price
+            holding.last_transacted_at = today
+            await self._holding_repo.upsert(holding)
+            updated += 1
+
+        return SyncResult(
+            account_id=account_id,
+            connection_type=account.connection_type,
+            fetched_count=len(rows),
+            created_count=created,
+            updated_count=updated,
+            unchanged_count=unchanged,
+            stock_created_count=stock_created,
         )
