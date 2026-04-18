@@ -72,16 +72,20 @@ class KrxClient:
     # ------------------------------------------------------------------
 
     async def fetch_stock_prices(self, trading_date: date) -> list[StockPriceRow]:
-        """전 종목 OHLCV + 시가총액을 합쳐 반환.
+        """전 종목 OHLCV + 시가총액 + market_type 을 합쳐 반환.
 
         pykrx 1.2.x 부터 `get_market_ohlcv_by_ticker` 가 '시가총액' 을 직접 반환하므로,
         `get_market_cap_by_ticker` 로 별도 조회할 필요는 없다. 구버전 호환을 위해
         ohlcv 에 컬럼이 없을 때만 cap 조회로 보강.
+
+        `get_market_ohlcv_by_ticker(market="ALL")` 는 시장구분 컬럼을 반환하지 않으므로,
+        KOSPI/KOSDAQ 티커 리스트를 별도 조회해 market_type 을 매핑한다. 이 맵에 없는
+        티커(KONEX 등)는 fallback 'KOSPI'.
+
+        pykrx 는 종목명 배치 조회 API 를 제공하지 않는다. `stock_name` 은 row 에 컬럼이
+        있으면 사용하고 없으면 빈 문자열로 남겨 Repository 가 기존값을 보존하게 한다.
         """
         date_str = trading_date.strftime("%Y%m%d")
-        # market="ALL" 은 KOSPI+KOSDAQ+KONEX 합집합을 한 번에 반환한다. 기본값은 "KOSPI"
-        # 이라 생략하면 KOSDAQ 누락. 시장구분 컬럼이 자동으로 채워져 _to_stock_price_row
-        # 의 market_type 매핑이 그대로 동작.
         ohlcv = await self._call_pykrx("get_market_ohlcv_by_ticker", date_str, market="ALL")
         if ohlcv is None or ohlcv.empty:
             return []
@@ -91,8 +95,47 @@ class KrxClient:
             )
             if cap is not None and not cap.empty and "시가총액" in cap.columns:
                 ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
-        # pandas Index 는 Hashable — pykrx 는 항상 종목코드 str 이지만 정적으로는 narrow.
-        return [self._to_stock_price_row(str(code), row) for code, row in ohlcv.iterrows()]
+
+        market_map = await self._build_market_type_map(date_str)
+
+        return [
+            self._to_stock_price_row(str(code), row, market_map.get(str(code), "KOSPI"))
+            for code, row in ohlcv.iterrows()
+        ]
+
+    async def _build_market_type_map(self, date_str: str) -> dict[str, str]:
+        """시장별 티커 리스트로 market_type 매핑 딕셔너리 구성.
+
+        KOSPI/KOSDAQ 각 1회씩 호출 (총 2회, rate limit 2초 간격).
+        """
+        kospi = await self._call_pykrx_tickers(date_str, "KOSPI")
+        kosdaq = await self._call_pykrx_tickers(date_str, "KOSDAQ")
+        mapping: dict[str, str] = {}
+        for t in kospi:
+            mapping[t] = "KOSPI"
+        for t in kosdaq:
+            mapping[t] = "KOSDAQ"
+        return mapping
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
+    )
+    async def _call_pykrx_tickers(self, date_str: str, market: str) -> list[str]:
+        """pykrx.stock.get_market_ticker_list 래퍼 — list 반환 타입 전용."""
+        async with self._lock:
+            await self._throttle()
+            return await asyncio.to_thread(self._invoke_ticker_list, date_str, market)
+
+    @staticmethod
+    def _invoke_ticker_list(date_str: str, market: str) -> list[str]:
+        from pykrx import stock
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            result = stock.get_market_ticker_list(date_str, market=market)
+            return [str(t) for t in (result or [])]
 
     async def fetch_short_selling(self, trading_date: date) -> list[ShortSellingRow]:
         """전 종목 공매도 거래 현황."""
@@ -153,11 +196,11 @@ class KrxClient:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_stock_price_row(code: str, row: Any) -> StockPriceRow:
+    def _to_stock_price_row(code: str, row: Any, market_type: str) -> StockPriceRow:
         return StockPriceRow(
             stock_code=str(code),
             stock_name=str(row.get("종목명", "")),
-            market_type=str(row.get("시장구분", "KOSPI")),
+            market_type=market_type,
             close_price=_int(row.get("종가")),
             open_price=_int(row.get("시가")),
             high_price=_int(row.get("고가")),

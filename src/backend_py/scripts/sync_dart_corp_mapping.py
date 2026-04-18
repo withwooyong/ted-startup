@@ -66,6 +66,15 @@ EXCLUDED_NAME_PATTERNS: tuple[str, ...] = (
     "상장지수",
 )
 
+# DART 가 일부 공모 인프라펀드를 단축명으로 저장하는 케이스 대응.
+# 예) 정식명 "맥쿼리한국인프라투융자회사" → DART corp_name = "맥쿼리인프라"
+# 이름 기반 패턴만으론 매칭 실패 → 명시적 stock_code 블랙리스트로 보완.
+# "인프라" 를 이름 패턴에 추가하면 "현대인프라코어" 등 일반 기업도 오탐되므로 지양.
+EXCLUDED_STOCK_CODES: frozenset[str] = frozenset({
+    "088980",  # 맥쿼리한국인프라투융자회사 (DART: "맥쿼리인프라")
+    "423310",  # KB발해인프라투융자회사
+})
+
 
 def is_common_stock_code(stock_code: str) -> bool:
     """6자리 숫자이고 끝자리가 '0' 이면 보통주."""
@@ -82,6 +91,11 @@ def is_excluded_by_name(corp_name: str) -> bool:
     if not name:
         return True
     return any(pat in name for pat in EXCLUDED_NAME_PATTERNS)
+
+
+def is_excluded_by_code(stock_code: str) -> bool:
+    """명시적 제외 종목 코드 (DART 단축명 매칭 실패 보완)."""
+    return stock_code in EXCLUDED_STOCK_CODES
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +146,8 @@ def filter_listed_common_stocks(rows: Iterable[CorpRow]) -> list[CorpRow]:
         if not is_common_stock_code(r.stock_code):
             continue
         if is_excluded_by_name(r.corp_name):
+            continue
+        if is_excluded_by_code(r.stock_code):
             continue
         kept.append(r)
     return kept

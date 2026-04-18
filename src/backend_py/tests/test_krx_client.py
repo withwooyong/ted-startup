@@ -54,12 +54,25 @@ def _fake_short() -> pd.DataFrame:
     )
 
 
+def _fake_ticker_list(market: str) -> list[str]:
+    # 기본값: 005930 KOSPI / 247540 KOSDAQ / 000660 KOSPI
+    if market == "KOSPI":
+        return ["005930", "000660"]
+    if market == "KOSDAQ":
+        return ["247540"]
+    return []
+
+
 @pytest.mark.asyncio
 async def test_fetch_stock_prices_joins_ohlcv_and_market_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     from pykrx import stock as pykrx_stock
 
     monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: _fake_ohlcv())
     monkeypatch.setattr(pykrx_stock, "get_market_cap_by_ticker", lambda *a, **k: _fake_cap())
+    monkeypatch.setattr(
+        pykrx_stock, "get_market_ticker_list",
+        lambda *a, **k: _fake_ticker_list(k.get("market", "KOSPI")),
+    )
 
     client = _make_client()
     rows = await client.fetch_stock_prices(date(2026, 4, 17))
@@ -71,6 +84,40 @@ async def test_fetch_stock_prices_joins_ohlcv_and_market_cap(monkeypatch: pytest
     assert first.close_price == 78_500
     assert first.market_cap == 468_500_000_000_000
     assert first.change_rate == Decimal("0.64")
+
+
+@pytest.mark.asyncio
+async def test_fetch_stock_prices_maps_kosdaq_via_ticker_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pykrx OHLCV 응답에 시장구분이 없어도 KOSPI/KOSDAQ 티커 리스트로 매핑 복구."""
+    from pykrx import stock as pykrx_stock
+
+    # 005930(KOSPI) + 247540(KOSDAQ, 에코프로비엠) 혼합
+    ohlcv = pd.DataFrame(
+        {
+            "시가": [78_000, 123_000],
+            "고가": [79_200, 125_000],
+            "저가": [77_800, 122_000],
+            "종가": [78_500, 124_500],
+            "거래량": [15_234_567, 2_345_678],
+            "등락률": [0.64, 1.22],
+            "시가총액": [468_500_000_000_000, 12_000_000_000_000],
+        },
+        index=pd.Index(["005930", "247540"], name="티커"),
+    )
+    monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: ohlcv)
+    monkeypatch.setattr(
+        pykrx_stock, "get_market_ticker_list",
+        lambda *a, **k: _fake_ticker_list(k.get("market", "KOSPI")),
+    )
+
+    client = _make_client()
+    rows = await client.fetch_stock_prices(date(2026, 4, 17))
+    assert len(rows) == 2
+    by_code = {r.stock_code: r for r in rows}
+    assert by_code["005930"].market_type == "KOSPI"
+    assert by_code["247540"].market_type == "KOSDAQ"
 
 
 @pytest.mark.asyncio
@@ -95,6 +142,10 @@ async def test_fetch_stock_prices_uses_ohlcv_inline_market_cap(
 
     monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: ohlcv)
     monkeypatch.setattr(pykrx_stock, "get_market_cap_by_ticker", _cap)
+    monkeypatch.setattr(
+        pykrx_stock, "get_market_ticker_list",
+        lambda *a, **k: _fake_ticker_list(k.get("market", "KOSPI")),
+    )
 
     client = _make_client()
     rows = await client.fetch_stock_prices(date(2026, 4, 17))
@@ -112,6 +163,7 @@ async def test_fetch_stock_prices_empty_dataframe(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: pd.DataFrame())
     monkeypatch.setattr(pykrx_stock, "get_market_cap_by_ticker", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(pykrx_stock, "get_market_ticker_list", lambda *a, **k: [])
 
     client = _make_client()
     rows = await client.fetch_stock_prices(date(2026, 4, 17))

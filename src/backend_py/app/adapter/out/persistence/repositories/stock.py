@@ -39,15 +39,22 @@ class StockRepository:
         return (await self._session.execute(stmt)).scalars().all()
 
     async def upsert_by_code(self, stock_code: str, stock_name: str, market_type: str) -> Stock:
-        """종목코드 기준 upsert — 활성 종목 목록을 수집 단계에서 유지."""
+        """종목코드 기준 upsert — 활성 종목 목록을 수집 단계에서 유지.
+
+        pykrx 가 종목명을 반환하지 않는 배치 경로에서 `stock_name` 이 빈 문자열로
+        들어오는 경우, 기존 row 의 이름을 덮어쓰지 않고 보존한다. β 가 시드한 5개
+        핵심 종목 이름 등이 α 재실행으로 공백화되는 회귀를 방지.
+        """
         existing = await self.find_by_code(stock_code)
         if existing is None:
             stock = Stock(stock_code=stock_code, stock_name=stock_name, market_type=market_type)
             self._session.add(stock)
             await self._session.flush()
             return stock
-        if existing.stock_name != stock_name or existing.market_type != market_type:
-            existing.stock_name = stock_name
+        # 빈 이름은 기존 값을 덮어쓰지 않음
+        new_name = stock_name if stock_name.strip() else existing.stock_name
+        if existing.stock_name != new_name or existing.market_type != market_type:
+            existing.stock_name = new_name
             existing.market_type = market_type
             await self._session.flush()
         return existing

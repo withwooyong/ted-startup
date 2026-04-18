@@ -37,6 +37,35 @@ async def test_stock_add_and_find_by_code(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stock_upsert_preserves_name_when_new_is_empty(session: AsyncSession) -> None:
+    """α 배치 경로: pykrx 가 종목명을 반환하지 않아 빈 문자열이 들어와도
+    기존 row 의 이름은 보존되어야 한다. β 시드 회귀 방지."""
+    repo = StockRepository(session)
+    # β 가 시드한 상태
+    await repo.add(Stock(stock_code="005930", stock_name="삼성전자", market_type="KOSPI"))
+
+    # α 재실행 — 빈 stock_name 으로 KOSDAQ 재분류 시도(이 경우 삼성은 KOSPI 유지가 정상)
+    await repo.upsert_by_code("005930", "", "KOSPI")
+
+    fetched = await repo.find_by_code("005930")
+    assert fetched is not None
+    assert fetched.stock_name == "삼성전자"  # 보존됨
+
+
+@pytest.mark.asyncio
+async def test_stock_upsert_updates_name_when_provided(session: AsyncSession) -> None:
+    """비어있지 않은 이름은 정상적으로 업데이트."""
+    repo = StockRepository(session)
+    await repo.add(Stock(stock_code="005930", stock_name="(구)삼성전자", market_type="KOSPI"))
+
+    await repo.upsert_by_code("005930", "삼성전자", "KOSPI")
+
+    fetched = await repo.find_by_code("005930")
+    assert fetched is not None
+    assert fetched.stock_name == "삼성전자"
+
+
+@pytest.mark.asyncio
 async def test_stock_price_upsert_conflict_updates(session: AsyncSession) -> None:
     stock_repo = StockRepository(session)
     stock = await stock_repo.add(Stock(stock_code="000660", stock_name="SK하이닉스", market_type="KOSPI"))

@@ -16,6 +16,7 @@ from scripts.sync_dart_corp_mapping import (
     filter_by_krx_listing,
     filter_listed_common_stocks,
     is_common_stock_code,
+    is_excluded_by_code,
     is_excluded_by_name,
     parse_corp_code_xml,
 )
@@ -80,6 +81,37 @@ def test_is_excluded_by_name(corp_name: str, excluded: bool) -> None:
 # ---------------------------------------------------------------------------
 # filter_listed_common_stocks
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# is_excluded_by_code (stock_code 블랙리스트)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "stock_code,excluded",
+    [
+        ("088980", True),   # 맥쿼리한국인프라투융자회사 (DART 단축명 "맥쿼리인프라")
+        ("423310", True),   # KB발해인프라투융자회사
+        ("005930", False),  # 삼성전자
+        ("000660", False),  # SK하이닉스
+        ("", False),
+    ],
+)
+def test_is_excluded_by_code(stock_code: str, excluded: bool) -> None:
+    assert is_excluded_by_code(stock_code) is excluded
+
+
+def test_filter_applies_stock_code_blacklist() -> None:
+    """이름으론 안 잡히지만 명시 블랙리스트로 제외되는 케이스."""
+    rows = [
+        CorpRow(corp_code="00126380", corp_name="삼성전자", stock_code="005930"),
+        # DART 가 단축명으로 저장한 맥쿼리인프라 — 이름 필터 통과하지만 코드 블랙리스트에 있음
+        CorpRow(corp_code="00335812", corp_name="맥쿼리인프라", stock_code="088980"),
+        CorpRow(corp_code="00999999", corp_name="KB발해인프라", stock_code="423310"),
+    ]
+    kept = filter_listed_common_stocks(rows)
+    assert [r.stock_code for r in kept] == ["005930"]
 
 
 def test_filter_by_krx_listing_keeps_intersection() -> None:
