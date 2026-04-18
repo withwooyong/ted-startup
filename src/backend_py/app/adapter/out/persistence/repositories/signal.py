@@ -45,3 +45,26 @@ class SignalRepository:
         self._session.add_all(list(signals))
         await self._session.flush()
         return len(signals)
+
+    async def list_by_stocks_between(
+        self,
+        stock_ids: Sequence[int],
+        start: date,
+        end: date,
+        *,
+        min_score: int = 0,
+    ) -> Sequence[Signal]:
+        """여러 종목의 기간 시그널을 한 번에 조회 (P12 정합도용, N+1 방지)."""
+        if not stock_ids:
+            return []
+        stmt = (
+            select(Signal)
+            .where(
+                Signal.stock_id.in_(list(stock_ids)),
+                Signal.signal_date >= start,
+                Signal.signal_date <= end,
+                Signal.score >= min_score,
+            )
+            .order_by(Signal.signal_date.desc(), Signal.score.desc())
+        )
+        return (await self._session.execute(stmt)).scalars().all()

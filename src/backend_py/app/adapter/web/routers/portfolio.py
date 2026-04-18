@@ -22,6 +22,7 @@ from app.adapter.web._schemas import (
     AccountResponse,
     HoldingResponse,
     PerformanceResponse,
+    SignalAlignmentResponse,
     SnapshotResponse,
     SyncResponse,
     TransactionCreateRequest,
@@ -37,6 +38,7 @@ from app.application.service.portfolio_service import (
     PortfolioError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
+    SignalAlignmentUseCase,
     StockNotFoundError,
     SyncError,
     SyncPortfolioFromKisUseCase,
@@ -248,6 +250,33 @@ async def sync_from_kis(
     except PortfolioError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return SyncResponse.model_validate(asdict(result))
+
+
+@router.get(
+    "/accounts/{account_id}/signal-alignment",
+    response_model=SignalAlignmentResponse,
+)
+async def get_signal_alignment(
+    account_id: int,
+    since: date | None = None,
+    until: date | None = None,
+    min_score: int = 60,
+    session: AsyncSession = Depends(get_session),
+) -> SignalAlignmentResponse:
+    if not 0 <= min_score <= 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="min_score 는 0~100")
+    today = date.today()
+    end_d = until or today
+    start_d = since or (end_d - relativedelta(days=30))
+    try:
+        report = await SignalAlignmentUseCase(session).execute(
+            account_id=account_id, since=start_d, until=end_d, min_score=min_score
+        )
+    except AccountNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PortfolioError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return SignalAlignmentResponse.model_validate(asdict(report))
 
 
 @router.get(

@@ -24,6 +24,7 @@ from app.adapter.out.persistence.models import (
     PortfolioHolding,
     PortfolioSnapshot,
     PortfolioTransaction,
+    Signal,
     Stock,
 )
 from app.adapter.out.persistence.models.portfolio import (
@@ -37,6 +38,7 @@ from app.adapter.out.persistence.repositories import (
     PortfolioHoldingRepository,
     PortfolioSnapshotRepository,
     PortfolioTransactionRepository,
+    SignalRepository,
     StockPriceRepository,
     StockRepository,
 )
@@ -127,6 +129,37 @@ class SyncResult:
     updated_count: int  # 기존 보유 수량/평단가 갱신된 종목 수
     unchanged_count: int  # 변경 없음
     stock_created_count: int  # 신규 stock 마스터 upsert 수
+
+
+@dataclass(slots=True)
+class AlignedSignal:
+    signal_date: date
+    signal_type: str
+    score: int
+    grade: str
+
+
+@dataclass(slots=True)
+class AlignedHolding:
+    stock_id: int
+    stock_code: str
+    stock_name: str
+    quantity: int
+    avg_buy_price: Decimal
+    max_score: int
+    hit_count: int
+    signals: list[AlignedSignal]
+
+
+@dataclass(slots=True)
+class SignalAlignmentReport:
+    account_id: int
+    since: date
+    until: date
+    min_score: int
+    total_holdings: int
+    aligned_holdings: int
+    items: list[AlignedHolding]
 
 
 # ---------- UseCases ----------
@@ -392,6 +425,96 @@ class ComputePerformanceUseCase:
             sharpe_ratio=_q(float(sharpe) if sharpe is not None else None),
             first_value=Decimal(str(first)),
             last_value=Decimal(str(last)),
+        )
+
+
+class SignalAlignmentUseCase:
+    """보유 종목 × 기간 시그널 교차 리포트.
+
+    - 보유는 quantity > 0 인 holding 만 대상
+    - 시그널은 min_score 이상 + (since ≤ signal_date ≤ until)
+    - N+1 회피: stock_id IN (...) 단일 쿼리로 시그널 일괄 조회
+    - 정렬: 종목별 max_score desc, 동률이면 hit_count desc
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._account_repo = BrokerageAccountRepository(session)
+        self._holding_repo = PortfolioHoldingRepository(session)
+        self._stock_repo = StockRepository(session)
+        self._signal_repo = SignalRepository(session)
+
+    async def execute(
+        self,
+        *,
+        account_id: int,
+        since: date,
+        until: date,
+        min_score: int = 60,
+    ) -> SignalAlignmentReport:
+        account = await self._account_repo.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(f"account_id={account_id} 없음")
+        if since > until:
+            raise PortfolioError("since 는 until 보다 미래일 수 없습니다")
+
+        holdings = await self._holding_repo.list_by_account(account_id, only_active=True)
+        total = len(holdings)
+        if not holdings:
+            return SignalAlignmentReport(
+                account_id=account_id, since=since, until=until,
+                min_score=min_score, total_holdings=0,
+                aligned_holdings=0, items=[],
+            )
+
+        stock_ids = [h.stock_id for h in holdings]
+        stocks = await self._stock_repo.list_by_ids(stock_ids)
+        stock_map: dict[int, Stock] = {s.id: s for s in stocks}
+
+        signals = await self._signal_repo.list_by_stocks_between(
+            stock_ids, since, until, min_score=min_score
+        )
+        # stock_id → [Signal...] 버킷
+        bucket: dict[int, list[Signal]] = {}
+        for sig in signals:
+            bucket.setdefault(sig.stock_id, []).append(sig)
+
+        items: list[AlignedHolding] = []
+        for h in holdings:
+            sigs = bucket.get(h.stock_id, [])
+            if not sigs:
+                continue
+            s = stock_map.get(h.stock_id)
+            items.append(
+                AlignedHolding(
+                    stock_id=h.stock_id,
+                    stock_code=s.stock_code if s else "",
+                    stock_name=s.stock_name if s else "",
+                    quantity=h.quantity,
+                    avg_buy_price=h.avg_buy_price,
+                    max_score=max(sig.score for sig in sigs),
+                    hit_count=len(sigs),
+                    signals=[
+                        AlignedSignal(
+                            signal_date=sig.signal_date,
+                            signal_type=sig.signal_type,
+                            score=sig.score,
+                            grade=sig.grade,
+                        )
+                        for sig in sigs
+                    ],
+                )
+            )
+        items.sort(key=lambda x: (x.max_score, x.hit_count), reverse=True)
+
+        return SignalAlignmentReport(
+            account_id=account_id,
+            since=since,
+            until=until,
+            min_score=min_score,
+            total_holdings=total,
+            aligned_holdings=len(items),
+            items=items,
         )
 
 

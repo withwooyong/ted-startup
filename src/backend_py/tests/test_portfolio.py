@@ -16,6 +16,8 @@ from app.adapter.out.persistence.models import (
     BrokerageAccount,
     PortfolioHolding,
     PortfolioSnapshot,
+    Signal,
+    SignalType,
     Stock,
     StockPrice,
 )
@@ -24,6 +26,7 @@ from app.adapter.out.persistence.repositories import (
     PortfolioHoldingRepository,
     PortfolioSnapshotRepository,
     PortfolioTransactionRepository,
+    SignalRepository,
     StockPriceRepository,
     StockRepository,
 )
@@ -37,6 +40,7 @@ from app.application.service.portfolio_service import (
     InvalidRealEnvironmentError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
+    SignalAlignmentUseCase,
     SyncPortfolioFromKisUseCase,
     TransactionRecord,
     UnsupportedConnectionError,
@@ -540,3 +544,139 @@ async def test_sync_endpoint_returns_summary(
     assert body["connection_type"] == "kis_rest_mock"
     assert body["fetched_count"] == 1
     assert body["created_count"] == 1
+
+
+# -----------------------------------------------------------------------------
+# P12 — 시그널 정합도
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_signal_alignment_empty_holdings_returns_empty_items(
+    session: AsyncSession,
+) -> None:
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="align-empty", broker_code="manual", connection_type="manual"
+    )
+    report = await SignalAlignmentUseCase(session).execute(
+        account_id=account.id,
+        since=date(2026, 3, 1),
+        until=date(2026, 4, 17),
+        min_score=60,
+    )
+    assert report.total_holdings == 0
+    assert report.aligned_holdings == 0
+    assert report.items == []
+
+
+@pytest.mark.asyncio
+async def test_signal_alignment_matches_held_stocks_and_filters_by_score(
+    session: AsyncSession,
+) -> None:
+    stocks = await _seed_stocks(session)
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="align-match", broker_code="manual", connection_type="manual"
+    )
+    # 삼성/SK 모두 보유
+    for stock_key, qty, price in (("samsung", 10, 70000), ("sk", 3, 210000)):
+        await RecordTransactionUseCase(session).execute(TransactionRecord(
+            account_id=account.id, stock_id=stocks[stock_key].id,
+            transaction_type="BUY", quantity=qty, price=Decimal(str(price)),
+            executed_at=date(2026, 3, 1), source="manual",
+        ))
+
+    sr = SignalRepository(session)
+    # 삼성: score 85 / 55(컷오프 미달)
+    await sr.add(Signal(
+        stock_id=stocks["samsung"].id, signal_date=date(2026, 4, 10),
+        signal_type=SignalType.RAPID_DECLINE.value, score=85, grade="A", detail={},
+    ))
+    await sr.add(Signal(
+        stock_id=stocks["samsung"].id, signal_date=date(2026, 4, 12),
+        signal_type=SignalType.SHORT_SQUEEZE.value, score=55, grade="C", detail={},
+    ))
+    # SK: score 70 1건
+    await sr.add(Signal(
+        stock_id=stocks["sk"].id, signal_date=date(2026, 4, 11),
+        signal_type=SignalType.TREND_REVERSAL.value, score=70, grade="B", detail={},
+    ))
+
+    report = await SignalAlignmentUseCase(session).execute(
+        account_id=account.id,
+        since=date(2026, 4, 1),
+        until=date(2026, 4, 17),
+        min_score=60,
+    )
+    assert report.total_holdings == 2
+    assert report.aligned_holdings == 2
+    assert [item.stock_code for item in report.items] == ["005930", "000660"]  # max_score 정렬
+    samsung = report.items[0]
+    assert samsung.max_score == 85
+    # 55점은 컷오프로 배제
+    assert samsung.hit_count == 1
+    assert samsung.signals[0].signal_type == "RAPID_DECLINE"
+
+
+@pytest.mark.asyncio
+async def test_signal_alignment_excludes_signals_outside_window(
+    session: AsyncSession,
+) -> None:
+    stocks = await _seed_stocks(session)
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="align-window", broker_code="manual", connection_type="manual"
+    )
+    await RecordTransactionUseCase(session).execute(TransactionRecord(
+        account_id=account.id, stock_id=stocks["samsung"].id,
+        transaction_type="BUY", quantity=5, price=Decimal("70000"),
+        executed_at=date(2026, 2, 1), source="manual",
+    ))
+    # 기간 밖 시그널만 있음
+    await SignalRepository(session).add(Signal(
+        stock_id=stocks["samsung"].id, signal_date=date(2026, 2, 15),
+        signal_type=SignalType.RAPID_DECLINE.value, score=90, grade="A", detail={},
+    ))
+    report = await SignalAlignmentUseCase(session).execute(
+        account_id=account.id,
+        since=date(2026, 4, 1),
+        until=date(2026, 4, 17),
+        min_score=60,
+    )
+    assert report.total_holdings == 1
+    assert report.aligned_holdings == 0
+
+
+@pytest.mark.asyncio
+async def test_signal_alignment_endpoint_e2e(
+    session: AsyncSession, client: httpx.AsyncClient
+) -> None:
+    stocks = await _seed_stocks(session)
+    account = await RegisterAccountUseCase(session).execute(
+        account_alias="align-e2e", broker_code="manual", connection_type="manual"
+    )
+    await RecordTransactionUseCase(session).execute(TransactionRecord(
+        account_id=account.id, stock_id=stocks["samsung"].id,
+        transaction_type="BUY", quantity=2, price=Decimal("70000"),
+        executed_at=date(2026, 4, 1), source="manual",
+    ))
+    await SignalRepository(session).add(Signal(
+        stock_id=stocks["samsung"].id, signal_date=date(2026, 4, 10),
+        signal_type=SignalType.RAPID_DECLINE.value, score=75, grade="B", detail={},
+    ))
+
+    resp = await client.get(
+        f"/api/portfolio/accounts/{account.id}/signal-alignment",
+        params={"since": "2026-04-01", "until": "2026-04-17", "min_score": 60},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["aligned_holdings"] == 1
+    assert body["items"][0]["stock_code"] == "005930"
+    assert body["items"][0]["signals"][0]["score"] == 75
+
+
+@pytest.mark.asyncio
+async def test_signal_alignment_endpoint_404_for_unknown_account(
+    client: httpx.AsyncClient,
+) -> None:
+    resp = await client.get("/api/portfolio/accounts/999999/signal-alignment")
+    assert resp.status_code == 404

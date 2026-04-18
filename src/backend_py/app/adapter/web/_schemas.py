@@ -188,3 +188,31 @@ class SyncResponse(BaseModel):
     updated_count: int
     unchanged_count: int
     stock_created_count: int
+
+
+class AlignedSignalItem(BaseModel):
+    signal_date: date
+    signal_type: str
+    score: int
+    grade: str
+
+
+class AlignedHoldingItem(BaseModel):
+    stock_id: int
+    stock_code: str
+    stock_name: str
+    quantity: int
+    avg_buy_price: Decimal
+    max_score: int
+    hit_count: int
+    signals: list[AlignedSignalItem]
+
+
+class SignalAlignmentResponse(BaseModel):
+    account_id: int
+    since: date
+    until: date
+    min_score: int
+    total_holdings: int
+    aligned_holdings: int
+    items: list[AlignedHoldingItem]
