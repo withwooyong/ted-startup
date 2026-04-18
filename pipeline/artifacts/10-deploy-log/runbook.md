@@ -2,18 +2,19 @@
 artifact: runbook
 phase: 05-ship
 agent: 12-devops
-updated: 2026-04-17
+updated: 2026-04-18
 ---
 
 # 운영 런북 (Operational Runbook)
 
 단일 VPS/홈서버에서 docker compose 로 운영하는 1인 MVP 스택 기준.
-공매도 커버링 시그널 탐지 서비스 — 백엔드 + 프론트 + Postgres 3 컨테이너.
+공매도 커버링 시그널 탐지 서비스 — Caddy + 백엔드 + 프론트 + Postgres 4 컨테이너.
 
 - 저장소: `github.com/withwooyong/ted-startup`
 - Compose 파일: `docker-compose.prod.yml` (repo 루트)
 - 환경변수: `.env.prod` (git 제외, 권한 600)
-- 외부 노출: `3000/tcp` (프론트엔드만)
+- 외부 노출: `80/tcp`, `443/tcp`, `443/udp` (Caddy만 — HTTP/2 + HTTP/3)
+- 내부망 전용: backend:8080, frontend:3000, db:5432
 
 ---
 
@@ -21,8 +22,9 @@ updated: 2026-04-17
 
 - Linux 서버 (Ubuntu 22.04/24.04 권장), vCPU 2+ / RAM 4GB+ / 디스크 20GB+
 - Docker Engine 24+ 와 Docker Compose v2 설치
-- 아웃바운드 HTTPS 허용 (텔레그램 API, KRX API 호출용)
-- (선택) Nginx/Caddy 역프록시로 `3000` → `80/443` 매핑 + Let's Encrypt TLS
+- 아웃바운드 HTTPS 허용 (텔레그램 API, KRX API 호출용, Let's Encrypt ACME)
+- 인바운드 `80/tcp`, `443/tcp`, `443/udp` 개방 (Caddy TLS + ACME HTTP-01 challenge + HTTP/3)
+- (실도메인 사용 시) 도메인의 A 레코드가 서버 공인 IP 를 가리키도록 DNS 설정
 
 ---
 
@@ -51,6 +53,19 @@ chmod 600 .env.prod          # 운영자만 읽기/쓰기
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `KRX_AUTH_KEY`
 
+TLS / 도메인 설정 (Caddy):
+
+- `DOMAIN` — 기본값 `localhost` (Caddy internal CA 로 self-signed). 실 도메인(예: `signal.example.com`) 입력 시 Let's Encrypt 자동 발급
+- `ACME_EMAIL` — Let's Encrypt 만료 경고 수신용 이메일 (실도메인 운영 시만 필수)
+
+`.env.prod` 추가 예시 (기본값이 있으므로 생략해도 로컬은 동작):
+
+```env
+# --- TLS / Domain ---
+DOMAIN=localhost
+ACME_EMAIL=
+```
+
 ### 2.3 스택 기동
 
 ```bash
@@ -66,6 +81,9 @@ docker compose -f docker-compose.prod.yml ps
 - `ted-signal-db` → `healthy`
 - `ted-signal-backend` → `healthy` (기동에 60초 내외 소요)
 - `ted-signal-frontend` → `running`
+- `ted-signal-caddy` → `healthy` (TLS 인증서 발급 완료 후)
+
+> **첫 기동 시 TLS 발급 지연**: 실도메인 모드에서는 Let's Encrypt ACME challenge 로 최대 1~2분 소요. `docker compose logs -f caddy` 로 `certificate obtained successfully` 확인.
 
 ### 2.4 DB 스키마 초기화 확인
 
@@ -82,28 +100,37 @@ docker compose -f docker-compose.prod.yml exec db \
 
 ### 2.5 스모크 테스트
 
+로컬(`DOMAIN=localhost`) 모드에서는 Caddy 가 internal CA 로 self-signed 인증서를 발급하므로 `curl -k` 또는 `--cacert` 옵션이 필요하다. 실도메인 + Let's Encrypt 모드에서는 `-k` 없이 정상 검증된다.
+
 ```bash
-# 0) 관리자 키를 현재 셸에 로드 (test #5에서 사용)
+# 0) 관리자 키를 현재 셸에 로드 (test #5 에서 사용)
 export ADMIN_API_KEY=$(grep '^ADMIN_API_KEY=' .env.prod | cut -d= -f2-)
 
-# 1) 프론트엔드 루트 응답 확인
-curl -fsS http://localhost:3000/ | head -c 200
+# localhost 모드용 curl 옵션 (실도메인 시 -k 제거)
+CURL_OPTS="-fsSk"
+BASE="https://localhost"
 
-# 2) 백엔드 actuator/health (컨테이너 내부에서)
+# 1) 프론트엔드 루트 (Caddy TLS 종단 → frontend SSR)
+curl $CURL_OPTS "$BASE/" | head -c 200
+
+# 2) HTTP → HTTPS 자동 리다이렉트 확인 (Caddy 기본 동작)
+curl -sSI http://localhost/ | head -n 1   # HTTP/1.1 308 Permanent Redirect
+
+# 3) 백엔드 actuator/health (내부망 전용 — 컨테이너 내부에서)
 docker compose -f docker-compose.prod.yml exec backend \
   curl -fsS http://localhost:8080/actuator/health
 
-# 3) 시그널 조회 API (프론트 경유)
-curl -fsS http://localhost:3000/api/signals | head -c 500
+# 4) 시그널 조회 API (HTTPS)
+curl $CURL_OPTS "$BASE/api/signals" | head -c 500
 
-# 4) 알림 설정 조회 (공개, proxy.ts 경유)
-curl -fsS http://localhost:3000/api/notifications/preferences
+# 5) 알림 설정 조회 (공개, proxy.ts 경유)
+curl $CURL_OPTS "$BASE/api/notifications/preferences"
 
-# 5) 알림 설정 업데이트 (ADMIN_API_KEY 필요, Route Handler 경유)
-#    - 이 엔드포인트는 PUT 전용 (GET은 405).
+# 6) 알림 설정 업데이트 (ADMIN_API_KEY 필요, HTTPS 로 전송)
+#    - PUT 전용 엔드포인트 (GET 은 405)
 #    - signalTypes 유효값: RAPID_DECLINE, TREND_REVERSAL, SHORT_SQUEEZE (1~3개)
 #    - minScore: 0~100
-curl -fsS -X PUT \
+curl $CURL_OPTS -X PUT \
      -H "Content-Type: application/json" \
      -H "X-Admin-Api-Key: $ADMIN_API_KEY" \
      -d '{
@@ -114,10 +141,16 @@ curl -fsS -X PUT \
        "minScore": 60,
        "signalTypes": ["RAPID_DECLINE", "TREND_REVERSAL", "SHORT_SQUEEZE"]
      }' \
-     http://localhost:3000/api/admin/notifications/preferences
+     "$BASE/api/admin/notifications/preferences"
+
+# 7) Prometheus 메트릭 (내부망 전용, 운영자 접근)
+docker compose -f docker-compose.prod.yml exec backend \
+  curl -fsS http://localhost:8080/actuator/prometheus | head -n 30
 ```
 
-모두 2xx 응답이면 배포 완료.
+모두 2xx 응답이면 배포 완료. TLS 경로 검증이 포함된 풀 스모크.
+
+> **보안 포인트**: `ADMIN_API_KEY` 가 HTTP 평문으로 노출되던 이전 구조 대비, 이제 Caddy 가 TLS 종단을 담당해 브라우저 → Caddy 구간이 암호화된다. Caddy → frontend / frontend → backend 구간은 내부 docker 네트워크라 외부에서 접근 불가.
 
 ---
 
@@ -272,13 +305,23 @@ V2 이후 신규 마이그레이션 SQL 을 추가하려면:
 
 - `docker logs` 수동 확인
 - `/actuator/health` 엔드포인트 헬스체크
+- `/actuator/prometheus` 메트릭 노출 (내부망 — JVM/HTTP 요청/배치 메트릭)
+- Caddy `access log` stdout 출력 (TLS 연결, 4xx/5xx 카운트)
 - 장애 감지는 **텔레그램 알림 실패 시 운영자 직접 인지** (스케줄 작업이 조용히 죽을 경우 리스크)
+
+**Prometheus 메트릭 샘플 조회**:
+
+```bash
+# 컨테이너 내부에서 직접 (운영자)
+docker compose -f docker-compose.prod.yml exec backend \
+  curl -fsS http://localhost:8080/actuator/prometheus | grep -E '^(jvm_memory|http_server_requests_seconds_count|spring_batch)'
+```
 
 ### 9.2 권장 보강 (v1.1)
 
-- **Uptime Kuma** 컨테이너 추가 → 프론트엔드/백엔드 엔드포인트 5분 간격 체크
+- **Prometheus + Grafana** 컨테이너 추가 → `/actuator/prometheus` 스크랩, 대시보드 구성
+- **Uptime Kuma** 컨테이너 추가 → 공개 `https://$DOMAIN/` 엔드포인트 5분 간격 외부 체크
 - **Grafana Loki** + Promtail 로 컨테이너 로그 중앙집중화 (단일 노드라 경량)
-- `/actuator/prometheus` 노출 후 Prometheus + Grafana 대시보드
 
 ---
 
@@ -292,6 +335,7 @@ V2 이후 신규 마이그레이션 SQL 을 추가하려면:
 | 시크릿 관리 | `.env.prod` 파일 | AWS Secrets Manager |
 | 로그 보존 | Docker 기본 (로테이션 미설정) | CloudWatch Logs 30일 |
 | 레지스트리 | 없음 (로컬 build) | ECR |
+| TLS 인증서 | Caddy 자동 관리 (`caddy-data` 볼륨) | ACM + ALB |
 
 ---
 

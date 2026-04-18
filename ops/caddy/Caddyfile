@@ -1,0 +1,45 @@
+################################################################################
+# Caddyfile — ted-signal 프로덕션 역프록시 + 자동 TLS
+#
+# 동작 방식
+# - DOMAIN=localhost (기본)     → Caddy 내부 CA 로 self-signed 발급 (개발/로컬)
+# - DOMAIN=<실도메인>           → Let's Encrypt 자동 발급/갱신 (ACME HTTP-01)
+# - ACME_EMAIL 은 실도메인 모드에서만 의미가 있음 (만료 경고 수신용)
+#
+# 외부 → Caddy(:80/:443) → frontend(:3000) 단일 경로.
+# backend(:8080) 는 내부망 전용 — 브라우저는 frontend 의 proxy.ts / Route
+# Handler 를 통해서만 접근한다. 관측 목적의 /actuator/* 는 운영자가
+# `docker compose exec backend curl ...` 로 내부 접근한다.
+################################################################################
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	# TLS 모드는 ACME_EMAIL 값으로 결정된다 (compose 에서 기본값 주입).
+	# - ACME_EMAIL=internal          → Caddy internal CA (self-signed, localhost)
+	# - ACME_EMAIL=real@example.com  → Let's Encrypt 로 공식 발급
+	tls {$ACME_EMAIL}
+
+	# Next.js 앞단: SSR + static + /api 라우팅 모두 frontend 가 처리
+	reverse_proxy frontend:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# 보안 헤더
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Caddy 기본 Server 헤더 제거
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}

@@ -1,10 +1,11 @@
 # =============================================================================
 # docker-compose.prod.yml — 단일 VPS/홈서버 프로덕션 스택
 # -----------------------------------------------------------------------------
-# 3 services: db(postgres:16-alpine) / backend(spring boot) / frontend(next.js)
+# 4 services: db(postgres:16-alpine) / backend(spring boot) / frontend(next.js) / caddy(reverse proxy + TLS)
 # - 환경변수는 .env.prod (git 제외) 에서 주입
-# - 외부 노출은 frontend:3000 만 (backend, db 는 내부 네트워크 전용)
-# - DB 볼륨(signal-prod-data) 영구 보존
+# - 외부 노출은 caddy:80/443 만 (backend/frontend/db 는 내부 네트워크 전용)
+# - Caddy 가 Let's Encrypt 자동 발급/갱신 (DOMAIN=localhost 일 때는 internal CA)
+# - DB 볼륨(signal-prod-data) 영구 보존, Caddy 인증서/설정도 볼륨 보존
 # - depends_on 헬스체크로 기동 순서 보장
 # =============================================================================
 
@@ -93,10 +94,41 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+    # 외부 노출 없음 — 브라우저는 caddy 를 통해서만 접근
     networks:
       - backend-net
+
+  # ---------------------------------------------------------------------------
+  # Caddy (Reverse Proxy + 자동 TLS)
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: ted-signal-caddy
+    restart: unless-stopped
+    environment:
+      # DOMAIN=localhost → internal CA (self-signed), 실도메인 → Let's Encrypt
+      DOMAIN: ${DOMAIN:-localhost}
+      # ACME_EMAIL=internal → Caddy `tls internal` (self-signed). 실도메인 시 실제 이메일로 오버라이드
+      ACME_EMAIL: ${ACME_EMAIL:-internal}
+      TZ: Asia/Seoul
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 (QUIC)
+    volumes:
+      - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data        # 인증서, ACME 계정 키, 세션
+      - caddy-config:/config    # 자동 생성 설정/오토세이브
+    depends_on:
+      - frontend
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 networks:
   backend-net:
@@ -105,3 +137,7 @@ networks:
 volumes:
   signal-prod-data:
     name: ted-signal-prod-data
+  caddy-data:
+    name: ted-signal-caddy-data
+  caddy-config:
+    name: ted-signal-caddy-config
