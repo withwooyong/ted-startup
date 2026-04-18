@@ -14,14 +14,15 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.adapter.out.external import KrxClient, TelegramClient
+from app.adapter.out.persistence.models import Signal
 from app.adapter.out.persistence.repositories import SignalRepository
 from app.adapter.out.persistence.session import get_sessionmaker
 from app.application.service import (
@@ -30,9 +31,6 @@ from app.application.service import (
     SignalDetectionService,
 )
 from app.batch.trading_day import is_trading_day
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +62,7 @@ async def run_market_data_pipeline(
     *,
     krx_client: KrxClient | None = None,
     telegram_client: TelegramClient | None = None,
-    session_factory: "async_sessionmaker[AsyncSession] | None" = None,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
     force_when_non_trading: bool = False,
 ) -> PipelineResult:
     """3-Step 파이프라인 실행. 거래일이 아니면 skip(force 플래그로 우회 가능)."""
@@ -116,10 +114,10 @@ async def run_market_data_pipeline(
         async with factory() as session:
             async def _notify() -> int:
                 # 같은 세션에서 다시 로드해 Telegram 발송
-                signals: Sequence = await SignalRepository(session).list_between(
-                    trading_date, trading_date
+                signals: list[Signal] = list(
+                    await SignalRepository(session).list_between(trading_date, trading_date)
                 )
-                return await NotificationService(session, telegram).notify_signals(list(signals))
+                return await NotificationService(session, telegram).notify_signals(signals)
 
             outcome = await _run_step(
                 "notify",
@@ -151,9 +149,9 @@ async def run_market_data_pipeline(
 
 async def _run_step(
     name: str,
-    runner,  # type: ignore[no-untyped-def]
-    session,  # type: ignore[no-untyped-def]
-    summarize,  # type: ignore[no-untyped-def]
+    runner: Callable[[], Awaitable[Any]],
+    session: AsyncSession,
+    summarize: Callable[[Any], dict[str, Any]],
 ) -> StepOutcome:
     started = time.monotonic()
     try:
@@ -165,6 +163,6 @@ async def _run_step(
         logger.error("배치 Step 실패: %s (%s) — %s", name, type(e).__name__, e)
         return StepOutcome(name=name, succeeded=False, elapsed_ms=elapsed, error=f"{type(e).__name__}: {e}")
     elapsed = int((time.monotonic() - started) * 1000)
-    summary = summarize(result) if summarize else None
+    summary = summarize(result)
     logger.info("배치 Step 완료: %s elapsed=%dms summary=%s", name, elapsed, summary)
     return StepOutcome(name=name, succeeded=True, elapsed_ms=elapsed, summary=summary)

@@ -21,8 +21,9 @@ import os
 import time
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import pandas as pd
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.adapter.out.external._records import (
@@ -31,9 +32,6 @@ from app.adapter.out.external._records import (
     StockPriceRow,
 )
 from app.config.settings import Settings, get_settings
-
-if TYPE_CHECKING:
-    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +81,8 @@ class KrxClient:
         if cap is not None and not cap.empty:
             # 두 DataFrame 은 종목코드 인덱스를 공유
             ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
-        return [self._to_stock_price_row(code, row) for code, row in ohlcv.iterrows()]
+        # pandas Index 는 Hashable — pykrx 는 항상 종목코드 str 이지만 정적으로는 narrow.
+        return [self._to_stock_price_row(str(code), row) for code, row in ohlcv.iterrows()]
 
     async def fetch_short_selling(self, trading_date: date) -> list[ShortSellingRow]:
         """전 종목 공매도 거래 현황."""
@@ -91,7 +90,7 @@ class KrxClient:
         df = await self._call_pykrx("get_shorting_volume_by_ticker", date_str)
         if df is None or df.empty:
             return []
-        return [self._to_short_selling_row(code, row) for code, row in df.iterrows()]
+        return [self._to_short_selling_row(str(code), row) for code, row in df.iterrows()]
 
     async def fetch_lending_balance(self, trading_date: date) -> list[LendingBalanceRow]:
         """전 종목 대차잔고. pykrx 현재 버전에 스키마 불일치 이슈가 있어 실패 시 빈 리스트."""
@@ -104,7 +103,7 @@ class KrxClient:
         if df is None or df.empty:
             logger.warning("KRX 대차잔고 응답이 비어 있음 (trading_date=%s)", date_str)
             return []
-        return [self._to_lending_balance_row(code, row) for code, row in df.iterrows()]
+        return [self._to_lending_balance_row(str(code), row) for code, row in df.iterrows()]
 
     # ------------------------------------------------------------------
     # Internals
@@ -116,21 +115,22 @@ class KrxClient:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
     )
-    async def _call_pykrx(self, func_name: str, *args: Any, **kwargs: Any) -> "pd.DataFrame | None":
+    async def _call_pykrx(self, func_name: str, *args: Any, **kwargs: Any) -> pd.DataFrame | None:
         """pykrx 함수 호출을 rate-limit + stdout 차폐 + 재시도로 감싼다."""
         async with self._lock:
             await self._throttle()
             return await asyncio.to_thread(self._invoke_silent, func_name, *args, **kwargs)
 
     @staticmethod
-    def _invoke_silent(func_name: str, *args: Any, **kwargs: Any) -> "pd.DataFrame | None":
+    def _invoke_silent(func_name: str, *args: Any, **kwargs: Any) -> pd.DataFrame | None:
         """pykrx 내부 print 를 버퍼로 가두고 함수 호출."""
         from pykrx import stock  # 지연 임포트 — 테스트 시 monkeypatch 용이
 
         fn = getattr(stock, func_name)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            return fn(*args, **kwargs)
+            result: pd.DataFrame | None = fn(*args, **kwargs)
+            return result
 
     async def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_call_ts

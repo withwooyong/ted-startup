@@ -42,16 +42,19 @@ export default function BacktestPage() {
       .catch(err => { setError(err.message); setLoading(false); });
   }, []);
 
+  // 백엔드가 Decimal 을 string 으로 직렬화 — 안전 변환 헬퍼.
+  const num = (v: string | null | undefined): number => (v ? Number(v) : 0);
+
   // 차트 데이터 변환
   const chartData = results.map(r => ({
-    name: SIGNAL_TYPE_NAMES[r.signalType] || r.signalType,
-    '5일': r.avgReturn5d ?? 0,
-    '10일': r.avgReturn10d ?? 0,
-    '20일': r.avgReturn20d ?? 0,
+    name: SIGNAL_TYPE_NAMES[r.signal_type] || r.signal_type,
+    '5일': num(r.avg_return_5d),
+    '10일': num(r.avg_return_10d),
+    '20일': num(r.avg_return_20d),
   }));
 
   const periodStr = results.length > 0
-    ? `${results[0].periodStart} — ${results[0].periodEnd}`
+    ? `${results[0].period_start} — ${results[0].period_end}`
     : '';
 
   return (
@@ -112,66 +115,78 @@ export default function BacktestPage() {
                 </tr>
               </thead>
               <tbody>
-                {results.map(r => (
-                  <tr key={r.signalType} className="border-t border-white/[0.06] hover:bg-[#1E2538] transition-colors">
-                    <th className="px-4 py-3 font-medium text-left" scope="row">{SIGNAL_TYPE_NAMES[r.signalType] || r.signalType}</th>
-                    <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)]">{r.totalSignals}</td>
-                    <td className={`px-4 py-3 text-right font-semibold font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate5d ?? 0)}`}>
-                      {(r.hitRate5d ?? 0).toFixed(1)}%
-                    </td>
-                    <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate10d ?? 0)}`}>
-                      {(r.hitRate10d ?? 0).toFixed(1)}%
-                    </td>
-                    <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate20d ?? 0)}`}>
-                      {(r.hitRate20d ?? 0).toFixed(1)}%
-                    </td>
-                    <td className={`px-4 py-3 text-right font-semibold font-[family-name:var(--font-mono)] ${returnColor(r.avgReturn5d ?? 0)}`}>
-                      {(r.avgReturn5d ?? 0) > 0 ? '+' : ''}{(r.avgReturn5d ?? 0).toFixed(1)}%
-                    </td>
-                  </tr>
-                ))}
+                {results.map(r => {
+                  const h5 = num(r.hit_rate_5d);
+                  const h10 = num(r.hit_rate_10d);
+                  const h20 = num(r.hit_rate_20d);
+                  const ar5 = num(r.avg_return_5d);
+                  return (
+                    <tr key={r.signal_type} className="border-t border-white/[0.06] hover:bg-[#1E2538] transition-colors">
+                      <th className="px-4 py-3 font-medium text-left" scope="row">{SIGNAL_TYPE_NAMES[r.signal_type] || r.signal_type}</th>
+                      <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)]">{r.total_signals}</td>
+                      <td className={`px-4 py-3 text-right font-semibold font-[family-name:var(--font-mono)] ${hitRateColor(h5)}`}>
+                        {h5.toFixed(1)}%
+                      </td>
+                      <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] ${hitRateColor(h10)}`}>
+                        {h10.toFixed(1)}%
+                      </td>
+                      <td className={`px-4 py-3 text-right font-[family-name:var(--font-mono)] ${hitRateColor(h20)}`}>
+                        {h20.toFixed(1)}%
+                      </td>
+                      <td className={`px-4 py-3 text-right font-semibold font-[family-name:var(--font-mono)] ${returnColor(ar5)}`}>
+                        {ar5 > 0 ? '+' : ''}{ar5.toFixed(1)}%
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {/* Summary — Card list (mobile) */}
           <ul className="sm:hidden space-y-3 mb-6" aria-label="시그널 타입별 백테스팅 결과">
-            {results.map(r => (
-              <li key={r.signalType} className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-semibold text-sm">{SIGNAL_TYPE_NAMES[r.signalType] || r.signalType}</span>
-                  <span className="font-[family-name:var(--font-mono)] text-xs text-[#6B7A90]">
-                    발생 {r.totalSignals}
-                  </span>
-                </div>
-                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <dt className="text-[#6B7A90]">적중 5d</dt>
-                    <dd className={`font-[family-name:var(--font-mono)] font-semibold ${hitRateColor(r.hitRate5d ?? 0)}`}>
-                      {(r.hitRate5d ?? 0).toFixed(1)}%
-                    </dd>
+            {results.map(r => {
+              const h5 = num(r.hit_rate_5d);
+              const h10 = num(r.hit_rate_10d);
+              const h20 = num(r.hit_rate_20d);
+              const ar5 = num(r.avg_return_5d);
+              return (
+                <li key={r.signal_type} className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-semibold text-sm">{SIGNAL_TYPE_NAMES[r.signal_type] || r.signal_type}</span>
+                    <span className="font-[family-name:var(--font-mono)] text-xs text-[#6B7A90]">
+                      발생 {r.total_signals}
+                    </span>
                   </div>
-                  <div className="flex justify-between">
-                    <dt className="text-[#6B7A90]">수익 5d</dt>
-                    <dd className={`font-[family-name:var(--font-mono)] font-semibold ${returnColor(r.avgReturn5d ?? 0)}`}>
-                      {(r.avgReturn5d ?? 0) > 0 ? '+' : ''}{(r.avgReturn5d ?? 0).toFixed(1)}%
-                    </dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-[#6B7A90]">적중 10d</dt>
-                    <dd className={`font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate10d ?? 0)}`}>
-                      {(r.hitRate10d ?? 0).toFixed(1)}%
-                    </dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-[#6B7A90]">적중 20d</dt>
-                    <dd className={`font-[family-name:var(--font-mono)] ${hitRateColor(r.hitRate20d ?? 0)}`}>
-                      {(r.hitRate20d ?? 0).toFixed(1)}%
-                    </dd>
-                  </div>
-                </dl>
-              </li>
-            ))}
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <dt className="text-[#6B7A90]">적중 5d</dt>
+                      <dd className={`font-[family-name:var(--font-mono)] font-semibold ${hitRateColor(h5)}`}>
+                        {h5.toFixed(1)}%
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-[#6B7A90]">수익 5d</dt>
+                      <dd className={`font-[family-name:var(--font-mono)] font-semibold ${returnColor(ar5)}`}>
+                        {ar5 > 0 ? '+' : ''}{ar5.toFixed(1)}%
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-[#6B7A90]">적중 10d</dt>
+                      <dd className={`font-[family-name:var(--font-mono)] ${hitRateColor(h10)}`}>
+                        {h10.toFixed(1)}%
+                      </dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-[#6B7A90]">적중 20d</dt>
+                      <dd className={`font-[family-name:var(--font-mono)] ${hitRateColor(h20)}`}>
+                        {h20.toFixed(1)}%
+                      </dd>
+                    </div>
+                  </dl>
+                </li>
+              );
+            })}
           </ul>
 
           {/* Return Chart */}

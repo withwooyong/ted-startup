@@ -10,16 +10,15 @@ import {
   GRADE_COLORS,
 } from '@/types/signal';
 import {
-  ResponsiveContainer,
-  ComposedChart,
-  Line,
   Area,
-  XAxis,
-  YAxis,
   CartesianGrid,
-  Tooltip,
+  ComposedChart,
   Legend,
   ReferenceDot,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
 
 const PERIODS = [
@@ -90,12 +89,14 @@ export default function StockDetailPage() {
   }
 
   const latestSignal = data.signals[0];
-  const changeColor = (data.latestPrice.changeRate ?? 0) > 0 ? '#FF4D6A' : (data.latestPrice.changeRate ?? 0) < 0 ? '#6395FF' : '#6B7A90';
+  // 백엔드는 prices[] 배열을 trading_date 오름차순으로 반환 — 마지막이 최신.
+  const latestPrice = data.prices[data.prices.length - 1];
+  const changeRateNum = latestPrice?.change_rate ? Number(latestPrice.change_rate) : 0;
+  const changeColor = changeRateNum > 0 ? '#FF4D6A' : changeRateNum < 0 ? '#6395FF' : '#6B7A90';
 
-  const chartData = data.timeSeries.map(p => ({
-    date: p.date.slice(5),
-    price: p.price,
-    balance: p.lendingBalance,
+  const chartData = data.prices.map(p => ({
+    date: p.trading_date.slice(5),
+    price: p.close_price,
   }));
 
   return (
@@ -114,26 +115,26 @@ export default function StockDetailPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-5">
           <div className="flex items-center gap-2 mb-3">
-            <span className="font-[family-name:var(--font-display)] text-xl font-bold">{data.stockName}</span>
-            <span className="font-[family-name:var(--font-mono)] text-sm text-[#3D4A5C]">{data.stockCode}</span>
+            <span className="font-[family-name:var(--font-display)] text-xl font-bold">{data.stock.stock_name}</span>
+            <span className="font-[family-name:var(--font-mono)] text-sm text-[#3D4A5C]">{data.stock.stock_code}</span>
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
               <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">현재가</div>
               <div className="font-[family-name:var(--font-display)] text-xl font-semibold mt-0.5">
-                {data.latestPrice.closePrice.toLocaleString()}
+                {latestPrice ? latestPrice.close_price.toLocaleString() : '-'}
               </div>
             </div>
             <div>
               <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">전일비</div>
               <div className="font-[family-name:var(--font-mono)] text-xl font-medium mt-0.5" style={{ color: changeColor }}>
-                {(data.latestPrice.changeRate ?? 0) > 0 ? '+' : ''}{data.latestPrice.changeRate?.toFixed(2) ?? '0.00'}%
+                {changeRateNum > 0 ? '+' : ''}{changeRateNum.toFixed(2)}%
               </div>
             </div>
             <div>
               <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">거래량</div>
               <div className="font-[family-name:var(--font-mono)] text-xl font-medium mt-0.5">
-                {(data.latestPrice.volume / 1000000).toFixed(1)}M
+                {latestPrice ? `${(latestPrice.volume / 1000000).toFixed(1)}M` : '-'}
               </div>
             </div>
           </div>
@@ -144,7 +145,7 @@ export default function StockDetailPage() {
             <div className="flex justify-between items-start">
               <div>
                 <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">
-                  {SIGNAL_TYPE_LABELS[latestSignal.signalType]} Score
+                  {SIGNAL_TYPE_LABELS[latestSignal.signal_type]} Score
                 </div>
                 <div className="font-[family-name:var(--font-display)] text-4xl font-extrabold tracking-tighter mt-1">
                   {latestSignal.score}
@@ -192,14 +193,6 @@ export default function StockDetailPage() {
                 tickLine={false}
                 axisLine={false}
               />
-              <YAxis
-                yAxisId="balance"
-                orientation="right"
-                tick={{ fill: '#FF8B3E', fontSize: 10 }}
-                tickFormatter={v => `${(v / 1000000).toFixed(1)}M`}
-                tickLine={false}
-                axisLine={false}
-              />
               <Tooltip
                 contentStyle={{ background: '#1A1F28', border: 'none', borderRadius: 10, color: '#E8ECF1' }}
                 labelStyle={{ color: '#6B7A90' }}
@@ -214,22 +207,12 @@ export default function StockDetailPage() {
                 fill="rgba(99,149,255,0.06)"
                 strokeWidth={2}
               />
-              <Line
-                yAxisId="balance"
-                type="monotone"
-                dataKey="balance"
-                name="대차잔고"
-                stroke="#FF8B3E"
-                strokeWidth={1.5}
-                strokeDasharray="5 3"
-                dot={false}
-              />
               {data.signals.map((s, i) => {
-                const point = chartData.find(c => c.date === s.date.slice(5));
+                const point = chartData.find(c => c.date === s.signal_date.slice(5));
                 if (!point) return null;
                 return (
                   <ReferenceDot
-                    key={i}
+                    key={s.id ?? i}
                     x={point.date}
                     y={point.price}
                     yAxisId="price"

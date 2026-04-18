@@ -4,12 +4,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.persistence.repositories import NotificationPreferenceRepository
 from app.adapter.web._deps import get_session, require_admin_key
 from app.adapter.web._schemas import (
     NotificationPreferenceResponse,
     NotificationPreferenceUpdateRequest,
 )
-from app.adapter.out.persistence.repositories import NotificationPreferenceRepository
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 

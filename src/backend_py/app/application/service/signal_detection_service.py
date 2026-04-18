@@ -96,9 +96,12 @@ class SignalDetectionService:
         vol_df = pd.DataFrame(
             [{"stock_id": sp.stock_id, "volume": int(sp.volume)} for sp in vol_hist]
         )
-        avg_volume_by_stock: dict[int, float] = (
-            vol_df.groupby("stock_id")["volume"].mean().to_dict() if not vol_df.empty else {}
-        )
+        avg_volume_by_stock: dict[int, float] = {}
+        if not vol_df.empty:
+            # groupby().mean().to_dict() 는 Hashable/Any 키로 좁혀지지 않아 cast.
+            raw_mean: dict[Any, Any] = vol_df.groupby("stock_id")["volume"].mean().to_dict()
+            for k, v in raw_mean.items():
+                avg_volume_by_stock[int(k)] = float(v)
 
         # 기존 시그널 중복 방지
         existing = await signal_repo.list_by_date(trading_date)

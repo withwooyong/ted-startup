@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class MarketType(str, Enum):
+class MarketType(StrEnum):
     KOSPI = "KOSPI"
     KOSDAQ = "KOSDAQ"
 
 
-class SignalType(str, Enum):
+class SignalType(StrEnum):
     RAPID_DECLINE = "RAPID_DECLINE"
     TREND_REVERSAL = "TREND_REVERSAL"
     SHORT_SQUEEZE = "SHORT_SQUEEZE"
 
 
-class SignalGrade(str, Enum):
+class SignalGrade(StrEnum):
     A = "A"
     B = "B"
     C = "C"
@@ -31,7 +31,7 @@ class SignalGrade(str, Enum):
         return cls.D
 
 
-class BatchJobStatus(str, Enum):
+class BatchJobStatus(StrEnum):
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
     RUNNING = "RUNNING"

@@ -22,7 +22,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapter.out.persistence.base import Base
 
-
 # ---- Enum-like string constants (DB CHECK 제약과 동기화) ----
 
 VALID_BROKER_CODES = ("manual", "kis", "kiwoom")

@@ -54,7 +54,10 @@ export default function CountUp({
     const abs = Math.abs(value);
 
     if (reducedMotion) {
-      setDisplay(prefix + sign + format(abs, decimals, separator) + suffix);
+      // 이펙트 본문에서 즉시 setState 하면 React 19 react-hooks/set-state-in-effect 경고.
+      // queueMicrotask 로 다음 micro task 에 실행해 렌더 완료 후 갱신 — 동일한 '즉시 최종값' UX 유지.
+      const final = prefix + sign + format(abs, decimals, separator) + suffix;
+      queueMicrotask(() => setDisplay(final));
       return;
     }
 

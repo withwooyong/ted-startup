@@ -6,8 +6,8 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.web._deps import get_krx_client, get_session, require_admin_key
 from app.adapter.out.external import KrxClient
+from app.adapter.web._deps import get_krx_client, get_session, require_admin_key
 from app.application.dto.results import CollectionResult
 from app.application.service import MarketDataCollectionService
 

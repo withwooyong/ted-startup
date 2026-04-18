@@ -6,17 +6,17 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.persistence.repositories import (
+    SignalRepository,
+    StockPriceRepository,
+    StockRepository,
+)
 from app.adapter.web._deps import get_session, require_admin_key
 from app.adapter.web._schemas import (
     SignalResponse,
     StockDetailResponse,
     StockPricePoint,
     StockSummary,
-)
-from app.adapter.out.persistence.repositories import (
-    SignalRepository,
-    StockPriceRepository,
-    StockRepository,
 )
 from app.application.dto.results import DetectionResult
 from app.application.service import SignalDetectionService

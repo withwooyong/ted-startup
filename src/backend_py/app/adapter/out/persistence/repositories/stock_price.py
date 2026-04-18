@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.persistence.models import StockPrice
+from app.adapter.out.persistence.repositories._helpers import rowcount_of
 
 
 class StockPriceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert_many(self, rows: Sequence[dict]) -> int:
+    async def upsert_many(self, rows: Sequence[dict[str, Any]]) -> int:
         """(stock_id, trading_date) 충돌 시 시세 컬럼 업데이트."""
         if not rows:
             return 0
@@ -32,7 +34,7 @@ class StockPriceRepository:
             index_elements=["stock_id", "trading_date"], set_=update_cols
         )
         result = await self._session.execute(stmt)
-        return result.rowcount or 0
+        return rowcount_of(result)
 
     async def find_by_stock_and_date(self, stock_id: int, trading_date: date) -> StockPrice | None:
         stmt = select(StockPrice).where(

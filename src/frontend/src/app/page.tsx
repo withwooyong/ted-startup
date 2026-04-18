@@ -5,7 +5,7 @@ import SignalCard from '@/components/features/SignalCard';
 import CountUp from '@/components/ui/CountUp';
 import Magnetic from '@/components/ui/Magnetic';
 import { getSignals } from '@/lib/api/client';
-import { SignalResult } from '@/types/signal';
+import { SignalResult, detailNumber } from '@/types/signal';
 
 const FILTERS = [
   { key: 'all', label: '전체' },
@@ -35,17 +35,19 @@ export default function DashboardPage() {
 
   const filtered = filter === 'all'
     ? signals
-    : signals.filter(s => s.signalType === filter);
+    : signals.filter(s => s.signal_type === filter);
 
   const sorted = [...filtered].sort((a, b) =>
-    sort === 'score' ? b.score - a.score : a.balanceChangeRate - b.balanceChangeRate
+    sort === 'score'
+      ? b.score - a.score
+      : detailNumber(a.detail, 'balanceChangeRate') - detailNumber(b.detail, 'balanceChangeRate')
   );
 
   const counts: Record<string, number> = {
     all: signals.length,
-    RAPID_DECLINE: signals.filter(s => s.signalType === 'RAPID_DECLINE').length,
-    TREND_REVERSAL: signals.filter(s => s.signalType === 'TREND_REVERSAL').length,
-    SHORT_SQUEEZE: signals.filter(s => s.signalType === 'SHORT_SQUEEZE').length,
+    RAPID_DECLINE: signals.filter(s => s.signal_type === 'RAPID_DECLINE').length,
+    TREND_REVERSAL: signals.filter(s => s.signal_type === 'TREND_REVERSAL').length,
+    SHORT_SQUEEZE: signals.filter(s => s.signal_type === 'SHORT_SQUEEZE').length,
   };
 
   return (
@@ -153,7 +155,7 @@ export default function DashboardPage() {
       {!loading && !error && sorted.length > 0 && (
         <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3" role="list" aria-label="탐지된 시그널 목록">
           {sorted.map(s => (
-            <li key={s.signalId}>
+            <li key={s.id}>
               <SignalCard signal={s} />
             </li>
           ))}

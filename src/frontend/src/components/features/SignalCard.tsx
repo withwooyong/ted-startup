@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import {
-  SignalResult,
-  SIGNAL_TYPE_LABELS,
-  SIGNAL_TYPE_ICONS,
   GRADE_COLORS,
+  SIGNAL_TYPE_ICONS,
+  SIGNAL_TYPE_LABELS,
+  SignalResult,
+  detailNumber,
 } from '@/types/signal';
 
 const TYPE_BG: Record<string, string> = {
@@ -16,10 +17,15 @@ const TYPE_BG: Record<string, string> = {
 
 export default function SignalCard({ signal }: { signal: SignalResult }) {
   const s = signal;
+  const balanceRate = detailNumber(s.detail, 'balanceChangeRate');
+  const volumeRate = detailNumber(s.detail, 'volumeChangeRate');
+  const consecutive = detailNumber(s.detail, 'consecutiveDecreaseDays');
+  const stockCode = s.stock_code ?? '';
+  const stockName = s.stock_name ?? '(이름 없음)';
   return (
     <Link
-      href={`/stocks/${s.stockCode}`}
-      aria-label={`${s.stockName} ${s.stockCode} — ${SIGNAL_TYPE_LABELS[s.signalType]} 스코어 ${s.score}점 ${s.grade}등급, 상세 보기`}
+      href={`/stocks/${stockCode}`}
+      aria-label={`${stockName} ${stockCode} — ${SIGNAL_TYPE_LABELS[s.signal_type]} 스코어 ${s.score}점 ${s.grade}등급, 상세 보기`}
       className={`
         group grid grid-cols-[40px_1fr_auto] items-center gap-3 sm:gap-4
         bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4
@@ -29,27 +35,31 @@ export default function SignalCard({ signal }: { signal: SignalResult }) {
         ${s.grade === 'A' ? 'animate-pulse-glow' : ''}
       `}
     >
-        <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center text-lg ${TYPE_BG[s.signalType]}`} aria-hidden="true">
-          {SIGNAL_TYPE_ICONS[s.signalType]}
+        <div className={`w-10 h-10 rounded-[10px] flex items-center justify-center text-lg ${TYPE_BG[s.signal_type]}`} aria-hidden="true">
+          {SIGNAL_TYPE_ICONS[s.signal_type]}
         </div>
 
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-semibold">{s.stockName}</span>
+            <span className="font-semibold">{stockName}</span>
             <span className="font-[family-name:var(--font-mono)] text-[0.72rem] text-[#3D4A5C]">
-              {s.stockCode}
+              {stockCode}
             </span>
           </div>
           <div className="flex items-center gap-1 mt-1 flex-wrap">
-            <span className="text-[0.65rem] px-2 py-0.5 rounded bg-[#FF4D6A]/10 text-[#FF4D6A] font-[family-name:var(--font-mono)] font-medium">
-              {s.balanceChangeRate.toFixed(1)}%
-            </span>
-            <span className="text-[0.65rem] px-2 py-0.5 rounded bg-[#00D68F]/10 text-[#00D68F] font-[family-name:var(--font-mono)] font-medium">
-              VOL +{s.volumeChangeRate.toFixed(0)}%
-            </span>
-            {s.consecutiveDecreaseDays > 0 && (
+            {balanceRate !== 0 && (
+              <span className="text-[0.65rem] px-2 py-0.5 rounded bg-[#FF4D6A]/10 text-[#FF4D6A] font-[family-name:var(--font-mono)] font-medium">
+                {balanceRate.toFixed(1)}%
+              </span>
+            )}
+            {volumeRate !== 0 && (
+              <span className="text-[0.65rem] px-2 py-0.5 rounded bg-[#00D68F]/10 text-[#00D68F] font-[family-name:var(--font-mono)] font-medium">
+                VOL +{volumeRate.toFixed(0)}%
+              </span>
+            )}
+            {consecutive > 0 && (
               <span className="text-[0.65rem] px-2 py-0.5 rounded bg-white/[0.04] text-[#6B7A90] font-medium">
-                {s.consecutiveDecreaseDays}일 연속
+                {consecutive}일 연속
               </span>
             )}
           </div>
@@ -60,7 +70,7 @@ export default function SignalCard({ signal }: { signal: SignalResult }) {
             {s.score}
           </div>
           <span className={`inline-block mt-1 px-2 py-0.5 rounded-md text-[0.65rem] font-bold font-[family-name:var(--font-display)] ${GRADE_COLORS[s.grade]}`}>
-            {s.grade} · {SIGNAL_TYPE_LABELS[s.signalType]}
+            {s.grade} · {SIGNAL_TYPE_LABELS[s.signal_type]}
           </span>
         </div>
     </Link>

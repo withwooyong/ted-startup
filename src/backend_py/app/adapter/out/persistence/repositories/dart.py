@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.persistence.models import DartCorpMapping
+from app.adapter.out.persistence.repositories._helpers import rowcount_of
 
 
 class DartCorpMappingRepository:
@@ -47,7 +48,7 @@ class DartCorpMappingRepository:
             },
         )
         result = await self._session.execute(stmt)
-        return result.rowcount or 0
+        return rowcount_of(result)
 
     async def list_all(self) -> Sequence[DartCorpMapping]:
         stmt = select(DartCorpMapping).order_by(DartCorpMapping.stock_code)

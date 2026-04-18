@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.persistence.models import BacktestResult, Signal, SignalType
+from app.adapter.out.persistence.models import BacktestResult, SignalType
 from app.adapter.out.persistence.repositories import (
     BacktestResultRepository,
     SignalRepository,
@@ -96,7 +96,11 @@ class BacktestEngineService:
             for n, rdf in returns.items():
                 if sig.signal_date in rdf.index and sig.stock_id in rdf.columns:
                     val = rdf.at[sig.signal_date, sig.stock_id]
-                    r_by_n[n] = _dec(val) if val is not None and not pd.isna(val) else None
+                    # rdf.at 반환 타입은 pandas-stubs 상 union 이 매우 넓음. 수치가 아니면 None.
+                    if val is None or pd.isna(val):
+                        r_by_n[n] = None
+                    else:
+                        r_by_n[n] = _dec(float(val))  # type: ignore[arg-type]
                 else:
                     r_by_n[n] = None
             sig.return_5d = r_by_n[5]

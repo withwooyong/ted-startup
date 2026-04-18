@@ -1,7 +1,7 @@
 """글로벌 예외 핸들러 — Java GlobalExceptionHandler 동등."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Request, status
@@ -15,7 +15,7 @@ def _body(status_code: int, message: str) -> dict[str, Any]:
     return {
         "status": status_code,
         "message": message,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 

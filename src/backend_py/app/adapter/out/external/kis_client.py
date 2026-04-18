@@ -121,7 +121,7 @@ class KisClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "KisClient":
+    async def __aenter__(self) -> KisClient:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -156,14 +156,14 @@ class KisClient:
                 f"토큰 요청 실패: HTTP {resp.status_code} body={resp.text[:200]}"
             )
         data = resp.json()
-        token = data.get("access_token")
-        if not token:
+        raw_token = data.get("access_token")
+        if not isinstance(raw_token, str) or not raw_token:
             raise KisAuthError(f"access_token 부재: {data}")
         expires_in = float(data.get("expires_in") or 86400)
-        self._access_token = token
+        self._access_token = raw_token
         self._token_expires_at = now + max(expires_in - _TOKEN_RENEW_MARGIN_SECONDS, 60.0)
         logger.info("KIS 토큰 발급 성공 (expires_in=%ds)", int(expires_in))
-        return token
+        return raw_token
 
     # ------------------------------------------------------------------
     # Public API

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -165,7 +165,7 @@ class DartClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "DartClient":
+    async def __aenter__(self) -> DartClient:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -191,11 +191,11 @@ class DartClient:
                 f"DART HTTP {resp.status_code} path={path} body={resp.text[:200]}"
             )
         try:
-            body = resp.json()
+            body = cast(dict[str, Any], resp.json())
         except ValueError as exc:
             raise DartUpstreamError(f"DART 응답 JSON 파싱 실패: {resp.text[:200]}") from exc
         status_code = str(body.get("status", ""))
-        if status_code == _OK or status_code == _NO_DATA:
+        if status_code in (_OK, _NO_DATA):
             return body
         raise DartUpstreamError(
             f"DART status={status_code} message={body.get('message', '')}"

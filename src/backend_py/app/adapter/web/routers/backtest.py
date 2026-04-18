@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 from datetime import date
-from dateutil.relativedelta import relativedelta
 
+from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.persistence.models import BacktestResult, SignalType
 from app.adapter.web._deps import get_session, require_admin_key
 from app.adapter.web._schemas import BacktestResultResponse
-from app.adapter.out.persistence.models import BacktestResult, SignalType
 from app.application.dto.results import BacktestExecutionResult
 from app.application.service import BacktestEngineService
 

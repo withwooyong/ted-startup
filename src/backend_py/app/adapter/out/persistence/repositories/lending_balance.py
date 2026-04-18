@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.persistence.models import LendingBalance
+from app.adapter.out.persistence.repositories._helpers import rowcount_of
 
 
 class LendingBalanceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert_many(self, rows: Sequence[dict]) -> int:
+    async def upsert_many(self, rows: Sequence[dict[str, Any]]) -> int:
         if not rows:
             return 0
         stmt = pg_insert(LendingBalance).values(list(rows))
@@ -29,7 +31,7 @@ class LendingBalanceRepository:
             },
         )
         result = await self._session.execute(stmt)
-        return result.rowcount or 0
+        return rowcount_of(result)
 
     async def list_by_trading_date(self, trading_date: date) -> Sequence[LendingBalance]:
         stmt = select(LendingBalance).where(LendingBalance.trading_date == trading_date)
