@@ -14,6 +14,12 @@ from app.adapter.out.persistence.models.enums import (
 )
 from app.adapter.out.persistence.models.lending_balance import LendingBalance
 from app.adapter.out.persistence.models.notification_preference import NotificationPreference
+from app.adapter.out.persistence.models.portfolio import (
+    BrokerageAccount,
+    PortfolioHolding,
+    PortfolioSnapshot,
+    PortfolioTransaction,
+)
 from app.adapter.out.persistence.models.short_selling import ShortSelling
 from app.adapter.out.persistence.models.signal import Signal
 from app.adapter.out.persistence.models.stock import Stock
@@ -22,9 +28,13 @@ from app.adapter.out.persistence.models.stock_price import StockPrice
 __all__ = [
     "BacktestResult",
     "BatchJobStatus",
+    "BrokerageAccount",
     "LendingBalance",
     "MarketType",
     "NotificationPreference",
+    "PortfolioHolding",
+    "PortfolioSnapshot",
+    "PortfolioTransaction",
     "ShortSelling",
     "Signal",
     "SignalGrade",

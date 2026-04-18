@@ -98,3 +98,83 @@ class NotificationPreferenceUpdateRequest(BaseModel):
     weekly_report_enabled: bool
     min_score: ScoreInt
     signal_types: Annotated[list[str], Field(min_length=1, max_length=3)]
+
+
+# ---------- Portfolio (P10) ----------
+
+
+AliasStr = Annotated[str, Field(min_length=1, max_length=50)]
+QuantityPositive = Annotated[int, Field(gt=0)]
+PriceNonNegative = Annotated[Decimal, Field(ge=Decimal("0"))]
+
+
+class AccountCreateRequest(BaseModel):
+    account_alias: AliasStr
+    broker_code: Annotated[str, Field(pattern=r"^(manual|kis|kiwoom)$")]
+    connection_type: Annotated[str, Field(pattern=r"^(manual|kis_rest_mock)$")]
+    environment: Annotated[str, Field(pattern=r"^mock$")] = "mock"
+
+
+class AccountResponse(_Base):
+    id: int
+    account_alias: str
+    broker_code: str
+    connection_type: str
+    environment: str
+    is_active: bool
+    created_at: datetime
+
+
+class TransactionCreateRequest(BaseModel):
+    stock_code: Annotated[str, Field(min_length=6, max_length=6)]
+    transaction_type: Annotated[str, Field(pattern=r"^(BUY|SELL)$")]
+    quantity: QuantityPositive
+    price: PriceNonNegative
+    executed_at: date
+    memo: Annotated[str | None, Field(max_length=1000)] = None
+
+
+class TransactionResponse(_Base):
+    id: int
+    account_id: int
+    stock_id: int
+    transaction_type: str
+    quantity: int
+    price: Decimal
+    executed_at: date
+    source: str
+    memo: str | None = None
+    created_at: datetime
+
+
+class HoldingResponse(_Base):
+    account_id: int
+    stock_id: int
+    stock_code: str | None = None
+    stock_name: str | None = None
+    quantity: int
+    avg_buy_price: Decimal
+    first_bought_at: date
+    last_transacted_at: date | None = None
+
+
+class SnapshotResponse(_Base):
+    account_id: int
+    snapshot_date: date
+    total_value: Decimal
+    total_cost: Decimal
+    unrealized_pnl: Decimal
+    realized_pnl: Decimal
+    holdings_count: int
+
+
+class PerformanceResponse(BaseModel):
+    account_id: int
+    start_date: date
+    end_date: date
+    samples: int
+    total_return_pct: Decimal | None = None
+    max_drawdown_pct: Decimal | None = None
+    sharpe_ratio: Decimal | None = None
+    first_value: Decimal | None = None
+    last_value: Decimal | None = None

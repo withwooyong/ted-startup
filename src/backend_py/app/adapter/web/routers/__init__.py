@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.adapter.web.routers.backtest import router as backtest_router
 from app.adapter.web.routers.batch import router as batch_router
 from app.adapter.web.routers.notifications import router as notifications_router
+from app.adapter.web.routers.portfolio import router as portfolio_router
 from app.adapter.web.routers.signals import router as signals_router
 
 api_router = APIRouter()
@@ -13,5 +14,6 @@ api_router.include_router(signals_router)
 api_router.include_router(backtest_router)
 api_router.include_router(notifications_router)
 api_router.include_router(batch_router)
+api_router.include_router(portfolio_router)
 
 __all__ = ["api_router"]

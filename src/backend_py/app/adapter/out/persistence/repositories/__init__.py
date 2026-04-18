@@ -6,6 +6,12 @@ from app.adapter.out.persistence.repositories.lending_balance import LendingBala
 from app.adapter.out.persistence.repositories.notification_preference import (
     NotificationPreferenceRepository,
 )
+from app.adapter.out.persistence.repositories.portfolio import (
+    BrokerageAccountRepository,
+    PortfolioHoldingRepository,
+    PortfolioSnapshotRepository,
+    PortfolioTransactionRepository,
+)
 from app.adapter.out.persistence.repositories.short_selling import ShortSellingRepository
 from app.adapter.out.persistence.repositories.signal import SignalRepository
 from app.adapter.out.persistence.repositories.stock import StockRepository
@@ -13,8 +19,12 @@ from app.adapter.out.persistence.repositories.stock_price import StockPriceRepos
 
 __all__ = [
     "BacktestResultRepository",
+    "BrokerageAccountRepository",
     "LendingBalanceRepository",
     "NotificationPreferenceRepository",
+    "PortfolioHoldingRepository",
+    "PortfolioSnapshotRepository",
+    "PortfolioTransactionRepository",
     "ShortSellingRepository",
     "SignalRepository",
     "StockPriceRepository",
