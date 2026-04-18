@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "result": {
+    "message_id": 12345,
+    "from": {
+      "id": 9876543210,
+      "is_bot": true,
+      "first_name": "BEARWATCH Signal Bot",
+      "username": "bearwatch_signal_bot"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "title": "BEARWATCH 시그널",
+      "type": "channel"
+    },
+    "date": 1776412345,
+    "text": "[시그널] 삼성전자 공매도 급감 탐지",
+    "entities": [
+      {"offset": 0, "length": 7, "type": "bold"}
+    ]
+  }
+}

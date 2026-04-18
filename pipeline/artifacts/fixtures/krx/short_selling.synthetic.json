@@ -1,0 +1,28 @@
+{
+  "OutBlock_1": [
+    {
+      "ISU_SRT_CD": "005930",
+      "ISU_ABBRV": "삼성전자",
+      "MKT_NM": "유가증권",
+      "CVSRTSELL_TRDVOL": "1,234,567",
+      "CVSRTSELL_TRDVAL": "98,765,432,100",
+      "SRTSELL_RTO": "12.34"
+    },
+    {
+      "ISU_SRT_CD": "000660",
+      "ISU_ABBRV": "SK하이닉스",
+      "MKT_NM": "유가증권",
+      "CVSRTSELL_TRDVOL": "456,789",
+      "CVSRTSELL_TRDVAL": "45,678,901,234",
+      "SRTSELL_RTO": "8.76"
+    },
+    {
+      "ISU_SRT_CD": "035720",
+      "ISU_ABBRV": "카카오",
+      "MKT_NM": "유가증권",
+      "CVSRTSELL_TRDVOL": "-",
+      "CVSRTSELL_TRDVAL": "-",
+      "SRTSELL_RTO": "-"
+    }
+  ]
+}

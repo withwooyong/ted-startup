@@ -1,0 +1,40 @@
+{
+  "OutBlock_1": [
+    {
+      "ISU_SRT_CD": "005930",
+      "ISU_ABBRV": "삼성전자",
+      "MKT_NM": "유가증권",
+      "TDD_CLSPRC": "78,500",
+      "TDD_OPNPRC": "78,000",
+      "TDD_HGPRC": "79,200",
+      "TDD_LWPRC": "77,800",
+      "ACC_TRDVOL": "15,234,567",
+      "MKTCAP": "468,500,000,000,000",
+      "FLUC_RT": "0.64"
+    },
+    {
+      "ISU_SRT_CD": "000660",
+      "ISU_ABBRV": "SK하이닉스",
+      "MKT_NM": "유가증권",
+      "TDD_CLSPRC": "245,000",
+      "TDD_OPNPRC": "243,500",
+      "TDD_HGPRC": "247,000",
+      "TDD_LWPRC": "242,000",
+      "ACC_TRDVOL": "3,456,789",
+      "MKTCAP": "178,300,000,000,000",
+      "FLUC_RT": "-1.21"
+    },
+    {
+      "ISU_SRT_CD": "000020",
+      "ISU_ABBRV": "동화약품",
+      "MKT_NM": "유가증권",
+      "TDD_CLSPRC": "8,910",
+      "TDD_OPNPRC": "8,900",
+      "TDD_HGPRC": "9,050",
+      "TDD_LWPRC": "8,870",
+      "ACC_TRDVOL": "123,456",
+      "MKTCAP": "248,900,000,000",
+      "FLUC_RT": "0.11"
+    }
+  ]
+}
