@@ -6,6 +6,7 @@ Alembic env.py 및 테스트 conftest가 이 모듈을 임포트해서 메타데
 from __future__ import annotations
 
 from app.adapter.out.persistence.models.backtest_result import BacktestResult
+from app.adapter.out.persistence.models.dart import DartCorpMapping
 from app.adapter.out.persistence.models.enums import (
     BatchJobStatus,
     MarketType,
@@ -29,6 +30,7 @@ __all__ = [
     "BacktestResult",
     "BatchJobStatus",
     "BrokerageAccount",
+    "DartCorpMapping",
     "LendingBalance",
     "MarketType",
     "NotificationPreference",

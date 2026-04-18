@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     scheduler_hour_kst: int = Field(default=6, ge=0, le=23, description="일일 실행 시각(KST 24h)")
     scheduler_minute_kst: int = Field(default=0, ge=0, le=59)
 
+    # ---- DART OpenAPI (금융감독원 공시 — Tier1 공식 재무 출처) ----
+    dart_base_url: str = Field(
+        default="https://opendart.fss.or.kr/api",
+        description="DART OpenAPI Base URL",
+    )
+    dart_api_key: str = Field(default="", description="DART OpenAPI 인증키 (무료 발급)")
+    dart_request_timeout_seconds: float = Field(default=15.0)
+
     # ---- KIS (한국투자증권) 모의투자 REST ----
     # MVP 는 모의 전용. 실거래 URL/키는 코드 레벨에서 진입 차단.
     kis_base_url_mock: str = Field(
