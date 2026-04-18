@@ -7,6 +7,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-18 — 심야] 실 E2E 검증 + 3건의 크리티컬/MEDIUM 버그 수정 (`2febdf2` … `510fa1c`)
+
+`.env.prod` 의 실 DART/OpenAI/KIS 모의 키로 `docker compose --env-file .env.prod up -d --build` 풀 재빌드 후 엔드투엔드 검증. 포트폴리오 계좌 생성 → 수동 거래 → KIS 모의 동기화(OAuth+VTTC8434R) → **삼성전자 AI 리포트 실생성 (gpt-4o, 6.3초, 18524/530 토큰, DART 공시 5건 자동 소스 보강)** 까지 풀 체인 성공. 2차 호출 `cache_hit=true` 0.02초. 검증 과정에서 발견한 3건의 실버그를 같은 세션에 수정·검증 완료.
+
+### Fixed
+- **CRITICAL: entrypoint.py 레거시 경로가 003/004/005 누락**(`2febdf2`): `alembic_version` 없고 `stock` 있는 레거시 Java Flyway DB 에서 `stamp head` 만 실행 → P10~P13b 의 portfolio_* / dart_corp_mapping / analysis_report 5 테이블이 생성되지 않음. 수정: `stamp 002_notification_preference` (V1+V2 완료 마킹) → `upgrade head` (003/004/005 적용). Phase 7 E2E 테스트(testcontainers fresh DB) 가 stamp 경로를 타지 않아 놓친 사각지대. runbook §2.4 동시 갱신.
+- **MEDIUM: `scripts/validate_env.py` KIS 계좌번호 기준 느슨**(`2febdf2`): `acct_digits >= 8` → 8자리도 PASS. 어댑터 실요구는 CANO(8) + ACNT_PRDT_CD(2) = `== 10`. 거짓 음성 버그. 수정: `== 10` 으로 정확히 + 미달/초과별 안내 메시지.
+- **CRITICAL: REPORT_JSON_SCHEMA sources.items 의 required 에 `published_at` 누락**(`510fa1c`): OpenAI strict mode 는 `required` 배열에 **모든** properties 키가 포함되어야 함. `/chat/completions` 가 HTTP 400 "Missing 'published_at'" 으로 거부해 리포트 생성 실패. 수정: required 에 published_at 추가 (type: [string, null] 로 이미 nullable 선언).
+
+### Known Outcomes (E2E 검증 통과)
+- 관리자 릴레이: `POST /api/admin/portfolio/accounts` 201 (Caddy HTTPS + Next.js Route Handler + backend 경로 전체 동작)
+- 포트폴리오 거래 등록: 매수 10주@72000 → `GET /holdings` 200 (평단·수량 정확)
+- KIS 모의 동기화: OAuth client_credentials 토큰 발급 → VTTC8434R 잔고 조회 rt_cd=0 → `fetched_count=0` (모의 잔고 없음, 정상 응답)
+- AI 리포트 실생성: gpt-4o 모델 · 6.3초 · 토큰 18,524↓/530↑ · opinion=HOLD · sources 7건 전부 Tier1 (DART 공시 5 + 공식 홈페이지) · 자동 소스 보강 검증 · 24h 캐시 2차 호출 0.02s
+- 레거시 DB 위에서 entrypoint 자동 마이그레이션 003/004/005 적용 확인
+
+---
+
 ## [2026-04-18 — 저녁~밤] Phase 8/9 마무리 + §11 신규 도메인(P10~P15) + 프론트 UI + 리뷰 대응 (`24b43ba` … `7f4f3d1`)
 
 이전 세션에서 Phase 1~7 으로 Java→Python 런타임 이전을 마친 데 이어, 본 세션은 **Phase 8/9 정리 + §11 (포트폴리오·AI 분석 리포트) 신규 도메인 전체 + 프론트 UI + 코드 리뷰 대응** 을 단일 세션에 완결. 커밋 12개 · 약 +7,120 / -5,141 라인 (Java 삭제 4,710 포함) · 백엔드 98/98 PASS · mypy strict 0 · ruff 0 · 프론트 build/tsc/lint clean.

@@ -96,9 +96,13 @@ docker compose -f docker-compose.prod.yml ps
 
 **Alembic 기반**. 백엔드 컨테이너의 `scripts/entrypoint.py` 가 부팅 시 자동 판단:
 
-1. `alembic_version` 테이블 없음 + `stock` 테이블 있음 → `alembic stamp head` (레거시 Java 스키마에 메타 부착)
+1. `alembic_version` 테이블 없음 + `stock` 테이블 있음
+   → `alembic stamp 002_notification_preference` (Java Flyway V1/V2 완료 상태로 마킹)
+   → `alembic upgrade head` (003 portfolio / 004 dart_corp_mapping / 005 analysis_report 적용)
 2. 그 외 → `alembic upgrade head` (신규/누락 리비전 자동 적용)
 3. 이후 `os.execvp` 로 uvicorn 으로 PID 1 전환
+
+> 2026-04-18 수정 이력: 레거시 경로가 `stamp head` 만 실행해 P10~P13b 테이블이 생성되지 않는 버그(`2febdf2`)가 E2E 검증에서 발견됐다. 이제 `stamp 002 → upgrade head` 두 단계로 003/004/005 가 자동 적용된다.
 
 ```bash
 # 테이블 확인
