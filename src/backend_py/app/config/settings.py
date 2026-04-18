@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # 값이 비어 있으면 모든 요청은 401 로 거부(fail-closed).
     admin_api_key: str = Field(default="", description="X-API-Key 헤더 검증용 고정 키(32+ 바이트)")
 
+    # ---- Rate Limiting (slowapi) ----
+    # AI 리포트 엔드포인트 등 관리자 전용/고비용 경로에 적용. 관리자 키 단위 쿼터.
+    # 기본값은 운영 보수적 — 정상 사용에 여유, 루프/오남용 방어.
+    ai_report_rate_limit: str = Field(
+        default="30/minute",
+        description="AI 리포트 생성 엔드포인트 (POST /api/reports/{stock_code}) 제한",
+    )
+
     # ---- Batch Scheduler ----
     # False 면 APScheduler 를 기동하지 않음(테스트·개발 환경 기본값).
     # 운영 배포 시에만 True 로 설정해 매일 KST 06:00 월~금 실행.

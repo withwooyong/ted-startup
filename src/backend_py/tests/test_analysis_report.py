@@ -446,3 +446,59 @@ async def test_reports_endpoint_generates_and_returns_404_for_unknown(
         # 존재하지 않는 종목 → 404
         resp3 = await c.post("/api/reports/999999")
         assert resp3.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_reports_endpoint_rate_limited_after_quota(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """관리자 키 단위 쿼터 초과 시 429 + Retry-After 반환."""
+    from app.adapter.web._rate_limit import limiter
+
+    # 테스트용 극저 쿼터 설정
+    monkeypatch.setenv("ADMIN_API_KEY", "rl-test-key")
+    monkeypatch.setenv("AI_REPORT_RATE_LIMIT", "2/minute")
+    get_settings.cache_clear()
+    # 다른 테스트의 카운터 잔존 방지
+    limiter.reset()
+
+    app = create_app()
+
+    async def _override_session() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    async def _override_dart() -> AsyncIterator[DartClient]:
+        client = DartClient(Settings(dart_api_key="FAKE"), transport=_dart_mock_transport())
+        try:
+            yield client
+        finally:
+            await client.close()
+
+    async def _override_llm() -> AsyncIterator[LLMProvider]:
+        yield FakeLLMProvider(sources=[
+            ReportSource(tier=1, type="krx", url="https://krx.co.kr/x", label="KRX"),
+        ])
+
+    app.dependency_overrides[prod_get_session] = _override_session
+    app.dependency_overrides[prod_get_dart] = _override_dart
+    app.dependency_overrides[prod_get_llm] = _override_llm
+
+    try:
+        await _seed_stock_and_mapping(session)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test",
+            headers={"X-API-Key": "rl-test-key"},
+        ) as c:
+            # 쿼터 내 2회는 통과 (2회차는 캐시 히트)
+            assert (await c.post("/api/reports/005930")).status_code == 200
+            assert (await c.post("/api/reports/005930")).status_code == 200
+            # 3회차 — 쿼터 초과
+            resp = await c.post("/api/reports/005930")
+            assert resp.status_code == 429
+            assert "rate limit" in resp.json()["detail"].lower()
+            assert resp.headers.get("Retry-After") == "60"
+    finally:
+        app.dependency_overrides.clear()
+        limiter.reset()
+        get_settings.cache_clear()

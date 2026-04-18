@@ -4,11 +4,15 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.adapter.web._error_handler import register_exception_handlers
+from app.adapter.web._rate_limit import limiter
 from app.adapter.web.routers import api_router
 from app.batch.scheduler import build_scheduler
 from app.config.settings import get_settings
@@ -55,6 +59,19 @@ def create_app() -> FastAPI:
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=["Authorization", "Content-Type", "X-Admin-Api-Key", "X-API-Key"],
             max_age=600,
+        )
+
+    # slowapi 등록 — limiter.limit 데코레이터가 달린 라우트에서만 쿼터 검사.
+    # 초과 시 RateLimitExceeded → 429 + Retry-After 헤더.
+    app.state.limiter = limiter
+    app.add_middleware(SlowAPIMiddleware)
+
+    @app.exception_handler(RateLimitExceeded)
+    def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"rate limit exceeded: {exc.detail}"},
+            headers={"Retry-After": "60"},
         )
 
     Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)

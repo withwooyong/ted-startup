@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.external import DartClient
@@ -13,6 +13,7 @@ from app.adapter.web._deps import (
     get_session,
     require_admin_key,
 )
+from app.adapter.web._rate_limit import limiter
 from app.adapter.web._schemas import AnalysisReportResponse
 from app.application.port.out.llm_provider import LLMProvider
 from app.application.service.analysis_report_service import (
@@ -21,6 +22,7 @@ from app.application.service.analysis_report_service import (
     CorpCodeNotMappedError,
     StockNotFoundError,
 )
+from app.config.settings import get_settings
 
 router = APIRouter(
     prefix="/api/reports",
@@ -29,8 +31,15 @@ router = APIRouter(
 )
 
 
+def _ai_report_limit() -> str:
+    """슬로우api limit 값을 런타임에 조회 — 테스트가 settings override 할 여지 유지."""
+    return get_settings().ai_report_rate_limit
+
+
 @router.post("/{stock_code}", response_model=AnalysisReportResponse)
+@limiter.limit(_ai_report_limit)
 async def generate_report(
+    request: Request,  # slowapi 가 요청 메타 접근에 필수
     stock_code: str = Path(..., pattern=r"^\d{6}$"),
     force_refresh: bool = Query(False),
     session: AsyncSession = Depends(get_session),
