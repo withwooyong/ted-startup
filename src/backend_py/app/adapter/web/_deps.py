@@ -8,8 +8,10 @@ from functools import lru_cache
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.external import KisClient, KrxClient, TelegramClient
+from app.adapter.out.ai import OpenAIProvider
+from app.adapter.out.external import DartClient, KisClient, KrxClient, TelegramClient
 from app.adapter.out.persistence.session import get_sessionmaker
+from app.application.port.out.llm_provider import LLMProvider
 from app.config.settings import Settings, get_settings
 
 
@@ -28,6 +30,25 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 @lru_cache(maxsize=1)
 def get_krx_client() -> KrxClient:
     return KrxClient()
+
+
+async def get_dart_client() -> AsyncIterator[DartClient]:
+    """요청 스코프 DART 클라이언트."""
+    client = DartClient()
+    try:
+        yield client
+    finally:
+        await client.close()
+
+
+async def get_llm_provider() -> AsyncIterator[LLMProvider]:
+    """요청 스코프 AI 공급자. settings.ai_report_provider 로 Plan A/B 분기 가능하게
+    확장 예정(MVP 는 openai 고정)."""
+    provider = OpenAIProvider()
+    try:
+        yield provider
+    finally:
+        await provider.close()
 
 
 async def get_kis_client() -> AsyncIterator[KisClient]:

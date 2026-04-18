@@ -216,3 +216,36 @@ class SignalAlignmentResponse(BaseModel):
     total_holdings: int
     aligned_holdings: int
     items: list[AlignedHoldingItem]
+
+
+# ---------- AI Report (P13b) ----------
+
+
+class ReportSourceItem(BaseModel):
+    tier: int
+    type: str
+    url: str
+    label: str
+    published_at: str | None = None
+
+
+class ReportContentPayload(BaseModel):
+    summary: str
+    strengths: list[str]
+    risks: list[str]
+    outlook: str
+    opinion: str
+    disclaimer: str
+
+
+class AnalysisReportResponse(BaseModel):
+    stock_code: str
+    report_date: date
+    provider: str
+    model_id: str
+    content: ReportContentPayload
+    sources: list[ReportSourceItem]
+    cache_hit: bool
+    token_in: int | None = None
+    token_out: int | None = None
+    elapsed_ms: int | None = None

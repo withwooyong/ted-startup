@@ -1,6 +1,7 @@
 """Repository 계층 — 각 애그리게이트 별 async Repository."""
 from __future__ import annotations
 
+from app.adapter.out.persistence.repositories.analysis_report import AnalysisReportRepository
 from app.adapter.out.persistence.repositories.backtest_result import BacktestResultRepository
 from app.adapter.out.persistence.repositories.dart import DartCorpMappingRepository
 from app.adapter.out.persistence.repositories.lending_balance import LendingBalanceRepository
@@ -19,6 +20,7 @@ from app.adapter.out.persistence.repositories.stock import StockRepository
 from app.adapter.out.persistence.repositories.stock_price import StockPriceRepository
 
 __all__ = [
+    "AnalysisReportRepository",
     "BacktestResultRepository",
     "BrokerageAccountRepository",
     "DartCorpMappingRepository",

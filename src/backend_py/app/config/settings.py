@@ -57,6 +57,38 @@ class Settings(BaseSettings):
     scheduler_hour_kst: int = Field(default=6, ge=0, le=23, description="일일 실행 시각(KST 24h)")
     scheduler_minute_kst: int = Field(default=0, ge=0, le=59)
 
+    # ---- OpenAI (AI 분석 리포트 — Plan B) ----
+    # 플랜 §12 #9: mini(수집) + flagship(분석) + nano(리패키징) 3단 라우팅.
+    # MVP 는 flagship 단독 호출만 필수. mini 는 web_search 활성 시만 호출, nano 는 기본 passthrough.
+    openai_base_url: str = Field(default="https://api.openai.com/v1")
+    openai_api_key: str = Field(default="", description="OpenAI API Key")
+    openai_model_flagship: str = Field(
+        default="gpt-4o",
+        description="분석 레이어 — 1M 컨텍스트 가정. 실 배포 시 gpt-5.4 등으로 교체",
+    )
+    openai_model_collector: str = Field(
+        default="gpt-4o-mini",
+        description="Tier2 수집 — web_search 지원 모델",
+    )
+    openai_model_nano: str = Field(
+        default="gpt-4o-mini",
+        description="프론트 리패키징 — strict JSON 전환. MVP 에서 passthrough 로 사용",
+    )
+    openai_request_timeout_seconds: float = Field(default=60.0)
+
+    # ---- AI Report (공통) ----
+    ai_report_provider: str = Field(
+        default="openai",
+        description="현재 지원: openai. 추후 perplexity_claude 로 Plan A 전환",
+    )
+    ai_report_cache_hours: int = Field(
+        default=24, ge=1, le=168, description="동일 (stock_code, report_date) 캐시 TTL"
+    )
+    ai_report_web_search_enabled: bool = Field(
+        default=False,
+        description="True 시 Tier2 web_search(mini) 호출. MVP 기본 False",
+    )
+
     # ---- DART OpenAPI (금융감독원 공시 — Tier1 공식 재무 출처) ----
     dart_base_url: str = Field(
         default="https://opendart.fss.or.kr/api",
