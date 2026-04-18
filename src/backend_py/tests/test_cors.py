@@ -19,8 +19,10 @@ def _preflight(client: TestClient, origin: str) -> dict[str, str]:
 
 
 def test_no_cors_header_when_whitelist_empty(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from app.config.settings import get_settings
+
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", "[]")
-    # cache-busting: 새 인스턴스로 create_app 호출
+    get_settings.cache_clear()
     app = create_app()
     client = TestClient(app)
     headers = _preflight(client, "https://evil.example.com")
@@ -34,7 +36,10 @@ def test_wildcard_origin_is_stripped(monkeypatch) -> None:  # type: ignore[no-un
 
 
 def test_whitelisted_origin_allowed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from app.config.settings import get_settings
+
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", '["https://app.example.com"]')
+    get_settings.cache_clear()
     app = create_app()
     client = TestClient(app)
     headers = _preflight(client, "https://app.example.com")
@@ -43,7 +48,10 @@ def test_whitelisted_origin_allowed(monkeypatch) -> None:  # type: ignore[no-unt
 
 
 def test_non_whitelisted_origin_denied(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from app.config.settings import get_settings
+
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", '["https://app.example.com"]')
+    get_settings.cache_clear()
     app = create_app()
     client = TestClient(app)
     headers = _preflight(client, "https://evil.example.com")
