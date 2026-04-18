@@ -3,11 +3,12 @@
 §11.2 의 3-Tier 신뢰 출처 설계에서 **Tier 1 (공식 API)** 에 해당. 재무 숫자와 공시
 원문의 유일한 원천으로 사용하며, LLM web_search 로는 대체하지 않는다.
 
-지원 엔드포인트(MVP 3종):
+지원 엔드포인트(MVP 3종 + 벌크):
 - `fetch_company(corp_code)` — 기업개황 (`/api/company.json`)
 - `fetch_disclosures(...)` — 공시검색 (`/api/list.json`)
 - `fetch_financial_summary(...)` — 단일회사 전체 재무제표 주요계정
   (`/api/fnlttSinglAcntAll.json`)
+- `fetch_corp_code_zip()` — 전체 기업코드 ZIP (`/api/corpCode.xml`)
 
 응답 규약:
 - DART 는 HTTP 200 + `{"status": "000"}` 이 정상. 그 외 상태 코드는 모두 예외.
@@ -258,6 +259,50 @@ class DartClient:
                 rm=_str_or_none(r.get("rm")),
             ))
         return rows
+
+    @retry(
+        retry=retry_if_exception_type(httpx.HTTPError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1.0, min=1.0, max=8.0),
+        reraise=True,
+    )
+    async def fetch_corp_code_zip(self) -> bytes:
+        """전체 기업 corpCode ZIP 바이너리.
+
+        성공 응답은 ZIP 파일(`PK\\x03\\x04` 매직)이며 JSON 필드가 없다.
+        실패 시 OpenAPI 관례대로 JSON 바디 `{"status": "...", "message": "..."}`.
+        바디 선두 4바이트로 분기하고, 이외는 `DartUpstreamError` 로 승격.
+
+        용량이 수 MB 에 달하므로 기본 read timeout 의 4배를 적용.
+        """
+        if not self.configured:
+            raise DartNotConfiguredError("DART_API_KEY 누락")
+        resp = await self._client.get(
+            "/corpCode.xml",
+            params={"crtfc_key": self._api_key},
+            timeout=httpx.Timeout(
+                connect=5.0, read=60.0, write=60.0, pool=5.0,
+            ),
+        )
+        if resp.status_code != 200:
+            raise DartUpstreamError(
+                f"DART HTTP {resp.status_code} path=/corpCode.xml "
+                f"body={resp.text[:200]}"
+            )
+        content = resp.content
+        if content.startswith(b"PK\x03\x04"):
+            return content
+        # 실패 케이스 — JSON 본문에서 상태/메시지 추출
+        try:
+            body = cast(dict[str, Any], resp.json())
+        except ValueError as exc:
+            raise DartUpstreamError(
+                f"DART corpCode 예상치 못한 응답 head={content[:64]!r}"
+            ) from exc
+        raise DartUpstreamError(
+            f"DART corpCode status={body.get('status')} "
+            f"message={body.get('message', '')}"
+        )
 
     async def fetch_financial_summary(
         self,
