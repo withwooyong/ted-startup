@@ -256,7 +256,7 @@ Caddy에서 엔드포인트별로 라우팅을 Java→Python으로 하나씩 돌
    - APP Key/Secret은 모의투자용으로 별도 발급 → `.env.prod`에 `KIS_APP_KEY_MOCK`, `KIS_APP_SECRET_MOCK`, `KIS_ACCOUNT_NO_MOCK`
    - 실거래 계좌 연동은 **본 단계에서 차단** (코드상 모의 URL 하드코드 + 환경변수명에 `_MOCK` 접미사로 오사용 방지)
 2. **수동 등록 기능을 우선 완성** 후 KIS 동기화를 덧붙이는 순서 유지 (Fallback 보장)
-3. **키움 REST API는 조사만 수행** — 별도 스파이크 문서(`docs/research/kiwoom-rest-feasibility.md`)로 분리, 본 마이그레이션 일정에서 제외
+3. **키움 REST API는 조사만 수행** — 별도 스파이크 문서 [`docs/research/kiwoom-rest-feasibility.md`](../research/kiwoom-rest-feasibility.md) 로 분리, 본 마이그레이션 일정에서 제외. **2026-04-18 P15 완료**: 공식 도메인 `openapi.kiwoom.com`, 모의 `mockapi.kiwoom.com` 확인. Python SDK 미성숙(0.1.x) 으로 현재는 No-Go, Go 조건 3가지 정의
 
 #### 데이터 모델 (추가 테이블 초안)
 
@@ -372,7 +372,7 @@ Caddy에서 엔드포인트별로 라우팅을 Java→Python으로 하나씩 돌
 | **P13a. 신뢰 출처 어댑터** | DART OpenAPI 클라이언트(`dart_client.py`), ECOS 클라이언트, 응답 정규화·캐시 | 1일 |
 | **P13b. AI 분석 파이프라인** | `LLMProvider` 추상 + `OpenAIProvider`(web_search + `allowed_domains` 화이트리스트 + strict JSON) + Tier 병합기 + 역할 분리 프롬프트 + 24h 캐시 + 온디맨드 라우트 | 2일 |
 | **P14. 프론트 리포트 뷰** | 포트폴리오 대시보드 + AI 리포트 상세 페이지 + 재생성 버튼 | 1.5일 |
-| **P15. 키움 REST 가용성 조사 (별도 트랙)** | 문서 스파이크만. 제공 TR 범위·제약·KIS 대비 차별점 정리. 구현 없음 | 0.5일 |
+| **P15. 키움 REST 가용성 조사 (별도 트랙)** ✅ 완료 | 문서 스파이크만. 제공 TR 범위·제약·KIS 대비 차별점 정리. 구현 없음. 산출: `docs/research/kiwoom-rest-feasibility.md` | 0.5일 |
 
 **추가 소계: 9일** → 마이그레이션 9일 + 추가 9일 = **약 18 영업일(1인)**
 
