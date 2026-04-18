@@ -7,6 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-19 — 오전] P13-3 AI 리포트 rate limiting + P13-4 KRX 교차 필터 + DB 벌크 upsert 실행 + UI 실측 (`3e44ab6` … `e6d79e6`)
+
+바로 전 세션에서 구현한 P13-1/P13-2 의 실측 검증을 마무리한 뒤, 동일 세션 내에서 **(A) DART 벌크 sync 본실행 → (B) AI 리포트 엔드포인트 slowapi rate limiting → (D) 포트폴리오 UI 실측 → (E) KRX 현재 상장 교차 필터** 4건을 순차·병렬 처리. DB 에 실데이터 3,654건 적재, 백엔드 테스트 131→135건으로 확장.
+
+### Added
+- **slowapi rate limiting**(`3e44ab6`): `POST /api/reports/{stock_code}` 에 관리자 키 단위 쿼터(기본 30/min). `app/adapter/web/_rate_limit.py` 의 Limiter 싱글톤은 `X-API-Key` 우선, 부재 시 remote IP fallback. `RateLimitExceeded` → 429 + `Retry-After: 60` 헤더. 설정값 `AI_REPORT_RATE_LIMIT` 로 env override.
+- **KRX 현재 상장 교차 필터**(`e6d79e6`): `scripts/sync_dart_corp_mapping.py` 에 `fetch_krx_listed_codes()` 추가 — pykrx 로 KOSPI+KOSDAQ 조회 후 DART 결과와 교집합. `--no-cross-filter-krx` 로 비활성화 가능. pykrx 실패 시 빈 집합 반환 + stderr 경고로 fallback.
+- **테스트 5건**: rate limit(1) + KRX 교차·fallback·pykrx 성공·실패(4).
+
+### Verified (실측)
+- **A: DART 벌크 sync 본실행** — `docker compose exec backend python -m scripts.sync_dart_corp_mapping` 로 3,654건 upsert 완료. 주요 종목 005930/000660/035420 매핑 확인. 배치 500건 단위 8회 반복, 총 소요 ~30초.
+- **D: 포트폴리오 UI** — `https://localhost/portfolio` 접속 → 계좌 탭(`e2e-manual`/`e2e-kis`) 렌더링 · 삼성전자 10주 보유 테이블 정확 · AI 리포트 버튼 동작 → `/reports/005930` 캐시 본문 렌더링 확인. 단 수익률/MDD 카드는 `—` (stock 마스터 0 rows + 주가 시계열 없음 — KRX 익명 차단 carry-over 파급).
+
+### Observed (차후 개선)
+- **UI 실측의 데이터 의존 한계** — 라우팅/컴포넌트/상태 층은 UI 만으로 검증 가능하지만, 파생 지표(수익률, MDD, 시그널 정합도, 백테스트)는 stock_price 시계열 필요. 근본 원인은 KRX 익명 차단 2026-04 전면화. 해결 경로: α) KRX 회원 크리덴셜, β) 수동 시드, γ) KIS REST 주가 조회 전환.
+- **slowapi 메모리 스토리지** — 단일 uvicorn 프로세스 전제. multi-worker 확장 시 Redis 백엔드 전환 필요.
+- **상장폐지 종목 3,654건 혼재** — E 구현으로 해소 가능. 다음 sync 실행 시 KRX 상장 ~2,500건 수준으로 축소 예상(실측은 차기 과제).
+
+---
+
 ## [2026-04-18 — 새벽] P13-1 DART 벌크 sync 스크립트 + P13-2 운영 보안 M1~M4 + 실측 검증 (`43f07fd` … `1c27c65`)
 
 수동 시드 3건에 머물던 `dart_corp_mapping` 을 전체 bulk sync 할 수 있는 CLI 스크립트를 구현하고, 이전 세션에서 carry-over 된 운영 보안 4건(M1 /metrics IP 게이팅 · M2 /health 마스킹 · M3 uv digest 고정 · M4 nologin 셸)을 일괄 처리. backend 재빌드 + Caddy reload 후 실 환경에서 **DART API 호출**과 **외부/내부 경로 차단 동작**을 실측 검증 완료.

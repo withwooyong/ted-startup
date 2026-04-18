@@ -1,117 +1,109 @@
 # Session Handoff
 
-> Last updated: 2026-04-19 (KST, 새벽 — P13-1/P13-2 실측 검증 직후)
-> Branch: `master` (origin 과 동기화 — 푸시 완료)
-> Latest commit: `1c27c65` — P13-2: 운영 보안 carry-over M1~M4 일괄 처리
+> Last updated: 2026-04-19 (KST, 오전 — P13-3/P13-4 구현·실측·커밋 직후)
+> Branch: `master` (origin 과 2 커밋 앞서 — 푸시 대기)
+> Latest commit: `e6d79e6` — P13-4: DART 벌크 sync 에 KRX 현재 상장 교차 필터 추가
 
 ## Current Status
 
-**P13-1 (DART 벌크 sync 스크립트) 와 P13-2 (운영 보안 M1~M4) 가 실 환경에서 실측 통과.** 이전 세션까지 carry-over 상태였던 4건의 운영 보안 개선과, 수동 시드 3건으로 한정됐던 `dart_corp_mapping` 의 bulk sync 경로를 같은 세션에 구현·검증·배포 완료. 실 DART API 호출까지 성공(전체 116,503 법인 → 필터 통과 3,654건). Caddy 외부 차단·내부 `/internal/info` 응답·appuser nologin 적용 모두 실측 확인.
+**DART 벌크 sync 실 DB 적재(3,654건) + AI 리포트 rate limiting + KRX 교차 필터 + 포트폴리오 UI 실측까지 한 세션에 완료.** 전 세션에서 마련한 스크립트/보안 기반 위에 **운영 데이터**가 처음으로 적재되었고, OpenAI/DART 호출 루프 공격에 대한 관리자 키 단위 쿼터 방어선이 확보됨. UI 실측은 라우팅/컴포넌트 층 PASS, 데이터 파생 지표는 KRX carry-over 파급으로 `—` 상태 유지 중 — 차후 과제로 명확히 분리.
 
 ## Completed This Session
 
-| # | Task | Commit | Files |
-|---|------|--------|-------|
-| 1 | P13-1 DART corpCode 벌크 sync 스크립트 | `43f07fd` | `app/adapter/out/external/dart_client.py`, `scripts/__init__.py`, `scripts/sync_dart_corp_mapping.py`, `tests/test_sync_dart_corp_mapping.py` |
-| 2 | P13-2 운영 보안 M1~M4 일괄 | `1c27c65` | `ops/caddy/Caddyfile`, `src/backend_py/Dockerfile`, `app/main.py`, `tests/test_health.py` |
-| 3 | 세션 운영 문서 현행화 (이전 세션 마감) | `3dfaf7b` | `HANDOFF.md`, `CHANGELOG.md`, `runbook.md` |
+| # | Task | Commit | Files / 결과 |
+|---|------|--------|--------------|
+| 1 | A: DART 벌크 sync 본실행 | (스크립트 실행만) | DB 에 3,654건 upsert. 삼성전자/SK하이닉스/NAVER 매핑 확인 |
+| 2 | B: AI 리포트 slowapi rate limiting | `3e44ab6` | `_rate_limit.py`, `main.py`, `reports.py`, `settings.py`, `pyproject.toml`, `uv.lock`, `tests/test_analysis_report.py` |
+| 3 | D: 포트폴리오 UI 실측 | (실측만) | 라우팅·보유 테이블·AI 리포트 페이지 렌더링 PASS. 파생 지표는 데이터 부재로 `—` |
+| 4 | E: KRX 현재 상장 교차 필터 | `e6d79e6` | `scripts/sync_dart_corp_mapping.py`, `tests/test_sync_dart_corp_mapping.py` |
 
-**누적 규모(본 세션)**: 3 커밋 / 11 파일 / +613 / -114 라인.
-**테스트**: 백엔드 **130/130 PASS** (기존 98 + /internal/info 1 + sync script 31). mypy strict 0, ruff 0 (신규 파일).
-
-### 실측 검증 결과
-
-| # | 단계 | 결과 |
-|---|------|------|
-| E | DART 벌크 sync `--dry-run` | PASS — ZIP 3,529,057 bytes · 전체 116,503 · stock_code 보유 3,959 · 필터 통과 **3,654건**. 샘플 10건 출력 정상(과거 폐지 종목 혼재 관찰) |
-| F-1 | 외부 `/metrics` | PASS — HTTP 404 (Caddy `@blocked` matcher) |
-| F-2 | 외부 `/internal/info` | PASS — HTTP 404 (Caddy `@blocked` matcher) |
-| F-3 | 내부 `/health` | PASS — `{"status":"UP"}` 만 반환, app/env 미노출 |
-| F-3 | 내부 `/internal/info` | PASS — `{"status":"UP","app":"ted-signal-backend","env":"prod"}` 상세 응답 |
-| F-4 | appuser 로그인 셸 | PASS (범위 이해) — `/etc/passwd` 에 `/usr/sbin/nologin` 확인. `docker exec /bin/bash` 는 여전히 실행되지만 이는 설계 범위 밖(nologin 은 login/su/sshd 경로 차단 전용) |
+**누적 규모(본 세션)**: 2 커밋 / 9 파일 / +289 / -6 라인.
+**테스트**: 백엔드 **135/135 PASS** (전 세션 131 + rate limit 1 + KRX 교차 4). mypy strict 0, ruff 0 (신규 파일).
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | **DART 벌크 sync 본실행 (DB upsert)** | pending | `--dry-run` 통과 확인. 실 upsert 는 사용자 지시 후 `docker compose exec backend python -m scripts.sync_dart_corp_mapping` |
-| 2 | **brow UI 실측** | carry-over | P13a 프론트 렌더링 경로 미검증 (이전 세션 carry-over) |
-| 3 | **force_refresh=true rate limiting** | 보류 (옵션 C) | slowapi/fastapi-limiter. 관리자 키 단위 쿼터 |
-| 4 | **KRX 대차잔고 pykrx 스키마 복구** | 보류 (옵션 D) | 어댑터 fallback 중 |
-| 5 | **`BrokerAdapter` Protocol 추출** | 보류 | 키움 합류 시점 전까지 미필요 |
-| 6 | **Caddy unhealthy** | 관찰 | localhost self-signed 환경 한정. 실도메인 모드에선 자동 해소 |
-| 7 | **KRX 익명 차단 (stock 마스터 0 rows)** | carry-over | P10~P13 검증은 수동 INSERT 로 우회 |
+| 1 | **원격 푸시** | pending | `3e44ab6`, `e6d79e6` 2 커밋 origin 앞서 있음 |
+| 2 | **Z: E 실측** | pending | 컨테이너 재빌드 후 `docker compose exec backend python -m scripts.sync_dart_corp_mapping --dry-run` 로 KRX 교차 필터 결과 확인. 3,654 → ~2,500 수준 축소 예상 |
+| 3 | **데이터 부재 해소(α/β/γ)** | 결정 필요 | KRX 익명 차단 carry-over 의 실제 파급. UI 파생 지표·시그널·백테스트 기능 전체 블로커 |
+| 4 | **`force_refresh=true` 조건부 rate limiting** | 보류 | 현재는 엔드포인트 전체에 30/min. 조건부 분리 원하면 엔드포인트 분리 리팩터 필요 |
+| 5 | **slowapi Redis 백엔드** | 보류 | 단일 uvicorn 프로세스 동안 불필요 |
+| 6 | **`BrokerAdapter` Protocol 추출** | 보류 | 키움 합류 전까지 미필요 |
+| 7 | **Caddy unhealthy** | 관찰 | localhost self-signed 한정 |
 
 ## Key Decisions Made
 
-1. **필터 기준 확정** — 보통주(종목코드 6자리 + 끝자리 `0`) + 이름 기반 제외 8패턴(스팩·기업인수목적·리츠·부동산투자회사·인프라투융자회사·ETF·ETN·상장지수). ETF/ETN 은 법인 미등록이라 자연 제외되지만 방어 필터 유지. 리츠는 사용자 요청으로 명시 제외.
-2. **XML 파싱은 stdlib ET 유지** — DART 는 Tier1 신뢰 출처. 범용 외부 XML 로 확장 시 `defusedxml` 도입. 현재는 코드 주석으로 신뢰 가정 명시.
-3. **uv digest 는 multi-arch index digest 고정** — amd64/arm64 개별 digest 가 아닌 index digest(`sha256:240fb85a…516a`). 두 아키텍처 동시 고정. 업그레이드 절차(`docker buildx imagetools inspect`) 주석화.
-4. **M2 `/health` 마스킹은 외부보다 내부 최소화가 본질** — Caddy 가 frontend 로만 프록시하므로 외부에서 `/health` 는 원래 미노출(→ Next.js 404). 그러나 Docker HEALTHCHECK 및 운영자 진단 경로에서의 정보 최소화 원칙은 유효하므로 마스킹 유지.
-5. **M4 nologin 은 defense-in-depth 로 명시** — `docker exec /bin/bash` 는 여전히 실행됨. nologin 은 SSH/su/login 경로 차단 전용. 실질 방어는 `/bin/bash` 바이너리 제거까지 가야 하지만, 디버깅 편의성 트레이드오프로 MVP 단계에선 현 수준 유지.
-6. **Caddyfile 수정 시 컨테이너 재시작 필요** — Docker Desktop bind mount 가 rename-on-save 로 바뀐 inode 를 따라오지 못함. `caddy reload` 전에 `docker compose restart caddy` 필수. 절차 문서화 필요.
+1. **AI 리포트 rate limit 은 엔드포인트 전체에 적용** — slowapi 데코레이터 기반이라 런타임 조건부(`force_refresh=true` 만)는 hack 필요. 30/min 쿼터는 정상 사용(캐시 히트 포함)에 여유, 루프 공격에는 충분. 필요 시 엔드포인트 분리 리팩터.
+2. **Rate limit key 는 API Key 우선, IP fallback** — 관리자 키가 노출된 경우 공격자가 IP 우회해도 같은 키로 묶이도록. 정상 요청은 항상 키 보유하므로 IP fallback 경로는 도달 불가.
+3. **Limit 값은 런타임 조회 (`_ai_report_limit()` 함수)** — 테스트가 `monkeypatch.setenv` + `get_settings.cache_clear()` 로 override 할 수 있음. import-time 평가는 테스트 불가능.
+4. **KRX 교차 필터는 기본 ON, 실패 시 fallback** — 운영 연속성 우선. DART 결과만으로도 upsert 는 가능하므로 KRX 조회 실패를 블로커로 삼지 않음. stderr 경고로 운영자가 인지 가능.
+5. **KONEX 는 교차 필터 대상 제외** — 유동성 낮아 AI 리포트 대상 외. 실제 수요 발생 시 `market="ALL"` 로 확장.
+6. **UI 데이터 부재 문제를 Rate limit/KRX 필터와 분리** — UI 의 파생 지표(수익률·MDD)가 비어있는 것은 stock 마스터·stock_price 시계열 미집계가 원인이며, 본 세션 작업과 독립. 차후 작업(α/β/γ)으로 이관.
 
 ## Known Issues
 
-### 본 세션 수정·검증 완료
-- `43f07fd` DART 벌크 sync 스크립트 + 어댑터 확장 + 테스트 31건
-- `1c27c65` M1 `/metrics` 외부 차단 · M2 `/health` 마스킹 + `/internal/info` 분리 · M3 uv digest 고정 · M4 appuser nologin
+### 본 세션 구현·검증 완료
+- `3e44ab6` AI 리포트 엔드포인트 slowapi rate limiting
+- `e6d79e6` DART 벌크 sync 에 KRX 현재 상장 교차 필터
 
 ### 본 세션 관찰(차후 개선)
-- **상장폐지 종목 혼재** — `dart_corp_mapping` 필터 통과 3,654건 중 상당수가 과거 폐지 종목. AI 리포트 대상이 현재 상장 종목에 한정되므로 실사용 영향은 없으나, KRX 현재 상장 리스트와 교차 필터하면 더 깔끔해짐. 우선순위 낮음.
-- **Docker Desktop bind mount 휘발성** — Caddyfile 수정 시 inode 변경으로 mount stale. 운영 절차에 반영 필요.
+- **UI 파생 지표 전체 블로커** — 수익률·MDD·시그널 정합도·백테스트 모두 `stock_price` 시계열 의존. KRX 익명 차단 carry-over 가 실사용 기능 전체의 실질 블로커임이 D 실측에서 명확해짐.
+- **상장폐지 종목 혼재 → 축소 예상** — E 구현으로 다음 sync 실행 시 ~2,500건 수준으로 수렴 예상. 실측은 차기 과제(Z).
 
 ### Carry-over (이전 세션에서 식별, 본 세션에서 미처리)
-- `force_refresh=true` rate limiting (slowapi/fastapi-limiter)
+- KRX 익명 차단 (stock 마스터 0 rows → 파생 지표 전반 `—`)
 - KRX 대차잔고 pykrx 스키마 불일치 (fallback 동작 중)
-- KRX 익명 차단 (stock 마스터 0 rows, MVP 는 수동 INSERT 로 우회)
 - Caddy unhealthy (localhost self-signed 한정, 실도메인 모드에선 자동 해소)
+- Docker Desktop bind mount 휘발성 (Caddyfile 수정 시 `docker compose restart caddy` 필수)
 
 ## Context for Next Session
 
 ### 즉시 할 일
 
-1. **DART 벌크 sync 본실행** — `docker compose --env-file .env.prod -f docker-compose.prod.yml exec backend python -m scripts.sync_dart_corp_mapping` 로 `dart_corp_mapping` 에 3,654건 upsert. 완료 후 `psql \dt` 로 count 확인.
-2. **세션 종료 판단** — 스택 유지/정지. `down -v` 는 DB 파괴하므로 금지.
+1. **원격 푸시** — 2 커밋 (`3e44ab6`, `e6d79e6`) + 본 문서 업데이트 커밋.
+2. **Z: E 실측** — backend 재빌드 후 dry-run 으로 KRX 교차 필터 결과 확인. DART 3,654 → KRX 교집합 ~2,500건 수준으로 수렴하는지. 실측 통과 시 본실행(`--dry-run` 제거)로 DB 재적재.
 
 ### 다음 우선 후보
 
-- **A.** 실 DB 벌크 upsert 실행 (스크립트 완성 후 최종 단계) — ~5분
-- **B.** `force_refresh=true` rate limiting (slowapi) — ~0.3일
-- **C.** KRX 대차잔고 복구 — ~1일
-- **D.** 브라우저 UI 실측 (P13a 프론트 렌더링 경로) — ~0.3일
-- **E.** KRX 현재 상장 리스트 교차 필터(폐지 종목 제외) — ~0.2일
+- **α.** KRX 회원 크리덴셜 설정 (`.env.prod` KRX_ID/KRX_PW) + 배치 재실행 → stock 마스터 + 60일 주가 복구. 파생 지표 전체 복구 가능. ~30분(계정 보유 시)
+- **β.** UI 검증 전용 수동 시드 (stock + stock_price CSV) — 운영용 아님, UI 회귀 테스트용. ~1시간
+- **γ.** KIS REST 주가 조회 전환 — KIS 어댑터에 OHLCV 조회 추가, 배치에서 KRX 대신 사용. 근본 해결이지만 구조 변경. ~1일
+- **H.** `force_refresh=true` 조건부 rate limiting (엔드포인트 분리) — 현재 30/min 전체 제한으로 충분. 우선순위 낮음.
+- **I.** Frontend UI 리그레션 테스트(Playwright) — UI 렌더링은 PASS 확인했지만 자동화된 회귀 없음. ~0.5일.
 
 ### 사용자의 원래 목표 (carry-over)
-주식 시그널 탐지·백테스팅 서비스 Java→Python 이전 완결 + §11 (포트폴리오 + AI 리포트) MVP. 전 세션에서 실 E2E 검증 완료 → 본 세션에서 **수동 시드 한계 해소 + 운영 보안 강화** 로 운영 준비도 한 단계 상승.
+주식 시그널 탐지·백테스팅 서비스 Java→Python 이전 완결 + §11 (포트폴리오 + AI 리포트) MVP. **본 세션에서 기능 완성도 → 운영 준비도 → 보안/방어선 → UI 검증까지 한 번에 진행**. 남은 블로커는 주가 데이터 부재 한 가지로 수렴.
 
 ### 사용자 선호·제약 (carry-over + 본 세션 재확인)
 - **커밋 메시지 한글 필수**
 - **푸시는 명시 지시 후에만**
-- **시크릿 값 노출 명령 차단** — `grep '^KEY=' .env.prod` 차단. 대안은 컨테이너 내부 env 접근 또는 `scripts/validate_env.py` 마스킹 출력
+- **시크릿 값 노출 명령 차단** — 대안: 컨테이너 내부 env 접근
 - **작업 단위 커밋 분리 선호**
 - **리뷰 시 HIGH + 보안 MEDIUM + Python/Frontend MEDIUM 일괄 수정 선호**
-- **실측 마무리 선호** — 코드/테스트 PASS 만으로 종결하지 않고 실 환경 검증까지 (본 세션 명시 확인)
+- **실측 마무리 선호** — 코드/테스트 PASS 에 그치지 않고 실 환경 검증까지
+- **병렬 작업 가능 시 병렬** — 본 세션에서 A(백그라운드 DB 작업) + B(코드) + D(사용자 브라우저) 세 트랙 동시 진행
 
 ### 사용자에게 공유할 가치있는 발견
 
-1. **DART corpCode 규모는 "상장사 ~2,500건" 이 아님** — 전체 116,503 법인 중 stock_code 를 가진 것만 3,959건, 필터 후 3,654건. 과거 상장폐지 종목이 대거 포함되기 때문. 실사용(현재 상장 종목만 조회) 관점에선 영향 없지만 수치 기대값은 정정.
-2. **Caddy bind mount 의 stale 패턴** — Docker Desktop 환경에서 Caddyfile 을 수정한 직후 `caddy reload` 하면 이전 버전 config 로 파싱되어 syntax error 가 날 수 있음. **증상은 "unexpected token" 에 가까운 파서 에러** 이고 실제로는 파일이 잘려서 보이는 것. `docker compose restart caddy` 한 번이면 해소.
-3. **M4 nologin 은 명확한 범위 제한이 있음** — 컨테이너 내부에서 `docker exec` 로 `/bin/bash` 바이너리 직접 호출은 여전히 실행됨. 이는 nologin 의 설계 의도 밖(SSH/su/login 경로 차단 전용). 실제 셸 탈출을 막으려면 `/bin/bash` 바이너리 제거 또는 read-only rootfs 등 추가 layer 필요.
+1. **UI 실측의 레이어 구분** — 라우팅/컴포넌트/상태 관리는 데이터 없이도 검증 가능. 파생 지표는 데이터 의존. 데이터 부재를 UI 버그로 오인하지 않는 판단 중요. 본 세션 스크린샷에서 명확히 드러남.
+2. **slowapi 런타임 limit 값 조회 패턴** — 데코레이터에 callable 넘기면 매 요청마다 evaluated. 이것 덕에 테스트가 `monkeypatch.setenv` + `get_settings.cache_clear()` + `limiter.reset()` 3스텝으로 쿼터 override 가능.
+3. **E 는 구현만으로는 축소 효과 미실측** — DART 3,654 → ? 건으로 실제로 몇 건 걸러지는지는 `pykrx.get_market_ticker_list` 성공 여부에 달림. KRX 익명 차단 carry-over 가 pykrx 에도 영향을 주면 fallback 동작해 교차 필터가 사실상 skip. Z 실측이 이걸 판별.
 
 ## Files Modified This Session
 
 ```
  CHANGELOG.md                                          | (본 산출물)
  HANDOFF.md                                            | (본 산출물)
- ops/caddy/Caddyfile                                   | +14 / -3
- src/backend_py/Dockerfile                             | +9  / -2
- src/backend_py/app/main.py                            | +7  / -1
- src/backend_py/app/adapter/out/external/dart_client.py| +47 / -1
- src/backend_py/scripts/__init__.py                    | +1  (신규)
- src/backend_py/scripts/sync_dart_corp_mapping.py      | +185 (신규)
- src/backend_py/tests/test_health.py                   | +14 / -1
- src/backend_py/tests/test_sync_dart_corp_mapping.py   | +207 (신규)
+ src/backend_py/pyproject.toml                         | +1 (slowapi)
+ src/backend_py/uv.lock                                | +28 (lock sync)
+ src/backend_py/app/main.py                            | +18 / -1
+ src/backend_py/app/config/settings.py                 | +8
+ src/backend_py/app/adapter/web/_rate_limit.py         | +30 (신규)
+ src/backend_py/app/adapter/web/routers/reports.py     | +10 / -1
+ src/backend_py/scripts/sync_dart_corp_mapping.py      | +81 / -5
+ src/backend_py/tests/test_analysis_report.py          | +56
+ src/backend_py/tests/test_sync_dart_corp_mapping.py   | +58 / -0
 ```
 
-본 세션은 **코드 + 실측 병행** 기조. 3 커밋으로 수동 시드 한계 해소와 운영 보안 4건을 동시 처리하고, 모든 변경을 실 환경에서 실측 검증으로 마감.
+본 세션은 **한 트랙으로 머물지 않고 A→B→D→E 멀티 트랙** 진행. 매 단계에서 검증/커밋을 분리해 HANDOFF 전달성 극대화.
