@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,3 +28,7 @@ class ShortSellingRepository:
         )
         result = await self._session.execute(stmt)
         return result.rowcount or 0
+
+    async def list_by_trading_date(self, trading_date: date) -> Sequence[ShortSelling]:
+        stmt = select(ShortSelling).where(ShortSelling.trading_date == trading_date)
+        return (await self._session.execute(stmt)).scalars().all()

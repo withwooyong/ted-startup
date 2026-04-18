@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,3 +30,23 @@ class LendingBalanceRepository:
         )
         result = await self._session.execute(stmt)
         return result.rowcount or 0
+
+    async def list_by_trading_date(self, trading_date: date) -> Sequence[LendingBalance]:
+        stmt = select(LendingBalance).where(LendingBalance.trading_date == trading_date)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_by_stocks_between(
+        self, stock_ids: Sequence[int], start: date, end: date
+    ) -> Sequence[LendingBalance]:
+        if not stock_ids:
+            return []
+        stmt = (
+            select(LendingBalance)
+            .where(
+                LendingBalance.stock_id.in_(list(stock_ids)),
+                LendingBalance.trading_date >= start,
+                LendingBalance.trading_date <= end,
+            )
+            .order_by(LendingBalance.stock_id, LendingBalance.trading_date)
+        )
+        return (await self._session.execute(stmt)).scalars().all()

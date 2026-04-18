@@ -53,3 +53,23 @@ class StockPriceRepository:
             .order_by(StockPrice.trading_date)
         )
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_by_trading_date(self, trading_date: date) -> Sequence[StockPrice]:
+        stmt = select(StockPrice).where(StockPrice.trading_date == trading_date)
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_by_stocks_between(
+        self, stock_ids: Sequence[int], start: date, end: date
+    ) -> Sequence[StockPrice]:
+        if not stock_ids:
+            return []
+        stmt = (
+            select(StockPrice)
+            .where(
+                StockPrice.stock_id.in_(list(stock_ids)),
+                StockPrice.trading_date >= start,
+                StockPrice.trading_date <= end,
+            )
+            .order_by(StockPrice.stock_id, StockPrice.trading_date)
+        )
+        return (await self._session.execute(stmt)).scalars().all()

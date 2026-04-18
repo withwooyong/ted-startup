@@ -30,3 +30,18 @@ class SignalRepository:
             .limit(limit)
         )
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def list_between(self, start: date, end: date) -> Sequence[Signal]:
+        stmt = (
+            select(Signal)
+            .where(Signal.signal_date >= start, Signal.signal_date <= end)
+            .order_by(Signal.signal_date, Signal.stock_id)
+        )
+        return (await self._session.execute(stmt)).scalars().all()
+
+    async def add_many(self, signals: Sequence[Signal]) -> int:
+        if not signals:
+            return 0
+        self._session.add_all(list(signals))
+        await self._session.flush()
+        return len(signals)

@@ -17,6 +17,9 @@ dependencies = [
     "alembic>=1.14.0",
     "pykrx>=1.0.45",
     "tenacity>=9.0.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "vectorbt>=0.26.0",
 ]
 
 [project.optional-dependencies]

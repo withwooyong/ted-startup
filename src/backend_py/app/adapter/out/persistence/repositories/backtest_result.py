@@ -24,3 +24,10 @@ class BacktestResultRepository:
             .order_by(BacktestResult.period_end.desc())
         )
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def add_many(self, results: Sequence[BacktestResult]) -> int:
+        if not results:
+            return 0
+        self._session.add_all(list(results))
+        await self._session.flush()
+        return len(results)
