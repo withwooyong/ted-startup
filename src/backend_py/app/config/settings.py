@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # 값이 비어 있으면 모든 요청은 401 로 거부(fail-closed).
     admin_api_key: str = Field(default="", description="X-API-Key 헤더 검증용 고정 키(32+ 바이트)")
 
+    # ---- Batch Scheduler ----
+    # False 면 APScheduler 를 기동하지 않음(테스트·개발 환경 기본값).
+    # 운영 배포 시에만 True 로 설정해 매일 KST 06:00 월~금 실행.
+    scheduler_enabled: bool = Field(default=False, description="프로세스 부팅 시 배치 스케줄러 자동 기동 여부")
+    scheduler_hour_kst: int = Field(default=6, ge=0, le=23, description="일일 실행 시각(KST 24h)")
+    scheduler_minute_kst: int = Field(default=0, ge=0, le=59)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

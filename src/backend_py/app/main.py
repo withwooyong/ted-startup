@@ -1,12 +1,38 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.adapter.web._error_handler import register_exception_handlers
 from app.adapter.web.routers import api_router
+from app.batch.scheduler import build_scheduler
 from app.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    scheduler = None
+    if settings.scheduler_enabled:
+        scheduler = build_scheduler(settings)
+        scheduler.start()
+        logger.info(
+            "배치 스케줄러 기동: KST %02d:%02d 월~금",
+            settings.scheduler_hour_kst, settings.scheduler_minute_kst,
+        )
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
+            logger.info("배치 스케줄러 종료")
 
 
 def create_app() -> FastAPI:
@@ -16,6 +42,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs",
         redoc_url=None,
+        lifespan=_lifespan,
     )
 
     # 명시 화이트리스트에 있을 때만 CORS 활성화. 와일드카드(["*"])는 credentials와 함께 금지.
