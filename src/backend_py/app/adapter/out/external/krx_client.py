@@ -72,15 +72,25 @@ class KrxClient:
     # ------------------------------------------------------------------
 
     async def fetch_stock_prices(self, trading_date: date) -> list[StockPriceRow]:
-        """전 종목 OHLCV + 시가총액을 합쳐 반환."""
+        """전 종목 OHLCV + 시가총액을 합쳐 반환.
+
+        pykrx 1.2.x 부터 `get_market_ohlcv_by_ticker` 가 '시가총액' 을 직접 반환하므로,
+        `get_market_cap_by_ticker` 로 별도 조회할 필요는 없다. 구버전 호환을 위해
+        ohlcv 에 컬럼이 없을 때만 cap 조회로 보강.
+        """
         date_str = trading_date.strftime("%Y%m%d")
-        ohlcv = await self._call_pykrx("get_market_ohlcv_by_ticker", date_str)
-        cap = await self._call_pykrx("get_market_cap_by_ticker", date_str)
+        # market="ALL" 은 KOSPI+KOSDAQ+KONEX 합집합을 한 번에 반환한다. 기본값은 "KOSPI"
+        # 이라 생략하면 KOSDAQ 누락. 시장구분 컬럼이 자동으로 채워져 _to_stock_price_row
+        # 의 market_type 매핑이 그대로 동작.
+        ohlcv = await self._call_pykrx("get_market_ohlcv_by_ticker", date_str, market="ALL")
         if ohlcv is None or ohlcv.empty:
             return []
-        if cap is not None and not cap.empty:
-            # 두 DataFrame 은 종목코드 인덱스를 공유
-            ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
+        if "시가총액" not in ohlcv.columns:
+            cap = await self._call_pykrx(
+                "get_market_cap_by_ticker", date_str, market="ALL"
+            )
+            if cap is not None and not cap.empty and "시가총액" in cap.columns:
+                ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
         # pandas Index 는 Hashable — pykrx 는 항상 종목코드 str 이지만 정적으로는 narrow.
         return [self._to_stock_price_row(str(code), row) for code, row in ohlcv.iterrows()]
 

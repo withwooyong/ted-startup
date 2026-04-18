@@ -74,6 +74,39 @@ async def test_fetch_stock_prices_joins_ohlcv_and_market_cap(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
+async def test_fetch_stock_prices_uses_ohlcv_inline_market_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pykrx 1.2.x: get_market_ohlcv_by_ticker 가 시가총액을 직접 반환.
+
+    이 경우 get_market_cap_by_ticker 를 호출하면 '시가총액' 컬럼 충돌로
+    pandas join 이 ValueError 를 던진다. 어댑터는 ohlcv 에 이미 컬럼이
+    있으면 별도 조회를 건너뛰어야 한다.
+    """
+    from pykrx import stock as pykrx_stock
+
+    # ohlcv 에 시가총액이 포함된 신버전 스키마
+    ohlcv = _fake_ohlcv().assign(시가총액=[468_500_000_000_000, 178_300_000_000_000])
+    called_cap = {"count": 0}
+
+    def _cap(*_a: object, **_k: object) -> pd.DataFrame:
+        called_cap["count"] += 1
+        return _fake_cap()
+
+    monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: ohlcv)
+    monkeypatch.setattr(pykrx_stock, "get_market_cap_by_ticker", _cap)
+
+    client = _make_client()
+    rows = await client.fetch_stock_prices(date(2026, 4, 17))
+
+    assert len(rows) == 2
+    first = next(r for r in rows if r.stock_code == "005930")
+    assert first.market_cap == 468_500_000_000_000
+    # cap 조회는 호출되지 않아야 함
+    assert called_cap["count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_fetch_stock_prices_empty_dataframe(monkeypatch: pytest.MonkeyPatch) -> None:
     from pykrx import stock as pykrx_stock
 
