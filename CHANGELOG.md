@@ -7,6 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-18 — 새벽] P13-1 DART 벌크 sync 스크립트 + P13-2 운영 보안 M1~M4 + 실측 검증 (`43f07fd` … `1c27c65`)
+
+수동 시드 3건에 머물던 `dart_corp_mapping` 을 전체 bulk sync 할 수 있는 CLI 스크립트를 구현하고, 이전 세션에서 carry-over 된 운영 보안 4건(M1 /metrics IP 게이팅 · M2 /health 마스킹 · M3 uv digest 고정 · M4 nologin 셸)을 일괄 처리. backend 재빌드 + Caddy reload 후 실 환경에서 **DART API 호출**과 **외부/내부 경로 차단 동작**을 실측 검증 완료.
+
+### Added
+- **`DartClient.fetch_corp_code_zip()`**(`43f07fd`): DART `/api/corpCode.xml` ZIP 바이너리 다운로드. `PK\x03\x04` 매직으로 성공 분기, JSON 바디는 `DartUpstreamError` 승격. 읽기 타임아웃 60초(수 MB 전송 고려), tenacity 3회 재시도.
+- **`scripts/sync_dart_corp_mapping.py`**(`43f07fd`): CLI 진입점. `--dry-run` / `--batch-size` 옵션. 필터 2단: ① 종목코드 6자리 + 끝자리 `0` (보통주) ② 이름에 스팩·기업인수목적·리츠·부동산투자회사·인프라투융자회사·ETF·ETN·상장지수 미포함. 500건 배치 upsert.
+- **`/internal/info` 엔드포인트**(`1c27c65`): app/env 상세 응답. Caddy 에서 `/internal/*` 차단하므로 Docker 네트워크 내부에서만 접근.
+- **신규 테스트 31건**(`43f07fd`): 필터 파라미터라이즈 (보통주/우선주/스팩/리츠/ETF 경계값) + ZIP/XML 파싱 + `fetch_corp_code_zip` httpx.MockTransport 3종.
+
+### Changed
+- **`/health` 응답 본문 마스킹**(`1c27c65`): `{"status":"UP","app":...,"env":...}` → `{"status":"UP"}` 만. 운영 메타는 `/internal/info` 로 이동.
+- **Caddy `/metrics`, `/internal/*` 외부 404**(`1c27c65`): `@blocked` matcher + `handle` 블록. frontend 프록시 경로와 무관하게 defense-in-depth.
+- **uv 이미지 digest 고정**(`1c27c65`): `ghcr.io/astral-sh/uv:0.11` → `@sha256:240fb85a…516a` (multi-arch index). 공급망 공격 방어. 업그레이드 절차 주석 명시.
+- **appuser 로그인 셸**(`1c27c65`): `/bin/bash` → `/usr/sbin/nologin`. login/su/sshd 경로 차단.
+
+### Verified (실측)
+- **E: DART 벌크 sync `--dry-run`** — 실 API 호출 성공. ZIP 3.5 MB · 전체 116,503 법인 → stock_code 보유 3,959건 → 필터 통과 **3,654건**. 샘플 10건 출력에서 과거 상장폐지 종목이 다수 혼재 확인(예상보다 많은 이유: corpCode.xml 이 폐지 이력도 유지).
+- **F-1/F-2: 외부 차단** — `curl -k https://localhost/metrics` → HTTP 404 · `/internal/info` → HTTP 404. Caddy `@blocked` matcher 동작 확인.
+- **F-3: 내부 응답 분리** — 컨테이너 내부에서 `/health` = `{"status":"UP"}`, `/internal/info` = `{"status":"UP","app":"ted-signal-backend","env":"prod"}` 정상.
+- **F-4: nologin 적용 범위** — `/etc/passwd` 에 `/usr/sbin/nologin` 확인. `docker exec backend /bin/bash` 는 여전히 실행됨(설계 범위 밖 — nologin 은 login/su/sshd 경로 차단 전용). MVP 단계 적정.
+
+### Observed (차후 개선)
+- **Docker Desktop bind mount 휘발성** — 에디터의 rename-on-save 로 inode 가 바뀌면 컨테이너 mount 가 stale. Caddy reload 전에 **컨테이너 재시작 필수**(`docker compose restart caddy`). Caddyfile 수정 절차에 반영 필요.
+- **상장폐지 종목 혼재** — `dart_corp_mapping` 에 과거 폐지 종목도 포함. AI 리포트 대상은 실제 호출자가 현재 상장 종목만 쿼리하므로 실사용 영향 없음. 필요 시 KRX 현재 상장 리스트와 교차 필터 추가 가능.
+
+---
+
 ## [2026-04-18 — 심야] 실 E2E 검증 + 3건의 크리티컬/MEDIUM 버그 수정 (`2febdf2` … `510fa1c`)
 
 `.env.prod` 의 실 DART/OpenAI/KIS 모의 키로 `docker compose --env-file .env.prod up -d --build` 풀 재빌드 후 엔드투엔드 검증. 포트폴리오 계좌 생성 → 수동 거래 → KIS 모의 동기화(OAuth+VTTC8434R) → **삼성전자 AI 리포트 실생성 (gpt-4o, 6.3초, 18524/530 토큰, DART 공시 5건 자동 소스 보강)** 까지 풀 체인 성공. 2차 호출 `cache_hit=true` 0.02초. 검증 과정에서 발견한 3건의 실버그를 같은 세션에 수정·검증 완료.
