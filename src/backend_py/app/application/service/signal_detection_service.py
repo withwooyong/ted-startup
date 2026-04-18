@@ -186,14 +186,15 @@ class SignalDetectionService:
 
         ma_short = qty.rolling(TREND_MA_SHORT, min_periods=TREND_MA_SHORT).mean()
         ma_long = qty.rolling(TREND_MA_LONG, min_periods=TREND_MA_LONG).mean()
-        if ma_short.iloc[-1] is None or ma_long.iloc[-1] is None:
+        # rolling 결과는 NaN 이 나올 수 있고 None 은 절대 나오지 않음 — pd.isna 로 통일 검증.
+        if pd.isna(ma_short.iloc[-1]) or pd.isna(ma_long.iloc[-1]):
+            return None
+        if pd.isna(ma_short.iloc[-2]) or pd.isna(ma_long.iloc[-2]):
             return None
         short_today = float(ma_short.iloc[-1])
         long_today = float(ma_long.iloc[-1])
         short_yest = float(ma_short.iloc[-2])
         long_yest = float(ma_long.iloc[-2])
-        if pd.isna(short_today) or pd.isna(long_today) or pd.isna(short_yest) or pd.isna(long_yest):
-            return None
 
         cross = short_yest >= long_yest and short_today < long_today  # Java 동일 조건
         if not cross:

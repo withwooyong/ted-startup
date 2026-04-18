@@ -32,6 +32,12 @@ class StockRepository:
         )
         return (await self._session.execute(stmt)).scalars().all()
 
+    async def list_by_ids(self, stock_ids: Sequence[int]) -> Sequence[Stock]:
+        if not stock_ids:
+            return []
+        stmt = select(Stock).where(Stock.id.in_(list(stock_ids)))
+        return (await self._session.execute(stmt)).scalars().all()
+
     async def upsert_by_code(self, stock_code: str, stock_name: str, market_type: str) -> Stock:
         """종목코드 기준 upsert — 활성 종목 목록을 수집 단계에서 유지."""
         existing = await self.find_by_code(stock_code)
