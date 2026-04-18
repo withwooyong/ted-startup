@@ -1,118 +1,135 @@
 # Session Handoff
 
-> Last updated: 2026-04-18 (KST, 밤)
-> Branch: `master` (origin 대비 1 커밋 ahead — `7f4f3d1` P15 푸시 대기)
-> Latest commit: `7f4f3d1` — P15: 키움 REST 가용성 조사 (문서 스파이크)
+> Last updated: 2026-04-18 (KST, 밤 — E2E 검증 진입 직후)
+> Branch: `master` (origin 과 동일, 0 ahead / 0 behind)
+> Latest commit: `243826e` — 세션 운영 문서 현행화: CHANGELOG · HANDOFF
+> **작업 트리 clean. 신규 커밋 없음.** 본 핸드오프는 **진행 중 E2E 검증 일시 정지 상태** 를 기록.
 
 ## Current Status
 
-**Java→Python 전면 이전 Phase 1~9 + §11 신규 도메인(P10~P15) 전체 완결.** 포트폴리오·KIS 모의 동기화·시그널 정합도·DART Tier1 어댑터·AI 분석 리포트 파이프라인·프론트 UI·키움 REST 조사까지 전부 완료. 백엔드 **98/98 PASS · mypy strict 0 · ruff 0**, 프론트 **build/tsc/lint clean**. 실 API 키 E2E 검증만 남음.
+Phase 1~9 + §11 P10~P15 전체 완결 상태(이전 핸드오프 참조). **실 API 키 E2E 검증 단계 진입** 후 외부 상태 파악 결과 2가지 블로커가 나와 사용자 결정 대기 중. 신규 코드 변경은 없고 **진행 상태만 본 문서로 인계**.
 
-## Completed This Session
+## In-Flight: 실 E2E 검증 (A 경로)
 
-| # | Task | Commit | Key Files |
-|---|------|--------|-----------|
-| 1 | Phase 8 Java 스택 물리 제거 | `24b43ba` | `src/backend/` 전량 삭제 (-4,710) |
-| 2 | Phase 9 기술스택 문서/에이전트 Python 전환 | `005011e` | `CLAUDE.md`, `docs/design/ai-agent-team-master.md`, `agents/08-backend/AGENT.md`, `pipeline/artifacts/10-deploy-log/runbook.md`, `docs/migration/java-to-python-plan.md` |
-| 3 | P10 포트폴리오 도메인 (스키마·CRUD·성과) | `97203c2` | Alembic 003, portfolio 모델/Repository/Service/Router, 테스트 11 (+1,439) |
-| 4 | P11 KIS 모의투자 REST 연동 | `c003fc8` | `kis_client.py`, SyncPortfolioFromKisUseCase, /sync 라우터, 테스트 9 (+774) |
-| 5 | P12 포트폴리오↔시그널 정합도 | `11e80c2` | SignalAlignmentUseCase, /signal-alignment 라우터, 테스트 5 (+343) |
-| 6 | P13a DART OpenAPI Tier1 어댑터 | `b2c20f4` | Alembic 004, `dart_client.py`, dart_corp_mapping Repository, 테스트 9 (+711) |
-| 7 | P13b AI 분석 리포트 파이프라인 | `caf8355` | Alembic 005, LLMProvider Protocol, OpenAIProvider(strict JSON + 역할 분리 프롬프트), AnalysisReportService(24h 캐시 + 자동 소스 보강), /api/reports/{stock_code}, 테스트 9 (+1,484) |
-| 8 | 코드 리뷰 fix: P13b HIGH(mypy 5) + 보안 MEDIUM 4 | `185dfaf` | cast/list 제네릭/반환타입, `is_safe_public_url`, openai_base_url HTTPS 강제, `<tier1_data>` fence (+179/-43) |
-| 9 | P14 프론트 포트폴리오·AI 리포트 UI | `3cd5c75` | Next.js 16 `/portfolio`·`/portfolio/[id]/alignment`·`/reports/[stockCode]`, 제네릭 `/api/admin/[...path]` 릴레이, types/portfolio·report, NavHeader 확장 (+1,349) |
-| 10 | 코드 리뷰 fix: P14 HIGH 3 + MEDIUM 4 | `c008592` | path 세그먼트 allowlist(SSRF), reports cancellation race 해소, SourceRow safeHref(javascript: 차단), refreshCurrent 에러 전파, aria-label, ADMIN_BASE 공용화 (+153/-73) |
-| 11 | cleanup: mypy strict 0 · ruff 0 · frontend 타입 스키마 정합 | `51bfe10` | pandas-stubs/types-python-dateutil, StrEnum 4, rowcount_of 헬퍼, UP037 forward-ref 제거, signal.ts snake_case 정렬 + SignalDetail 안전 접근, StockDetail 실제 구조 정정, CountUp queueMicrotask (+332/-232) |
-| 12 | P15 키움 REST 가용성 조사 | `7f4f3d1` | `docs/research/kiwoom-rest-feasibility.md`, plan §11 도메인 정정 (+177) |
+### 이번 턴 완료
 
-**누적 규모**: 12 커밋 / 140 파일 / **+7,120 / -5,141 라인** (Java 삭제 -4,710 포함).
-**테스트**: 백엔드 pytest **98/98 PASS** (이전 52 + 신규 46). 프론트 tsc + ESLint + Next.js build 모두 clean.
+| # | 단계 | 결과 |
+|---|------|------|
+| E2E-1 | 사전 상태 점검 | `.env.prod` 존재·읽기 가능 ✅. 기존 Docker 스택이 **구 Java 이미지로 기동 중** (backend command `exec java ...`, 포트 8080 노출, Phase 7/8 이전 빌드) — 재빌드 필요 |
+| E2E-2 | `scripts/validate_env.py` | **3종 모두 PASS**: DART `status=000`, OpenAI `HTTP 200 (sk-proj-)`, KIS 모의 OAuth `access_token 발급`. 추가로 "KIS 계좌번호 형식: 숫자 8자리 (OK)" — 하지만 스크립트의 PASS 기준(`>=8`)과 어댑터 요구(`>=10`)가 불일치 → §블로커 #1 참조 |
+
+### 블로커 (사용자 결정 대기)
+
+#### #1. KIS 계좌번호 자리수 불일치
+- `scripts/validate_env.py` 의 기준: `acct_digits >= 8` → 현재 8자리 PASS 로 찍음
+- `app/adapter/out/external/kis_client.py::_account_parts()` 의 기준:
+  ```python
+  digits = account_no.replace("-", "").strip()
+  if len(digits) < 10:
+      raise KisNotConfiguredError(f"KIS 계좌번호는 숫자 10자리여야 함 (현재 {len(digits)}자리)")
+  ```
+- **질의**: `.env.prod` 의 `KIS_ACCOUNT_NO_MOCK` 값이 **하이픈 제거 후 몇자리인가**? (값 자체는 공유 불필요)
+- **후속 수정 방향**:
+  - 8자리라면 → KIS 모의 HTS "계좌정보" 에서 정식 10자리(`CANO(8) + ACNT_PRDT_CD(2)`) 재확인 후 `.env.prod` 갱신
+  - 동시에 `validate_env.py` 의 `acct_ok` 기준도 `>=10` 으로 정정 권고 (검증 스크립트가 어댑터보다 관대해서 문제를 늦게 잡음 — **참 양성/거짓 음성** 문제)
+
+#### #2. E2E 기동 방식 선택
+- **(A) 풀 재빌드** — `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build`. pandas/vectorbt/numpy 포함 5~10분. entrypoint.py 가 기존 DB 볼륨에 `alembic stamp head` → `upgrade head` 로 003/004/005 자동 적용. **가장 정확한 실환경 검증**
+- **(B) 로컬 uv 기동** — 기존 DB 컨테이너 재활용. backend 만 호스트에서 `uv run uvicorn` 구동. 빠르지만 Caddy·프론트 릴레이 경로 미검증
+- **(C) pytest 수준 어댑터 실호출 시뮬레이션** — MockTransport 대신 실 httpx. 인프라 스택 미기동
+
+### 추가 발견 (E2E-1 사이드)
+- `docker compose ps` 출력에서 `POSTGRES_DB/USER/PASSWORD` env 빈 값 경고 — **`--env-file .env.prod` 플래그 누락** 때문. runbook §2.3 에 이미 명시돼 있으나 실수로 빠지기 쉬운 지점
+- `ted-signal-caddy` **unhealthy** 상태 — TLS 발급 이슈 가능성(로컬 `DOMAIN=localhost` + self-signed). 기능 영향은 제한적이나 §2.5 스모크 테스트 시 `-k` 필수
+- 기존 `ted-signal-backend` (Java) 가 11시간 전 빌드로 살아 있음 — **KRX 익명 차단으로 데이터 0 rows** 상태라 기능적으로 무력화. 재빌드 시 Python 이미지로 교체되므로 문제 없음
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | **원격 푸시** | pending | `7f4f3d1` 1 커밋 ahead. 사용자 명시 지시 후 push |
-| 2 | **실 E2E 검증** | pending | `.env.prod` 의 실 DART/OpenAI/KIS 모의 키로 `docker compose up` → 브라우저 `/portfolio` 계좌 등록 → KIS 동기화 → 특정 종목 AI 리포트 생성까지 1회 검증. `scripts/validate_env.py` 로 사전 키 확인 먼저 권고 |
-| 3 | **`force_refresh=true` rate limiting** | pending (LOW) | P14 리뷰에서 식별. `slowapi` 또는 `fastapi-limiter` 도입해 관리자 키 보유자의 LLM 호출 폭주 방지. 인프라 수준 변경이라 별도 PR 권장 |
-| 4 | **KRX 대차잔고 pykrx 스키마 불일치 복구** | pending (carry-over) | 어댑터에서 경고 로그 + 빈 리스트 fallback 중. 직접 KRX 호출 or pykrx 버전업으로 해결. 대차잔고 공백 기간 동안 `TREND_REVERSAL` 등 시그널 품질 저하 가능 |
-| 5 | **`BrokerAdapter` Protocol 추출** | pending (P15 Go 조건 3) | 현 KIS 단일 구현을 Protocol 뒤로 분리해 계약 고정. 키움 합류 시점에 재작업 방지용. 범위: `fetch_balance() -> list[HoldingRow]` 등 |
-| 6 | **M2 `/health` env 필드 노출** | pending (carry-over) | 외부 `/health` 는 `{"status":"UP"}` 만 노출하고 상세는 `/internal/info` 로 분리 권고 |
-| 7 | **M1 `/metrics` 공개 노출** | pending (carry-over) | Caddyfile IP 게이팅 또는 `/internal/metrics` 경로 이동 권고 |
+| 1 | **E2E-3 스택 기동** | 🔴 블로커 #2 결정 대기 | A/B/C 중 선택 |
+| 2 | **E2E-4 포트폴리오 API 체인** | 대기 | 관리자 키로 POST /api/portfolio/accounts → 수동 보유 등록 → holdings 조회 |
+| 3 | **E2E-5 KIS 모의 /sync** | 블로커 #1 결정 필요 | 계좌번호 10자리 확정 후만 시도 가능 |
+| 4 | **E2E-6 AI 리포트 실생성** | 선행 작업 있음 | `dart_corp_mapping` 테이블 수동 시드 필요 (최소 005930=00126380). bulk sync 미구현 |
+| 5 | **E2E-7 결과 정리** | 대기 | 이슈 발견 시 보정 커밋 |
+| 6 | `force_refresh=true` rate limiting | 보류 | P14 리뷰 LOW 이슈 |
+| 7 | KRX 대차잔고 pykrx 스키마 불일치 복구 | carry-over | 어댑터 fallback 중 |
+| 8 | `BrokerAdapter` Protocol 추출 | 보류 | 키움 합류 전제 시 |
+| 9 | M1 `/metrics` 게이팅 · M2 `/health` env 분리 · M3 uv digest · M4 useradd shell | carry-over | 보안·운영 잔여 |
 
-## Key Decisions Made
+## Key Decisions This Turn
 
-1. **Phase 8/9 정리 먼저, §11 신규는 그다음** — 플랜에 명시된 우선순위 준수. Java 제거와 문서 갱신이 끝난 후에만 신규 도메인 진입.
-2. **포트폴리오 스키마: 4 테이블 분리** — `brokerage_account` / `portfolio_holding` (현재 잔고 스냅샷) / `portfolio_transaction` (매수/매도 원장) / `portfolio_snapshot` (일별 평가). holding 은 거래 이력 파생 캐시이되 가중평균 평단가는 `RecordTransactionUseCase` 에서 직접 갱신 — 매도 시에는 평단가 불변, 매수 시 가중평균 재계산.
-3. **KIS 동기화는 snapshot-level upsert** — KIS `inquire-balance` 응답이 (수량, 평단가) 스냅샷이라 거래 이력 재구성 불가. `portfolio_transaction` 은 수동 입력용으로만 남기고 `portfolio_holding` 을 직접 upsert. 실거래 URL/TR_ID 진입은 생성자 assertion + TR_ID 하드코드 (`VTTC8434R`) 로 이중 차단.
-4. **AI 리포트는 실시간 온디맨드 + 24h 캐시** (KST 00:00 기준). 일 1회 자동 배치는 비용 예측 가능해진 시점에 재논의. `force_refresh=true` 쿼리로 캐시 우회.
-5. **LLMProvider 추상화 우선** — Plan B (OpenAI 단독) 로 착수하되 `LLMProvider` Protocol 뒤에 배치해 Plan A (Perplexity + Claude) 전환 시 `AI_PROVIDER` 환경변수만 변경하면 되게 설계. `collect_qualitative` / `analyze` / `repackage` 3 메서드. web_search (mini) 와 nano 리패키징은 MVP 에서 no-op/passthrough, Responses API 연동 후속.
-6. **신뢰 출처 3-Tier 프롬프트 강제** — `<tier1_data>` / `<tier2_data>` XML-like fence 로 데이터와 지시문 분리. 시스템 프롬프트에 "숫자는 Tier1 만, 정성은 Tier2 만 인용, 일반지식으로 숫자 생성 금지" 역할 분리 규칙 + fence 내부 지시문 **무시** 명시. strict JSON schema 로 출력 블라스트 제한.
-7. **프론트 admin 경로는 catch-all 릴레이** — `/api/admin/[...path]` 단일 Route Handler 가 ADMIN_API_KEY 서버 측 부착. 기존 `/api/admin/notifications/preferences` 는 static 경로라 우선순위 공존. path 세그먼트 `^[A-Za-z0-9_\-.]+$` allowlist + `..` 명시 거부로 SSRF 차단.
-8. **프론트 타입 snake_case 로 전환** — 기존 `signal.ts` 가 camelCase (signalId, stockCode, balanceChangeRate) 로 백엔드 snake_case 와 불일치. 런타임 undefined 참조 다수 존재. P14 에서 portfolio/report 는 처음부터 snake_case 로 가고, cleanup 에서 signal.ts·StockDetail·BacktestSummary 도 snake_case 로 전환 + `SignalDetail` + `detailNumber()` 로 JSONB 안전 접근.
-9. **키움 REST: 현 No-Go** — Python SDK (`kiwoom-rest-api` 0.1.12) 미성숙, 공식 가이드 로그인 벽, 커뮤니티 자료 부족. KIS 단독으로 포트폴리오 목표 달성 가능. Go 조건 3/3 (개인 키움 계좌 수요 + SDK 0.2+ 성숙 + KIS 어댑터 계약 고정) 충족 시 재평가.
-10. **cleanup 에서 pandas-stubs 도입** — mypy strict 를 실제로 0 으로 만들기 위해 `pandas-stubs` + `types-python-dateutil` dev deps 추가. `pykrx` / `apscheduler` 는 스텁 없어 mypy override 로 무시. DataFrame 반환 곳의 `Hashable` 좁히기는 최소한의 `# type: ignore[arg-type]` 로 처리.
-
-## Known Issues
-
-### 보안·품질 이슈 (수정 완료)
-- **P13b HIGH·MEDIUM**(`185dfaf`): mypy strict 5 해소, URL 스킴 검증, 에러 본문 누설 차단, openai_base_url HTTPS 강제, 프롬프트 인젝션 fence.
-- **P14 HIGH·MEDIUM**(`c008592`): SSRF path allowlist, reports race 제거, SourceRow javascript: URI 차단, refreshCurrent 투명 실패 해소.
-- **cleanup**(`51bfe10`): mypy strict 0 / ruff 0 달성.
-
-### 이전 세션 carry-over (미처리)
-- **M1 `/metrics` 공개 노출** — Caddyfile IP 게이팅 권고.
-- **M2 `/health` env 필드 노출** — 외부용 `{"status":"UP"}` / 상세는 `/internal/info`.
-- **M3 uv 컨테이너 이미지 digest 미고정** — 공급망 안정성.
-- **M4 Dockerfile `useradd --shell /bin/bash`** — `/usr/sbin/nologin` 권장.
-- **`force_refresh` rate limiting** — P14 리뷰에서 추가 식별.
-
-### 도메인·운영 이슈
-- **KRX 대차잔고**: pykrx 스키마 불일치로 0 rows fallback. 어댑터 경고 로그만. `TREND_REVERSAL` 등 일부 시그널 품질 영향.
-- **실 E2E 검증 미완**: API 키 3종(DART/OpenAI/KIS 모의) 으로 풀 파이프라인 1회 생성 확인 필요.
+1. **E2E 진입 시 민감 명령 차단 원칙 재확인** — `cat .env.prod`, `ls -la .env.prod`, `awk` 로 키 나열 등 값에 접근 가능한 명령은 모두 **차단됨**. 대체 경로로 `test -f`/`test -r` (exit code 만) + `scripts/validate_env.py` (값 마스킹 내장) 사용. 다음 세션에서도 동일 원칙 유지.
+2. **validate_env.py 의 느슨한 기준이 실제 어댑터 요구와 불일치** 하는 버그 발견 — 8자리 PASS 를 내지만 KIS 어댑터는 10자리를 요구. E2E 시도 전에 스크립트·어댑터 기준 통일 필요.
+3. **기존 Docker 스택은 Phase 7/8 이전 빌드 상태** — 재빌드 없이 E2E 의미 없음. `--env-file .env.prod` 플래그 누락 경고까지 감안하면 옵션 A 풀 재빌드가 가장 깨끗.
 
 ## Context for Next Session
 
-### 사용자의 원래 목표
-주식 시그널 탐지·백테스팅 서비스의 Java→Python 전면 이전 + §11 (계좌 포트폴리오 + AI 종목 분석 리포트) 신규 도메인 합류. MVP 4~6주 내 런칭 범위.
+### 즉시 할 일 (블로커 해소 순서)
 
-### 선택된 경로와 이유
-- **Big-bang 재작성 + 완료 후 §11 진입**: 사전-운영 단계 이점 활용. Strangler Fig 보다 최종 구조 깔끔.
-- **Python 3.12 + FastAPI + SQLAlchemy 2.0 async + Alembic + APScheduler + pandas/vectorbt** 스택.
-- **KIS 모의 단독 착수, 키움은 조사만**: KIS REST 성숙도·레퍼런스·크로스플랫폼 모두 우위. 키움은 Python SDK 안정화 후 재평가.
-- **AI: OpenAI GPT-5.4 단독 (Plan B) 로 출발** + `LLMProvider` 추상화로 Plan A (Perplexity+Claude) 런타임 전환 가능.
-- **신뢰 출처 3-Tier**: Tier1(공식 API 원문) 이 숫자·공시의 유일한 근거. Tier2(web_search) 는 정성만. Tier3(블로그·커뮤니티) 는 파이프라인 미진입.
+1. **사용자에게 KIS 계좌번호 자리수 확인받기** (블로커 #1)
+   - 8자리면 모의 HTS 에서 10자리 재발급 → `.env.prod` 갱신
+   - `scripts/validate_env.py` 의 `acct_ok` 기준도 `>=10` 으로 정정 (작은 follow-up 커밋)
 
-### 사용자 선호·제약
-- **커밋 메시지는 반드시 한글** (글로벌 CLAUDE.md).
-- **푸시는 사용자 명시 지시 후에만** — 현재 1 커밋 로컬 대기.
-- **값이 민감한 명령 차단**: `.env.prod` cat / env 값 로깅 등은 차단. 검증 스크립트는 값 비노출 (`_key_structure` 같은 구조 진단만).
-- **작업 단위 커밋 분리 선호**: Phase/P단위/리뷰 fix/cleanup 을 별도 커밋.
-- **리뷰 요청 시 HIGH + 보안 MEDIUM + Python/Frontend MEDIUM 일괄 수정 선호** (자동수정 포함).
+2. **기동 방식 선택받기** (블로커 #2) — A 권장
+
+3. **E2E-3 기동**:
+   ```bash
+   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+   # 기동 확인
+   docker compose -f docker-compose.prod.yml ps
+   # alembic 리비전 확인
+   docker compose -f docker-compose.prod.yml exec backend alembic current
+   # /health 내부
+   docker compose -f docker-compose.prod.yml exec backend \
+     python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"
+   ```
+
+4. **E2E-4 포트폴리오 체인** (Admin Key 는 현재 셸로 export — runbook §2.5 test #0):
+   ```bash
+   export ADMIN_API_KEY=$(grep '^ADMIN_API_KEY=' .env.prod | cut -d= -f2-)
+   # 수동 계좌 생성
+   curl -fsSk -X POST https://localhost/api/admin/portfolio/accounts \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: $ADMIN_API_KEY" \
+     -d '{"account_alias":"e2e-manual","broker_code":"manual","connection_type":"manual","environment":"mock"}'
+   ```
+
+5. **E2E-5 KIS 동기화** — 계좌 alias=e2e-kis, connection_type=kis_rest_mock 으로 별도 생성 후 `/sync`.
+
+6. **E2E-6 AI 리포트 실생성** — 선행 작업: `dart_corp_mapping` 시드. 예시:
+   ```sql
+   INSERT INTO dart_corp_mapping (stock_code, corp_code, corp_name) VALUES
+     ('005930', '00126380', '삼성전자'),
+     ('000660', '00164779', 'SK하이닉스')
+   ON CONFLICT (stock_code) DO UPDATE SET corp_code=EXCLUDED.corp_code, corp_name=EXCLUDED.corp_name;
+   ```
+   그 후 `POST /api/admin/reports/005930` 호출. OpenAI 비용 소모 주의 — 1건만.
+
+7. **브라우저 E2E**: `https://localhost/portfolio` 접속 → 계정 탭 → 보유 등록 → `/reports/005930` 링크.
+
+### 사용자의 원래 목표 (carry-over)
+주식 시그널 탐지·백테스팅 서비스의 Java→Python 이전 완결 + §11 (포트폴리오 + AI 리포트) 풀 MVP. 본 E2E 가 실 환경에서 동작하는지 마지막 검증.
+
+### 사용자 선호·제약 (carry-over)
+- **커밋 메시지 한글 필수**
+- **푸시는 명시 지시 후에만**
+- **시크릿 값 노출 명령 차단** — 심지어 `awk` 로 키 나열도 거부됨. `test -f`/`test -r` exit code 또는 값 마스킹 스크립트 경유가 유일 경로
+- 작업 단위 커밋 분리 선호
 
 ### 다음 세션 선택지
-- **A.** 원격 푸시 → 실 E2E 검증 → `force_refresh` rate limiting — 현 MVP 를 실가동 검증으로 넘기는 자연스러운 흐름
-- **B.** M1/M2 carry-over (관측성 경로 분리) + Dockerfile 하드닝 (M3/M4) — 보안·운영 잔여 과제 처리
-- **C.** P14 프론트 보강: ErrorBoundary 공용화, `portfolio/page.tsx` 리팩터(Metric/ActionButton 추출), /stocks 페이지 대차잔고 라인 재도입(별도 API 필요)
-- **D.** AI 리포트 고도화: Responses API + web_search_preview 로 Tier2 활성화, nano 리패키징 실구현
 
-A → B 순이 우선도 높음. D 는 비용·검증 가시화 후 재논의.
+- **A.** 블로커 2건 해소 후 E2E 풀 검증 (A 경로 풀 재빌드)
+- **B.** `validate_env.py` 의 acct_ok 기준 `>=10` 정정 + 작은 follow-up 커밋만 먼저 (블로커 #1 영구 해소)
+- **C.** `dart_corp_mapping` bulk sync 스크립트 + `BrokerAdapter` Protocol 추출 등 carry-over 처리로 우회
+- **D.** M1/M2/M3/M4 보안 carry-over 정리
 
-## Files Modified This Session
+A 는 사용자 응답 대기, B 는 즉시 가능한 정리. A 가 먼저 풀려야 진짜 E2E 결론 나옴.
+
+## Files Modified This Turn
 
 ```
- 140 files changed, 7,120 insertions(+), 5,141 deletions(-)
+(none — working tree clean, no new commits since 243826e)
 ```
 
-주요 디렉토리 분포:
-- `src/backend_py/app/adapter/out/ai/` (신규) — OpenAI provider + LLMProvider 추상 (~400 라인)
-- `src/backend_py/app/adapter/out/external/` — KIS·DART 신규 + 기존 KRX/Telegram 타입 정리 (~900 라인)
-- `src/backend_py/app/adapter/out/persistence/` — portfolio/analysis_report/dart 모델·Repository + `_helpers.rowcount_of` (~600 라인)
-- `src/backend_py/app/adapter/web/` — portfolio/reports 라우터, 스키마 확장 (~600 라인)
-- `src/backend_py/app/application/` — portfolio/analysis_report 서비스, LLMProvider Port (~1,300 라인)
-- `src/backend_py/migrations/versions/` — 003 portfolio / 004 dart / 005 analysis_report (~200 라인)
-- `src/backend_py/tests/` — test_portfolio/test_kis_client/test_dart_client/test_analysis_report (46 테스트, ~1,560 라인)
-- `src/frontend/src/app/` — portfolio/reports/admin catch-all 라우트 (~1,000 라인)
-- `src/frontend/src/lib/api/` + `src/frontend/src/types/` — API 클라이언트·타입 (~350 라인)
-- `src/backend/` (삭제) — Java 스택 4,710 라인 제거
-- `docs/research/kiwoom-rest-feasibility.md` (신규, 177 라인)
+본 턴 변경은 실행(`docker compose ps`, `validate_env.py`)과 파일 존재 확인뿐이며 코드·문서 수정 없음.

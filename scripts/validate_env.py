@@ -148,8 +148,18 @@ def main() -> int:
         print("=" * 58)
         return 1
 
+    # KIS 계좌번호는 CANO(8자리 종합계좌번호) + ACNT_PRDT_CD(2자리 상품코드) = 10자리.
+    # KisClient._account_parts() 가 10자리 미만이면 KisNotConfiguredError 를 던지므로
+    # 여기서도 10자리 미만을 FAIL 로 처리해 E2E 진입 전에 잡는다.
     acct_digits = len(env["KIS_ACCOUNT_NO_MOCK"].replace("-", ""))
-    acct_ok = acct_digits >= 8
+    acct_ok = acct_digits == 10
+    acct_detail = f"숫자 {acct_digits}자리"
+    if acct_ok:
+        acct_detail += " (OK, CANO 8 + ACNT_PRDT_CD 2)"
+    elif acct_digits < 10:
+        acct_detail += " — 10자리 필요 (CANO 8 + ACNT_PRDT_CD 2). 모의 HTS 계좌정보에서 전체 번호 재확인"
+    else:
+        acct_detail += " — 10자리 초과. 앞 10자리만 사용 권고"
 
     results: list[tuple[str, bool, str]] = [
         ("DART", *check_dart(env["DART_API_KEY"])),
@@ -158,11 +168,7 @@ def main() -> int:
             "KIS 모의 OAuth",
             *check_kis_mock(env["KIS_APP_KEY_MOCK"], env["KIS_APP_SECRET_MOCK"]),
         ),
-        (
-            "KIS 계좌번호 형식",
-            acct_ok,
-            f"숫자 {acct_digits}자리" + (" (OK)" if acct_ok else " (비정상)"),
-        ),
+        ("KIS 계좌번호 형식", acct_ok, acct_detail),
     ]
 
     for name, ok, detail in results:

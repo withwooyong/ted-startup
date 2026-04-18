@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """컨테이너 진입점 — Alembic 마이그레이션 실행 후 Uvicorn 기동.
 
-레거시 스키마(Java Hibernate 가 생성) 가 이미 있는 DB 로 연결되는 경우,
+레거시 스키마(Java Flyway V1/V2 가 생성) 가 이미 있는 DB 로 연결되는 경우,
 `alembic upgrade head` 는 `CREATE TABLE stock ...` 에서 실패한다.
-이 스크립트는 다음 로직으로 안전 전환한다:
+Java V1 = Alembic 001, V2 = Alembic 002 로 스키마가 정확히 대응되므로 다음 로직:
 
-  - alembic_version 없음 AND stock 존재  → `alembic stamp head` (현 상태를 최신으로 인식)
-  - 그 외(신규 DB 또는 이미 tracked)    → `alembic upgrade head`
+  - alembic_version 없음 AND stock 존재
+      → `alembic stamp 002_notification_preference` (V1+V2 완료 상태로 마킹)
+      → `alembic upgrade head` (003/004/005 신규 적용)
+  - 그 외(신규 DB 또는 이미 tracked)
+      → `alembic upgrade head`
+
+※ 이전 버전은 `stamp head` 를 써서 003/004/005 가 누락됐다. 2026-04-18 수정.
 """
 from __future__ import annotations
 
@@ -41,11 +46,15 @@ def main() -> None:
     has_stock = "stock" in tables
 
     if not has_alembic and has_stock:
+        # Java Flyway V1(init_schema) + V2(notification_preference) 가 적용된 상태.
+        # 해당 두 단계를 완료로 마킹한 뒤, 003 portfolio / 004 dart_corp_mapping /
+        # 005 analysis_report 를 upgrade head 로 적용.
         print(
-            "[entrypoint] 레거시 스키마 감지(Java Hibernate) — alembic stamp head 로 버전 테이블만 생성",
+            "[entrypoint] 레거시 Java Flyway 스키마 감지 — alembic stamp 002 후 upgrade head",
             flush=True,
         )
-        _run(["alembic", "stamp", "head"])
+        _run(["alembic", "stamp", "002_notification_preference"])
+        _run(["alembic", "upgrade", "head"])
     else:
         _run(["alembic", "upgrade", "head"])
 
