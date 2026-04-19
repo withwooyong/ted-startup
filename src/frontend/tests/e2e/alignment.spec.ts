@@ -3,13 +3,14 @@ import { PortfolioPage } from './pages/PortfolioPage';
 import { AlignmentPage } from './pages/AlignmentPage';
 
 test.describe('D. 얼라인먼트 페이지', () => {
-  test('D1: 포트폴리오에서 "시그널 정합도" 링크 → /portfolio/1/alignment', async ({ page }) => {
+  test('D1: 포트폴리오에서 "시그널 정합도" 링크 → 얼라인먼트 페이지', async ({ page }) => {
     const portfolio = new PortfolioPage(page);
     await portfolio.goto();
     await expect(portfolio.accountTabs).toBeVisible();
     await portfolio.alignmentLink.click();
 
-    await expect(page).toHaveURL(/\/portfolio\/1\/alignment$/);
+    // 특정 계좌 id 에 의존하지 않도록 정수 매칭 — seed 순서에 따라 id 는 달라질 수 있음.
+    await expect(page).toHaveURL(/\/portfolio\/\d+\/alignment$/);
   });
 
   test('D2: 페이지 헤더 — "시그널 정합도 (계좌 #1)"', async ({ page }) => {

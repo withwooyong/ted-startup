@@ -77,8 +77,8 @@ async def run() -> int:
             ).scalar_one_or_none()
             if samsung is None:
                 print(
-                    "[seed-e2e] 경고: 005930(삼성전자) stock 미존재. "
-                    "seed_ui_demo 또는 backfill 선행 필요.",
+                    "[seed-e2e] 경고: 005930(삼성전자) stock 미존재 → "
+                    "보유·거래 시드 모두 skip. seed_ui_demo 또는 backfill 선행 필요.",
                     file=sys.stderr,
                     flush=True,
                 )

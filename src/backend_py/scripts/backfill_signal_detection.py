@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -90,7 +91,6 @@ def run(*, since: date | None, until: date | None, timeout_s: float) -> int:
         if status == 200:
             ok += 1
             # body 는 JSON: {"rapid_decline":N,"trend_reversal":N,"short_squeeze":N,"elapsed_ms":N}
-            import json
             try:
                 parsed = json.loads(body)
                 for k in total_signals:
