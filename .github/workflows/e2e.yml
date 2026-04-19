@@ -1,0 +1,130 @@
+name: E2E (Portfolio)
+
+on:
+  pull_request:
+    paths:
+      - 'src/frontend/**'
+      - 'src/backend_py/**'
+      - 'docker-compose.prod.yml'
+      - 'ops/caddy/**'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # CI 전용 비민감 값. 실제 키는 GitHub Secrets 로 주입.
+      POSTGRES_DB: signal_db
+      POSTGRES_USER: signal
+      POSTGRES_PASSWORD: signal_ci
+      ADMIN_API_KEY: ci-admin-key
+      DOMAIN: localhost
+      ACME_EMAIL: internal
+      # 선택적 외부 API — CI 에서는 빈 값 허용 (포트폴리오 플로우는 해당 없음)
+      TELEGRAM_BOT_TOKEN: ''
+      TELEGRAM_CHAT_ID: ''
+      KRX_ID: ''
+      KRX_PW: ''
+      DART_API_KEY: ''
+      OPENAI_API_KEY: ''
+      KIS_APP_KEY_MOCK: ci-mock-key
+      KIS_APP_SECRET_MOCK: ci-mock-secret
+      KIS_ACCOUNT_NO_MOCK: '0000000000-01'
+      NEXT_PUBLIC_API_BASE_URL: /api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write .env.prod
+        run: |
+          cat > .env.prod <<EOF
+          POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          ADMIN_API_KEY=${ADMIN_API_KEY}
+          DOMAIN=${DOMAIN}
+          ACME_EMAIL=${ACME_EMAIL}
+          TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+          TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+          KRX_ID=${KRX_ID}
+          KRX_PW=${KRX_PW}
+          DART_API_KEY=${DART_API_KEY}
+          OPENAI_API_KEY=${OPENAI_API_KEY}
+          KIS_APP_KEY_MOCK=${KIS_APP_KEY_MOCK}
+          KIS_APP_SECRET_MOCK=${KIS_APP_SECRET_MOCK}
+          KIS_ACCOUNT_NO_MOCK=${KIS_ACCOUNT_NO_MOCK}
+          NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+          EOF
+
+      - name: docker compose up (prod stack)
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+
+      - name: Wait for Caddy + backend healthy
+        run: |
+          timeout 180 bash -c 'until curl -sk https://localhost/ -o /dev/null; do sleep 3; done'
+          timeout 60 bash -c 'until docker compose -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\", timeout=3)"; do sleep 3; done'
+
+      - name: Seed UI demo data (accounts + 005930 holding)
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend python -m scripts.seed_ui_demo
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: src/frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: src/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Trust Caddy internal root CA (Linux)
+        run: |
+          docker cp ted-signal-caddy:/data/caddy/pki/authorities/local/root.crt /tmp/caddy-root.crt
+          sudo cp /tmp/caddy-root.crt /usr/local/share/ca-certificates/caddy-root.crt
+          sudo update-ca-certificates
+
+      - name: Run Playwright E2E
+        working-directory: src/frontend
+        env:
+          CI: '1'
+          E2E_BASE_URL: https://localhost
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: src/frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload test-results (traces/screenshots)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: src/frontend/test-results
+          retention-days: 14
+
+      - name: Collect docker logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --no-color > docker-logs.txt || true
+
+      - name: Upload docker logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-logs
+          path: docker-logs.txt
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
