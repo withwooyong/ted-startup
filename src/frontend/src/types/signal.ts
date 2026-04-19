@@ -35,6 +35,11 @@ export interface SignalResult {
   return_20d: string | null;
 }
 
+export interface LatestSignalsResult {
+  signal_date: string | null;
+  signals: SignalResult[];
+}
+
 export interface StockSummary {
   stock_code: string;
   stock_name: string;

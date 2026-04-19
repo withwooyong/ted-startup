@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import SignalCard from '@/components/features/SignalCard';
 import CountUp from '@/components/ui/CountUp';
 import Magnetic from '@/components/ui/Magnetic';
-import { getSignals } from '@/lib/api/client';
+import { getLatestSignals } from '@/lib/api/client';
 import { SignalResult, detailNumber } from '@/types/signal';
 
 const FILTERS = [
@@ -16,15 +16,17 @@ const FILTERS = [
 
 export default function DashboardPage() {
   const [signals, setSignals] = useState<SignalResult[]>([]);
+  const [signalDate, setSignalDate] = useState<string | null>(null);
   const [filter, setFilter] = useState('all');
   const [sort, setSort] = useState<'score' | 'change'>('score');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getSignals()
-      .then((data: SignalResult[]) => {
-        setSignals(data);
+    getLatestSignals()
+      .then(({ signal_date, signals: rows }) => {
+        setSignalDate(signal_date);
+        setSignals(rows);
         setLoading(false);
       })
       .catch(err => {
@@ -59,7 +61,7 @@ export default function DashboardPage() {
           오늘의 시그널
         </span>
         <span className="font-[family-name:var(--font-mono)] text-xs text-[#3D4A5C]">
-          {new Date().toISOString().split('T')[0]}
+          {signalDate ?? new Date().toISOString().split('T')[0]}
         </span>
       </div>
 

@@ -1,4 +1,4 @@
-import type { SignalResult, StockDetail, BacktestSummary } from '@/types/signal';
+import type { LatestSignalsResult, SignalResult, StockDetail, BacktestSummary } from '@/types/signal';
 import type {
   NotificationPreference,
   NotificationPreferenceUpdate,
@@ -28,6 +28,13 @@ export async function getSignals(date?: string, type?: string): Promise<SignalRe
   if (type) params.set('type', type);
   const query = params.toString();
   return fetchApi<SignalResult[]>(`/signals${query ? `?${query}` : ''}`);
+}
+
+export async function getLatestSignals(type?: string): Promise<LatestSignalsResult> {
+  const params = new URLSearchParams();
+  if (type) params.set('type', type);
+  const query = params.toString();
+  return fetchApi<LatestSignalsResult>(`/signals/latest${query ? `?${query}` : ''}`);
 }
 
 export async function getStockDetail(code: string, from?: string, to?: string): Promise<StockDetail> {
