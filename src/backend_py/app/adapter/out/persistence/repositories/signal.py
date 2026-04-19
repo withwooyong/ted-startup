@@ -18,8 +18,19 @@ class SignalRepository:
         await self._session.flush()
         return signal
 
-    async def list_by_date(self, signal_date: date) -> Sequence[Signal]:
-        stmt = select(Signal).where(Signal.signal_date == signal_date).order_by(Signal.score.desc())
+    async def list_by_date(
+        self, signal_date: date, *, limit: int | None = None
+    ) -> Sequence[Signal]:
+        """특정일 시그널을 score 내림차순으로 반환.
+
+        limit=None 이면 전량(SignalDetectionService 의 중복 검사 경로).
+        API 로 노출되는 라우터는 항상 명시 limit 을 주입한다.
+        """
+        stmt = select(Signal).where(Signal.signal_date == signal_date).order_by(
+            Signal.score.desc()
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return (await self._session.execute(stmt)).scalars().all()
 
     async def find_latest_signal_date(self) -> date | None:

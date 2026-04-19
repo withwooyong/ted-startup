@@ -29,10 +29,11 @@ router = APIRouter(prefix="/api", tags=["signals"])
 async def list_signals(
     signal_date: date | None = Query(default=None, alias="date"),
     signal_type: str | None = Query(default=None, alias="type"),
+    limit: int = Query(default=500, ge=1, le=5000),
     session: AsyncSession = Depends(get_session),
 ) -> list[SignalResponse]:
     target = signal_date or date.today()
-    signals = await SignalRepository(session).list_by_date(target)
+    signals = await SignalRepository(session).list_by_date(target, limit=limit)
     if signal_type:
         signals = [s for s in signals if s.signal_type == signal_type]
 
@@ -66,6 +67,7 @@ async def list_signals(
 @router.get("/signals/latest", response_model=LatestSignalsResponse)
 async def list_latest_signals(
     signal_type: str | None = Query(default=None, alias="type"),
+    limit: int = Query(default=500, ge=1, le=5000),
     session: AsyncSession = Depends(get_session),
 ) -> LatestSignalsResponse:
     """가장 최근 탐지일의 시그널을 반환. 대시보드의 '오늘 빈 상태' 회피용."""
@@ -74,7 +76,7 @@ async def list_latest_signals(
     if latest is None:
         return LatestSignalsResponse(signal_date=None, signals=[])
 
-    signals = await signal_repo.list_by_date(latest)
+    signals = await signal_repo.list_by_date(latest, limit=limit)
     if signal_type:
         signals = [s for s in signals if s.signal_type == signal_type]
     if not signals:

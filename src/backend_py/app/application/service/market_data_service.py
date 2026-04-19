@@ -13,6 +13,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.external import KrxClient
+from app.adapter.out.persistence.models import LendingBalance
 from app.adapter.out.persistence.repositories import (
     LendingBalanceRepository,
     ShortSellingRepository,
@@ -87,13 +88,13 @@ class MarketDataCollectionService:
 
         # 대차잔고 upsert (전일 대비 변동률·연속 감소일수 계산)
         lending_repo = LendingBalanceRepository(self._session)
-        prev_by_stock = await self._fetch_prev_lending(lending_repo, trading_date)
+        prev_by_stock = await _fetch_prev_lending(lending_repo, trading_date)
         lending_rows = []
         for lb in lendings:
             if lb.stock_code not in code_to_id:
                 continue
             sid = code_to_id[lb.stock_code]
-            change_q, change_r, consec = self._compute_lending_deltas(
+            change_q, change_r, consec = _compute_lending_deltas(
                 today_qty=lb.balance_quantity, prev=prev_by_stock.get(sid)
             )
             lending_rows.append(
@@ -126,42 +127,43 @@ class MarketDataCollectionService:
             elapsed_ms=elapsed,
         )
 
-    @staticmethod
-    async def _fetch_prev_lending(
-        repo: LendingBalanceRepository, trading_date: date
-    ) -> dict[int, object]:
-        """직전 영업일의 대차잔고를 stock_id 기준 dict 로 반환.
 
-        주말·공휴일 대응을 위해 최대 5일 전까지 역방향 스캔한다 (주말 포함 최대 3일).
-        """
-        for delta in range(1, 6):
-            cand = trading_date - timedelta(days=delta)
-            rows = await repo.list_by_trading_date(cand)
-            if rows:
-                return {r.stock_id: r for r in rows}
-        return {}
+async def _fetch_prev_lending(
+    repo: LendingBalanceRepository, trading_date: date
+) -> dict[int, LendingBalance]:
+    """직전 영업일의 대차잔고를 stock_id 기준 dict 로 반환.
 
-    @staticmethod
-    def _compute_lending_deltas(
-        *, today_qty: int, prev: object | None
-    ) -> tuple[int | None, Decimal | None, int]:
-        """오늘 잔고수량 vs 전일 행 → (change_quantity, change_rate, consecutive_decrease_days).
+    주말·공휴일 대응을 위해 최대 5일 전까지 역방향 스캔한다 (주말 포함 최대 3일).
+    모듈 레벨 함수 — 외부 repo 의존만 있고 서비스 상태는 쓰지 않음.
+    """
+    for delta in range(1, 6):
+        cand = trading_date - timedelta(days=delta)
+        rows = await repo.list_by_trading_date(cand)
+        if rows:
+            return {r.stock_id: r for r in rows}
+    return {}
 
-        - 전일이 없으면 (None, None, 0): 최초 수집일 또는 장기 결측 후 복귀
-        - 전일 balance_quantity 가 0 이면 change_rate 는 None (0 으로 나눌 수 없음)
-        - change_quantity < 0 일 때만 consecutive_decrease_days += 1, 아니면 0 으로 리셋 (Java 원본 일치)
-        """
-        if prev is None:
-            return None, None, 0
-        prev_qty = int(getattr(prev, "balance_quantity", 0))
-        change_q = today_qty - prev_qty
-        change_r: Decimal | None
-        if prev_qty > 0:
-            change_r = (Decimal(change_q) / Decimal(prev_qty) * Decimal(100)).quantize(
-                Decimal("0.0001")
-            )
-        else:
-            change_r = None
-        prev_consec = int(getattr(prev, "consecutive_decrease_days", 0) or 0)
-        consec = prev_consec + 1 if change_q < 0 else 0
-        return change_q, change_r, consec
+
+def _compute_lending_deltas(
+    *, today_qty: int, prev: LendingBalance | None
+) -> tuple[int | None, Decimal | None, int]:
+    """오늘 잔고수량 vs 전일 행 → (change_quantity, change_rate, consecutive_decrease_days).
+
+    - 전일이 없으면 (None, None, 0): 최초 수집일 또는 장기 결측 후 복귀
+    - 전일 balance_quantity 가 0 이면 change_rate 는 None (0 으로 나눌 수 없음)
+    - change_quantity < 0 일 때만 consecutive_decrease_days += 1, 아니면 0 으로 리셋 (Java 원본 일치)
+    """
+    if prev is None:
+        return None, None, 0
+    prev_qty = int(prev.balance_quantity)
+    change_q = today_qty - prev_qty
+    change_r: Decimal | None
+    if prev_qty > 0:
+        change_r = (Decimal(change_q) / Decimal(prev_qty) * Decimal(100)).quantize(
+            Decimal("0.0001")
+        )
+    else:
+        change_r = None
+    prev_consec = int(prev.consecutive_decrease_days or 0)
+    consec = prev_consec + 1 if change_q < 0 else 0
+    return change_q, change_r, consec
