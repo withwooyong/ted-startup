@@ -135,4 +135,7 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker-compose.prod.yml --env-file .env.prod down -v
+        run: |
+          docker compose -f docker-compose.prod.yml --env-file .env.prod down -v || true
+          # CI workspace 에 생성된 .env.prod 제거 (dummy 값이지만 방어적 hygiene)
+          rm -f .env.prod
