@@ -33,6 +33,16 @@ class SignalResponse(_Base):
     return_20d: Decimal | None = None
 
 
+class LatestSignalsResponse(BaseModel):
+    """가장 최근 탐지된 signal_date 기준으로 묶은 응답.
+
+    signal_date 가 None 이면 시그널 테이블이 비어있음.
+    대시보드가 "오늘 기준 빈 상태"를 피하려고 사용.
+    """
+    signal_date: date | None = None
+    signals: list[SignalResponse] = Field(default_factory=list)
+
+
 class StockSummary(_Base):
     stock_code: str
     stock_name: str

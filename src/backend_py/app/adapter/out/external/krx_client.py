@@ -97,11 +97,35 @@ class KrxClient:
                 ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
 
         market_map = await self._build_market_type_map(date_str)
+        name_map = await self._build_stock_name_map(date_str)
 
         return [
-            self._to_stock_price_row(str(code), row, market_map.get(str(code), "KOSPI"))
+            self._to_stock_price_row(
+                str(code),
+                row,
+                market_map.get(str(code), "KOSPI"),
+                name_map.get(str(code), ""),
+            )
             for code, row in ohlcv.iterrows()
         ]
+
+    async def _build_stock_name_map(self, date_str: str) -> dict[str, str]:
+        """티커 → 종목명 매핑.
+
+        get_market_ohlcv_by_ticker 는 종목명을 반환하지 않는다. 배치 조회 가능한 API 중
+        get_market_price_change_by_ticker(from=to) 가 '종목명' 컬럼을 포함해 1회 호출로
+        전종목 이름을 얻을 수 있다. 실패 시 빈 dict — Repository 의 '빈 이름 보존' 로직이 처리.
+        """
+        try:
+            df = await self._call_pykrx(
+                "get_market_price_change_by_ticker", date_str, date_str, market="ALL"
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("KRX 종목명 맵 실패(%s): %s", type(e).__name__, e)
+            return {}
+        if df is None or df.empty or "종목명" not in df.columns:
+            return {}
+        return {str(t): str(df.loc[t, "종목명"]) for t in df.index}
 
     async def _build_market_type_map(self, date_str: str) -> dict[str, str]:
         """시장별 티커 리스트로 market_type 매핑 딕셔너리 구성.
@@ -196,10 +220,14 @@ class KrxClient:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_stock_price_row(code: str, row: Any, market_type: str) -> StockPriceRow:
+    def _to_stock_price_row(
+        code: str, row: Any, market_type: str, stock_name: str = ""
+    ) -> StockPriceRow:
+        # stock_name 우선순위: 명시적 전달 > row 의 "종목명" 컬럼 > 빈 문자열
+        # pykrx get_market_ohlcv_by_ticker 는 종목명 컬럼을 반환하지 않으므로 외부 매핑 필수.
         return StockPriceRow(
             stock_code=str(code),
-            stock_name=str(row.get("종목명", "")),
+            stock_name=stock_name or str(row.get("종목명", "")),
             market_type=market_type,
             close_price=_int(row.get("종가")),
             open_price=_int(row.get("시가")),
@@ -229,9 +257,15 @@ class KrxClient:
 
     @staticmethod
     def _to_lending_balance_row(code: str, row: Any) -> LendingBalanceRow:
+        # pykrx get_shorting_balance_by_ticker 실제 컬럼: 공매도잔고 / 공매도금액 / 상장주식수 / 시가총액 / 비중
+        # 구버전 호환을 위해 기존 "잔고수량"/"BAL_QTY" 도 fallback 체인에 유지.
         return LendingBalanceRow(
             stock_code=str(code),
             stock_name=str(row.get("종목명", "")),
-            balance_quantity=_int(row.get("잔고수량", row.get("BAL_QTY", 0))),
-            balance_amount=_int(row.get("잔고금액", row.get("BAL_AMT", 0))),
+            balance_quantity=_int(
+                row.get("공매도잔고", row.get("잔고수량", row.get("BAL_QTY", 0)))
+            ),
+            balance_amount=_int(
+                row.get("공매도금액", row.get("잔고금액", row.get("BAL_AMT", 0)))
+            ),
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.persistence.models import Signal
@@ -21,6 +21,11 @@ class SignalRepository:
     async def list_by_date(self, signal_date: date) -> Sequence[Signal]:
         stmt = select(Signal).where(Signal.signal_date == signal_date).order_by(Signal.score.desc())
         return (await self._session.execute(stmt)).scalars().all()
+
+    async def find_latest_signal_date(self) -> date | None:
+        """탐지된 시그널 중 가장 최근 signal_date. 행 없음이면 None."""
+        stmt = select(func.max(Signal.signal_date))
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_by_stock(self, stock_id: int, limit: int = 30) -> Sequence[Signal]:
         stmt = (

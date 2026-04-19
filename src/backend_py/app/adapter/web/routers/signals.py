@@ -13,6 +13,7 @@ from app.adapter.out.persistence.repositories import (
 )
 from app.adapter.web._deps import get_session, require_admin_key
 from app.adapter.web._schemas import (
+    LatestSignalsResponse,
     SignalResponse,
     StockDetailResponse,
     StockPricePoint,
@@ -60,6 +61,47 @@ async def list_signals(
             )
         )
     return responses
+
+
+@router.get("/signals/latest", response_model=LatestSignalsResponse)
+async def list_latest_signals(
+    signal_type: str | None = Query(default=None, alias="type"),
+    session: AsyncSession = Depends(get_session),
+) -> LatestSignalsResponse:
+    """가장 최근 탐지일의 시그널을 반환. 대시보드의 '오늘 빈 상태' 회피용."""
+    signal_repo = SignalRepository(session)
+    latest = await signal_repo.find_latest_signal_date()
+    if latest is None:
+        return LatestSignalsResponse(signal_date=None, signals=[])
+
+    signals = await signal_repo.list_by_date(latest)
+    if signal_type:
+        signals = [s for s in signals if s.signal_type == signal_type]
+    if not signals:
+        return LatestSignalsResponse(signal_date=latest, signals=[])
+
+    stock_ids = list({s.stock_id for s in signals})
+    stocks = {s.id: s for s in await StockRepository(session).list_by_ids(stock_ids)}
+    return LatestSignalsResponse(
+        signal_date=latest,
+        signals=[
+            SignalResponse(
+                id=sig.id,
+                stock_id=sig.stock_id,
+                stock_code=stocks.get(sig.stock_id).stock_code if stocks.get(sig.stock_id) else None,
+                stock_name=stocks.get(sig.stock_id).stock_name if stocks.get(sig.stock_id) else None,
+                signal_date=sig.signal_date,
+                signal_type=sig.signal_type,
+                score=sig.score,
+                grade=sig.grade,
+                detail=sig.detail,
+                return_5d=sig.return_5d,
+                return_10d=sig.return_10d,
+                return_20d=sig.return_20d,
+            )
+            for sig in signals
+        ],
+    )
 
 
 @router.get("/stocks/{stock_code}", response_model=StockDetailResponse)

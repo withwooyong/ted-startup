@@ -65,6 +65,7 @@ services:
       KIS_APP_KEY_MOCK: ${KIS_APP_KEY_MOCK:-}
       KIS_APP_SECRET_MOCK: ${KIS_APP_SECRET_MOCK:-}
       KIS_ACCOUNT_NO_MOCK: ${KIS_ACCOUNT_NO_MOCK:-}
+      KIS_USE_IN_MEMORY_MOCK: ${KIS_USE_IN_MEMORY_MOCK:-false}
       # 배치 스케줄러 (프로덕션만 자동 기동)
       SCHEDULER_ENABLED: "true"
       SCHEDULER_HOUR_KST: "6"
