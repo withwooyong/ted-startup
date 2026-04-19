@@ -118,6 +118,13 @@ class Settings(BaseSettings):
         description="KIS 모의 계좌번호 — 10자리(CANO 8 + ACNT_PRDT_CD 2). 하이픈 허용",
     )
     kis_request_timeout_seconds: float = Field(default=15.0)
+    kis_use_in_memory_mock: bool = Field(
+        default=False,
+        description=(
+            "True 면 KisClient 가 내장 httpx.MockTransport 로 구동 — 외부 KIS 호출 없음. "
+            "E2E/CI 에서 KIS sandbox rate limit(1분 1회) 회피용. 운영은 반드시 False."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

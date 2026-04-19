@@ -27,6 +27,74 @@ logger = logging.getLogger(__name__)
 _MOCK_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 _TOKEN_RENEW_MARGIN_SECONDS = 300.0  # 만료 5분 전에 재발급
 
+_IN_MEMORY_TOKEN = "in-memory-e2e-token"
+_IN_MEMORY_BALANCE: list[dict[str, Any]] = [
+    # 결정론적 보유 종목 3건 — 실제 KIS sandbox 가 아닌 로컬 mock 용.
+    {
+        "pdno": "005930",
+        "prdt_name": "삼성전자",
+        "hldg_qty": "10",
+        "pchs_avg_pric": "72000.00",
+    },
+    {
+        "pdno": "000660",
+        "prdt_name": "SK하이닉스",
+        "hldg_qty": "5",
+        "pchs_avg_pric": "150000.00",
+    },
+    {
+        "pdno": "035420",
+        "prdt_name": "NAVER",
+        "hldg_qty": "3",
+        "pchs_avg_pric": "205000.00",
+    },
+]
+
+
+def _build_in_memory_transport() -> httpx.MockTransport:
+    """KIS 모의 sandbox 를 완전히 대체하는 로컬 MockTransport.
+
+    토큰 발급·잔고조회 두 엔드포인트만 구현. 결정론적 응답 — 동일 입력엔 동일 출력.
+    외부 네트워크 일체 호출하지 않으므로 CI/E2E 안정성 확보.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/oauth2/tokenP" and request.method == "POST":
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": _IN_MEMORY_TOKEN,
+                    "token_type": "Bearer",
+                    "expires_in": 86400,
+                },
+            )
+        if (
+            path == "/uapi/domestic-stock/v1/trading/inquire-balance"
+            and request.method == "GET"
+        ):
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg_cd": "MCA00000",
+                    "msg1": "정상처리",
+                    "output1": _IN_MEMORY_BALANCE,
+                    "output2": [],
+                    "ctx_area_fk100": "",
+                    "ctx_area_nk100": "",
+                },
+            )
+        return httpx.Response(
+            404,
+            json={
+                "rt_cd": "1",
+                "msg1": f"in-memory mock: 미구현 경로 {request.method} {path}",
+            },
+        )
+
+    return httpx.MockTransport(handler)
+
 
 @dataclass(slots=True)
 class KisHoldingRow:
@@ -108,6 +176,15 @@ class KisClient:
             connect=5.0, read=s.kis_request_timeout_seconds,
             write=s.kis_request_timeout_seconds, pool=5.0,
         )
+        # 명시적 transport 가 없을 때만 in-memory 모드 자동 주입.
+        # 테스트에서 주입하는 MockTransport 는 우선 — 런타임 플래그에 영향 안 받음.
+        if transport is None and s.kis_use_in_memory_mock:
+            transport = _build_in_memory_transport()
+            # in-memory 모드엔 configured 체크를 우회할 수 있도록 더미 자격증명 주입.
+            self._app_key = self._app_key or "in-memory-app-key"
+            self._app_secret = self._app_secret or "in-memory-app-secret"
+            self._account_no = self._account_no or "0000000000-01"
+            logger.info("KIS in-memory mock transport 활성화 — 외부 호출 없음")
         self._client = httpx.AsyncClient(
             base_url=self._base_url, timeout=timeout, transport=transport
         )

@@ -173,3 +173,52 @@ async def test_raises_when_rt_cd_is_not_zero() -> None:
     async with KisClient(_settings(), transport=transport) as client:
         with pytest.raises(KisClientError):
             await client.fetch_balance()
+
+
+# -----------------------------------------------------------------------------
+# in-memory mock 모드 (settings 플래그 기반 자동 주입)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_in_memory_mock_mode_skips_real_http() -> None:
+    # 빈 자격증명 + in-memory 플래그만 True — 외부 호출 없이 3건 반환해야 함.
+    settings = Settings(
+        kis_app_key_mock="",
+        kis_app_secret_mock="",
+        kis_account_no_mock="",
+        kis_use_in_memory_mock=True,
+    )
+    async with KisClient(settings) as client:
+        rows = await client.fetch_balance()
+
+    assert len(rows) == 3
+    codes = {r.stock_code for r in rows}
+    assert codes == {"005930", "000660", "035420"}
+    samsung = next(r for r in rows if r.stock_code == "005930")
+    assert samsung.quantity == 10
+    assert samsung.avg_buy_price == Decimal("72000.00")
+
+
+@pytest.mark.asyncio
+async def test_explicit_transport_overrides_in_memory_flag() -> None:
+    # 테스트에서 주입한 transport 는 in-memory 플래그보다 우선해야 한다 (기존 테스트 불변).
+    handler_called: list[bool] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handler_called.append(True)
+        if request.url.path == "/oauth2/tokenP":
+            return _ok_token_response()
+        return _balance_response()
+
+    transport = httpx.MockTransport(handler)
+    settings = Settings(
+        kis_app_key_mock="K",
+        kis_app_secret_mock="S",
+        kis_account_no_mock="12345678-01",
+        kis_use_in_memory_mock=True,  # 플래그 켜져 있어도 transport 가 우선
+    )
+    async with KisClient(settings, transport=transport) as client:
+        await client.fetch_balance()
+
+    assert handler_called, "명시적 transport 가 우선 적용되어야 함"

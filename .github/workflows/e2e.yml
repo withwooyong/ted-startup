@@ -33,6 +33,8 @@ jobs:
       KIS_APP_KEY_MOCK: ci-mock-key
       KIS_APP_SECRET_MOCK: ci-mock-secret
       KIS_ACCOUNT_NO_MOCK: '0000000000-01'
+      # KIS sandbox 토큰 rate limit(1분 1회) 회피 — CI 는 내장 MockTransport 사용
+      KIS_USE_IN_MEMORY_MOCK: 'true'
       NEXT_PUBLIC_API_BASE_URL: /api
 
     steps:
@@ -56,6 +58,7 @@ jobs:
           KIS_APP_KEY_MOCK=${KIS_APP_KEY_MOCK}
           KIS_APP_SECRET_MOCK=${KIS_APP_SECRET_MOCK}
           KIS_ACCOUNT_NO_MOCK=${KIS_ACCOUNT_NO_MOCK}
+          KIS_USE_IN_MEMORY_MOCK=${KIS_USE_IN_MEMORY_MOCK}
           NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
           EOF
 
