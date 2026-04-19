@@ -67,8 +67,13 @@ jobs:
           timeout 180 bash -c 'until curl -sk https://localhost/ -o /dev/null; do sleep 3; done'
           timeout 60 bash -c 'until docker compose -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/health\", timeout=3)"; do sleep 3; done'
 
-      - name: Seed UI demo data (accounts + 005930 holding)
+      - name: Seed UI demo data (stock/stock_price/snapshot)
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend python -m scripts.seed_ui_demo
+
+      - name: Seed E2E accounts + holdings
+        # E2E 가 요구하는 brokerage_account(e2e-manual/e2e-kis) + 005930 보유 시드.
+        # seed_ui_demo 는 계좌·보유를 다루지 않으므로 별도 스크립트로 분리.
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend python -m scripts.seed_e2e_accounts
 
       - uses: actions/setup-node@v4
         with:
