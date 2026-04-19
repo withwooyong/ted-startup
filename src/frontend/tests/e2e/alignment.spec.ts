@@ -20,9 +20,10 @@ test.describe('D. 얼라인먼트 페이지', () => {
     await expect(page.getByText(/최근 30일 · 스코어 60점 이상/)).toBeVisible();
   });
 
-  test('D3: 빈 상태 — 시그널 0건', async ({ page }) => {
+  test('D3: 보유 없는 계좌 → 빈 상태', async ({ page }) => {
+    // 계좌 2(e2e-kis)는 holdings 가 비어있어 items=[] 는 항상 성립 (데이터 환경 독립).
     const alignment = new AlignmentPage(page);
-    await alignment.goto(1);
+    await alignment.goto(2);
 
     await expect(alignment.emptyState).toBeVisible();
   });
@@ -30,8 +31,7 @@ test.describe('D. 얼라인먼트 페이지', () => {
   test('D4: min_score 슬라이더 60→30 — 헤더 카피 갱신', async ({ page }) => {
     const alignment = new AlignmentPage(page);
     await alignment.goto(1);
-    await expect(alignment.emptyState).toBeVisible();
-
+    // 초기 상태는 시그널 유무에 따라 달라질 수 있으므로 슬라이더 조작 효과만 검증.
     await alignment.setMinScore(30);
 
     // 서브카피의 숫자 갱신 확인
