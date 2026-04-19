@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 _MOCK_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 _TOKEN_RENEW_MARGIN_SECONDS = 300.0  # 만료 5분 전에 재발급
 
-_IN_MEMORY_TOKEN = "in-memory-e2e-token"
+# Test-only constant. Returned only from the internal httpx.MockTransport when
+# settings.kis_use_in_memory_mock=True — never transmitted to any external host.
+_IN_MEMORY_TOKEN = "in-memory-e2e-token"  # noqa: S105 — fake token, not a secret
 _IN_MEMORY_BALANCE: list[dict[str, Any]] = [
     # 결정론적 보유 종목 3건 — 실제 KIS sandbox 가 아닌 로컬 mock 용.
     {
