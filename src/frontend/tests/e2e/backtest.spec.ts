@@ -9,12 +9,87 @@ test.describe('H. 백테스트', () => {
     ).toBeVisible();
   });
 
-  test('H2: backtest_result 0건 → empty state', async ({ page }) => {
-    // 현 DB 기준 backtest_result 는 0 건. 미래에 데이터가 생기면 이 테스트를
-    // 업데이트해야 함.
+  test('H2: backtest 0건 (빈 응답 stub) → empty state', async ({ page }) => {
+    // 미래에 실제 데이터가 생겨도 테스트가 깨지지 않도록 응답을 stub 처리.
+    await page.route('**/api/backtest', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
+      }),
+    );
+
     await page.goto('/backtest');
 
     await expect(page.getByText('백테스팅을 아직 실행하지 않았어요')).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test('H3: backtest 3종 응답 stub → 기간 카피 + 차트 영역 렌더', async ({ page }) => {
+    const fixture = [
+      {
+        id: 1,
+        signal_type: 'RAPID_DECLINE',
+        period_start: '2025-01-01',
+        period_end: '2026-04-15',
+        total_signals: 1234,
+        hit_count_5d: 820, hit_rate_5d: '66.4500', avg_return_5d: '2.1300',
+        hit_count_10d: 780, hit_rate_10d: '63.2100', avg_return_10d: '3.8700',
+        hit_count_20d: 690, hit_rate_20d: '55.9100', avg_return_20d: '5.4200',
+        created_at: '2026-04-15T09:00:00+09:00',
+      },
+      {
+        id: 2,
+        signal_type: 'TREND_REVERSAL',
+        period_start: '2025-01-01',
+        period_end: '2026-04-15',
+        total_signals: 567,
+        hit_count_5d: 310, hit_rate_5d: '54.6700', avg_return_5d: '1.2200',
+        hit_count_10d: 295, hit_rate_10d: '52.0500', avg_return_10d: '2.4500',
+        hit_count_20d: 270, hit_rate_20d: '47.6100', avg_return_20d: '3.1800',
+        created_at: '2026-04-15T09:00:00+09:00',
+      },
+      {
+        id: 3,
+        signal_type: 'SHORT_SQUEEZE',
+        period_start: '2025-01-01',
+        period_end: '2026-04-15',
+        total_signals: 2345,
+        hit_count_5d: 1500, hit_rate_5d: '63.9700', avg_return_5d: '2.8900',
+        hit_count_10d: 1420, hit_rate_10d: '60.5500', avg_return_10d: '4.7200',
+        hit_count_20d: 1280, hit_rate_20d: '54.5800', avg_return_20d: '6.9300',
+        created_at: '2026-04-15T09:00:00+09:00',
+      },
+    ];
+
+    await page.route('**/api/backtest', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(fixture),
+      }),
+    );
+
+    await page.goto('/backtest');
+
+    await expect(page.getByText('2025-01-01 — 2026-04-15')).toBeVisible({ timeout: 10_000 });
+    // Empty state 는 더 이상 노출되지 않음
+    await expect(page.getByText('백테스팅을 아직 실행하지 않았어요')).toHaveCount(0);
+  });
+
+  test('H4: backtest API 500 → 재시도 버튼 노출', async ({ page }) => {
+    await page.route('**/api/backtest', route =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'internal' }),
+      }),
+    );
+
+    await page.goto('/backtest');
+
+    await expect(page.getByRole('button', { name: '다시 시도' })).toBeVisible({
       timeout: 10_000,
     });
   });
