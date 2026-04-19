@@ -46,8 +46,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: src/backend_py/uv.lock
 
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Install dependencies (dev extras for pytest/testcontainers)
+        run: uv sync --frozen --extra dev
 
       - name: Run pytest
         env:
