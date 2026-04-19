@@ -1,7 +1,7 @@
 # =============================================================================
 # CI — master 푸시 / PR 시 백엔드 테스트 + 프론트 빌드 + 이미지 빌드
 # -----------------------------------------------------------------------------
-# - backend-test : Gradle + Testcontainers (docker socket 필요)
+# - backend-test : Python 3.12 + uv + pytest (Testcontainers PG16)
 # - frontend-build : npm ci + next build (standalone 산출물 점검)
 # - docker-build : 두 이미지 빌드 + SHA 태그 (레지스트리 푸시는 미정)
 # =============================================================================
@@ -23,44 +23,43 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1) Backend: Gradle 테스트
+  # 1) Backend: Python pytest (Testcontainers 로 PG16 띄움)
   # ---------------------------------------------------------------------------
   backend-test:
-    name: Backend Test (Gradle + Testcontainers)
+    name: Backend Test (Python + pytest)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: src/backend
+        working-directory: src/backend_py
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          distribution: temurin
-          java-version: "21"
+          python-version: "3.12"
 
-      - name: Set up Gradle (with build cache)
-        uses: gradle/actions/setup-gradle@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/master' }}
+          enable-cache: true
+          cache-dependency-glob: src/backend_py/uv.lock
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew
+      - name: Install dependencies
+        run: uv sync --frozen
 
-      - name: Run tests
+      - name: Run pytest
         env:
-          # Testcontainers 는 ubuntu-latest 의 docker 데몬을 그대로 사용
           TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: ./gradlew --no-daemon test
+        run: uv run pytest -q
 
-      - name: Upload test reports on failure
+      - name: Upload pytest cache on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-reports
-          path: src/backend/build/reports/tests/test
+          name: backend-pytest-cache
+          path: src/backend_py/.pytest_cache
           retention-days: 7
 
   # ---------------------------------------------------------------------------
@@ -129,8 +128,8 @@ jobs:
       - name: Build backend image
         uses: docker/build-push-action@v6
         with:
-          context: ./src/backend
-          file: ./src/backend/Dockerfile
+          context: ./src/backend_py
+          file: ./src/backend_py/Dockerfile
           push: false
           load: true
           tags: |
