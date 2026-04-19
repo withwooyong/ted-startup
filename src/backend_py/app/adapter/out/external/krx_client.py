@@ -97,7 +97,7 @@ class KrxClient:
                 ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
 
         market_map = await self._build_market_type_map(date_str)
-        name_map = await self._build_stock_name_map(date_str)
+        name_map = await self.build_stock_name_map(date_str)
 
         return [
             self._to_stock_price_row(
@@ -109,7 +109,7 @@ class KrxClient:
             for code, row in ohlcv.iterrows()
         ]
 
-    async def _build_stock_name_map(self, date_str: str) -> dict[str, str]:
+    async def build_stock_name_map(self, date_str: str) -> dict[str, str]:
         """티커 → 종목명 매핑.
 
         get_market_ohlcv_by_ticker 는 종목명을 반환하지 않는다. 배치 조회 가능한 API 중

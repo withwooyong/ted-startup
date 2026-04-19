@@ -30,7 +30,7 @@ async def run(target_date: date) -> int:
 
     client = KrxClient()
     date_str = target_date.strftime("%Y%m%d")
-    name_map = await client._build_stock_name_map(date_str)  # noqa: SLF001
+    name_map = await client.build_stock_name_map(date_str)
     if not name_map:
         print(f"[fix-names] KRX 종목명 맵이 비어있음 (date={target_date})", file=sys.stderr)
         return 1
