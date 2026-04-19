@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,18 +85,28 @@ class MarketDataCollectionService:
         ]
         shorts_n = await short_repo.upsert_many(short_rows)
 
-        # 대차잔고 upsert
+        # 대차잔고 upsert (전일 대비 변동률·연속 감소일수 계산)
         lending_repo = LendingBalanceRepository(self._session)
-        lending_rows = [
-            {
-                "stock_id": code_to_id[lb.stock_code],
-                "trading_date": trading_date,
-                "balance_quantity": lb.balance_quantity,
-                "balance_amount": lb.balance_amount,
-            }
-            for lb in lendings
-            if lb.stock_code in code_to_id
-        ]
+        prev_by_stock = await self._fetch_prev_lending(lending_repo, trading_date)
+        lending_rows = []
+        for lb in lendings:
+            if lb.stock_code not in code_to_id:
+                continue
+            sid = code_to_id[lb.stock_code]
+            change_q, change_r, consec = self._compute_lending_deltas(
+                today_qty=lb.balance_quantity, prev=prev_by_stock.get(sid)
+            )
+            lending_rows.append(
+                {
+                    "stock_id": sid,
+                    "trading_date": trading_date,
+                    "balance_quantity": lb.balance_quantity,
+                    "balance_amount": lb.balance_amount,
+                    "change_quantity": change_q,
+                    "change_rate": change_r,
+                    "consecutive_decrease_days": consec,
+                }
+            )
         lendings_n = await lending_repo.upsert_many(lending_rows)
 
         elapsed = int((time.monotonic() - start) * 1000)
@@ -114,3 +125,43 @@ class MarketDataCollectionService:
             lending_balance_upserted=lendings_n,
             elapsed_ms=elapsed,
         )
+
+    @staticmethod
+    async def _fetch_prev_lending(
+        repo: LendingBalanceRepository, trading_date: date
+    ) -> dict[int, object]:
+        """직전 영업일의 대차잔고를 stock_id 기준 dict 로 반환.
+
+        주말·공휴일 대응을 위해 최대 5일 전까지 역방향 스캔한다 (주말 포함 최대 3일).
+        """
+        for delta in range(1, 6):
+            cand = trading_date - timedelta(days=delta)
+            rows = await repo.list_by_trading_date(cand)
+            if rows:
+                return {r.stock_id: r for r in rows}
+        return {}
+
+    @staticmethod
+    def _compute_lending_deltas(
+        *, today_qty: int, prev: object | None
+    ) -> tuple[int | None, Decimal | None, int]:
+        """오늘 잔고수량 vs 전일 행 → (change_quantity, change_rate, consecutive_decrease_days).
+
+        - 전일이 없으면 (None, None, 0): 최초 수집일 또는 장기 결측 후 복귀
+        - 전일 balance_quantity 가 0 이면 change_rate 는 None (0 으로 나눌 수 없음)
+        - change_quantity < 0 일 때만 consecutive_decrease_days += 1, 아니면 0 으로 리셋 (Java 원본 일치)
+        """
+        if prev is None:
+            return None, None, 0
+        prev_qty = int(getattr(prev, "balance_quantity", 0))
+        change_q = today_qty - prev_qty
+        change_r: Decimal | None
+        if prev_qty > 0:
+            change_r = (Decimal(change_q) / Decimal(prev_qty) * Decimal(100)).quantize(
+                Decimal("0.0001")
+            )
+        else:
+            change_r = None
+        prev_consec = int(getattr(prev, "consecutive_decrease_days", 0) or 0)
+        consec = prev_consec + 1 if change_q < 0 else 0
+        return change_q, change_r, consec

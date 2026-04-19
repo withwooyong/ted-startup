@@ -229,9 +229,15 @@ class KrxClient:
 
     @staticmethod
     def _to_lending_balance_row(code: str, row: Any) -> LendingBalanceRow:
+        # pykrx get_shorting_balance_by_ticker 실제 컬럼: 공매도잔고 / 공매도금액 / 상장주식수 / 시가총액 / 비중
+        # 구버전 호환을 위해 기존 "잔고수량"/"BAL_QTY" 도 fallback 체인에 유지.
         return LendingBalanceRow(
             stock_code=str(code),
             stock_name=str(row.get("종목명", "")),
-            balance_quantity=_int(row.get("잔고수량", row.get("BAL_QTY", 0))),
-            balance_amount=_int(row.get("잔고금액", row.get("BAL_AMT", 0))),
+            balance_quantity=_int(
+                row.get("공매도잔고", row.get("잔고수량", row.get("BAL_QTY", 0)))
+            ),
+            balance_amount=_int(
+                row.get("공매도금액", row.get("잔고금액", row.get("BAL_AMT", 0)))
+            ),
         )
