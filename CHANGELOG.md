@@ -7,6 +7,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-19 → 2026-04-20] E2E · 데이터 버그 체인 · KIS mock · CI 녹색 (`99445b3` … `46f08bb`)
+
+3-PR 세션: 포트폴리오 E2E 도입 → CI 첫 실행 녹색화 → 코드 리뷰 MEDIUM 5 + LOW 4 정리.
+master 에 커밋 **21건** 추가 (PR #1·#2·#3 모두 머지 + delete-branch).
+백엔드 테스트 158 → **175+** (신규 17건), E2E 0 → **30 케이스** 확보.
+
+### Added
+- **Playwright E2E 스위트 30 케이스** (`99445b3` · `eff2d65`): A(내비 3) + B(포트폴리오 리스트 7) + C(쓰기 2) + D(얼라인먼트 6) + E(에러 2) + F(주식 상세 4) + G(AI 리포트 2) + H(백테스트 4). Page Object Model 분리(`HomePage`·`PortfolioPage`·`AlignmentPage`). 3회 연속 로컬 통과 + CI 3회 녹색.
+- **`GET /api/signals/latest` 엔드포인트**(`9523ee1`): 가장 최근 `signal_date` 기준 응답. 주말/공휴일 대시보드 빈 상태 회피. `SignalRepository.find_latest_signal_date` 추가.
+- **시그널 탐지 백필 스크립트** `scripts/backfill_signal_detection.py`(`8712b3f`): `stock_price` DISTINCT trading_date 기반으로 752영업일 순회. 실측 12분 40초로 `signal` 70,609건 (RAPID 21,056 / TREND 6,242 / SQUEEZE 43,311) 적재.
+- **KIS in-memory mock 모드**(`59b2320`): `Settings.kis_use_in_memory_mock=True` 시 `httpx.MockTransport` 자동 주입. KIS sandbox 1분 1회 rate limit 회피. 결정론적 보유 3종(삼성전자/SK하이닉스/NAVER) 반환. 유닛 테스트 2건(+5 기존).
+- **E2E 전용 seed 스크립트** `scripts/seed_e2e_accounts.py`(`977ce43`): `brokerage_account`(e2e-manual/e2e-kis) + `portfolio_holding`(005930 10주) + 거래 1건 멱등 시드. CI `.github/workflows/e2e.yml` 의 seed 단계 연결.
+- **stock_name 원타임 복구 스크립트** `scripts/fix_stock_names.py`(`b5b5119` · `f651a8d`): `get_market_price_change_by_ticker(market="ALL")` 1회 호출로 전종목 이름 확보. 3,098건 중 2,880건 복구.
+- **CI 워크플로 `.github/workflows/e2e.yml`** (`99445b3`): compose up → seed → Caddy internal CA 신뢰 → Playwright → 아티팩트. `KIS_USE_IN_MEMORY_MOCK=true` 주입으로 외부 의존 0.
+- **루트 `README.md`**(`99445b3`): 프로젝트 개요 · Quickstart · 파이프라인 커맨드.
+- **문서 2건**: `docs/e2e-portfolio-test-plan.md` (테스트 계획서), `docs/data-state.md` (218건 미매칭 stock_name 현상유지 근거, 2026-04-16·17 lending T+1 지연 등 알려진 패턴).
+- **유닛 테스트**: `test_market_data_lending_deltas.py` 10건(`177f014`) + `test_kis_client.py` in-memory mock 2건(`59b2320`).
+- **`/signals` pagination limit** (`b46371b`): `limit` 쿼리 파라미터(기본 500, 최대 5000). `/signals`·`/signals/latest` 양쪽.
+
+### Changed
+- **대시보드 `/` 데이터 소스**(`9523ee1`): `getSignals()` → `getLatestSignals()`. 헤더에 실제 `signal_date` 표시 (오늘이 아니라 최근 탐지일).
+- **`ci.yml` Java → Python 이전 반영**(`e7a39ae`): 삭제된 `src/backend/`(Gradle) 참조를 `src/backend_py/`(uv + pytest) 로 교체. `--extra dev`(`e69cfa3`) 로 pytest/testcontainers 설치 보장.
+- **lending deltas 헬퍼 모듈 레벨 승격**(`235ab06`, M4+M5): `_fetch_prev_lending` / `_compute_lending_deltas` 를 `MarketDataCollectionService` 에서 모듈 레벨 private 함수로 추출. `prev: object | None` → `LendingBalance | None` 로 타입 정밀화 — `getattr` 우회 제거, mypy strict 가 향후 필드 리네임 감지.
+- **`build_stock_name_map` public 승격**(`f651a8d`, M2): 외부 스크립트가 `noqa: SLF001` 로 호출하던 private 메서드를 정식 API 로.
+- **E2E D3/D4 실데이터 전제 반영**(`795f3b3`): 시그널 재탐지로 삼성전자에 시그널이 채워짐 → D3 계좌 id=1→2(e2e-kis, 보유 0) 로 전환, D4 초기 empty state 단언 제거.
+- **E2E D1 하드코딩 제거**(L3, `ce1044c`): `/portfolio/1/alignment` → `/portfolio/\d+/alignment` 정규식 매칭으로 seed 순서 독립.
+- **E2E C2 KIS 응답 stub**(`eff2d65`): 실 sandbox 의존 제거.
+
+### Fixed
+- **대차잔고 pykrx 컬럼 오매핑**(`9ed7d86`): `_to_lending_balance_row` 가 `잔고수량`/`BAL_QTY` 만 찾던 것을 **`공매도잔고` / `공매도금액`** 최우선으로 변경. 기존 컬럼명은 fallback 유지. 668,322행이 전부 `balance_quantity=0` 이던 원인 제거.
+- **change_rate / change_quantity / consecutive_decrease_days 계산 누락**(`9ed7d86`): `market_data_service` 가 대차잔고 upsert 시 변동률을 계산하지 않던 버그 → `_fetch_prev_lending` + `_compute_lending_deltas` 추가. 3년 재수집 후 `change_rate` 335,863건, RAPID_DECLINE 후보(≤-10%) 21,056건.
+- **stock_name 수집 누락**(`b5b5119`): `get_market_ohlcv_by_ticker` 가 종목명 컬럼을 반환하지 않아 α 초기부터 3,093건이 공백이던 문제 → `build_stock_name_map()` 추가 호출로 영구 해결.
+- **`_IN_MEMORY_TOKEN` 문서화 주석** (M1, `7e48e01`): 보안 스캐너 false-positive 예방 주석 추가.
+- **`backfill_signal_detection.py` 루프 내부 `import json`** (L1, `ce1044c`): 파일 헤더로 이동.
+- **`seed_e2e_accounts.py` 경고 메시지 명확화** (L2, `ce1044c`): "보유·거래 시드 모두 skip" 명시.
+- **CI `.env.prod` cleanup** (L4, `ce1044c`): Tear down 단계에 `rm -f .env.prod` 추가.
+
+---
+
 ## [2026-04-19 — 저녁] E2 + i + 3년 백필 스크립트 (`93a88ec` … `c71a0fc`)
 
 차기 세션 carry-over 2건(DART 단축명 필터 · KRX stock_name/market_type)을 병렬 처리하고, 3년(752영업일) 실데이터 백필 스크립트를 구현·기동. 백필 자체는 백그라운드 약 2시간 실행(완료 보고는 차기 세션). 백엔드 테스트 146 → **158**.

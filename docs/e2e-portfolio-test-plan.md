@@ -4,7 +4,11 @@
 - **대상 플로우**: 홈 → 포트폴리오 리스트 → 계좌 상세/얼라인먼트
 - **도구**: Playwright (설치 전)
 - **실행 환경**: 로컬 프로덕션 compose (`docker-compose.prod.yml`, Caddy 경유 `https://localhost`)
-- **상태**: Phase 1 구현·실행 완료 (2026-04-19, 16/16 통과, 5.1s)
+- **상태**: Phase 1+2 + F/G/H 확장 완료 (2026-04-20, 로컬 **30/30** 통과 ~6~10s, CI 3회 연속 녹색)
+  - Phase 1 (읽기, A/B/D): 16 케이스 — PR #1
+  - Phase 2 (쓰기·에러, C/E): 4 케이스 — PR #1 (C2 는 KIS in-memory mock 으로 독립화, PR #2)
+  - 확장 (F 주식상세 4 + G AI 리포트 2 + H 백테스트 4) — PR #1·#2·#3
+  - CI 워크플로 `.github/workflows/e2e.yml` 활성: compose up → seed → E2E → 아티팩트 업로드
 
 ---
 
