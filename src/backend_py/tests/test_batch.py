@@ -4,12 +4,12 @@ KRX/Telegram 은 MagicMock/stub 으로 대체. DB 는 testcontainers PG16(confte
 """
 from __future__ import annotations
 
-from datetime import date
-from typing import Any
-from unittest.mock import AsyncMock
+from datetime import date, timedelta
+from decimal import Decimal
 
 import httpx
 import pytest
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.adapter.out.external import TelegramClient
@@ -18,8 +18,14 @@ from app.adapter.out.external._records import (
     ShortSellingRow,
     StockPriceRow,
 )
-from sqlalchemy import text
-
+from app.adapter.out.persistence.models import (
+    BacktestResult,
+    Signal,
+    SignalType,
+    Stock,
+    StockPrice,
+)
+from app.batch.backtest_job import run_backtest_pipeline
 from app.batch.market_data_job import run_market_data_pipeline
 from app.batch.scheduler import build_scheduler
 from app.batch.trading_day import is_trading_day
@@ -195,7 +201,10 @@ async def test_pipeline_collect_failure_is_isolated(
 
 
 def test_build_scheduler_registers_weekday_cron() -> None:
-    settings = Settings(scheduler_hour_kst=6, scheduler_minute_kst=30)
+    # backtest 는 별도 테스트에서 검증 — 여기서는 market_data 단독 등록만 확인
+    settings = Settings(
+        scheduler_hour_kst=6, scheduler_minute_kst=30, backtest_enabled=False,
+    )
     scheduler = build_scheduler(settings)
     jobs = scheduler.get_jobs()
     assert len(jobs) == 1
@@ -206,3 +215,105 @@ def test_build_scheduler_registers_weekday_cron() -> None:
     assert trigger_fields["day_of_week"] == "mon-fri"
     assert trigger_fields["hour"] == "6"
     assert trigger_fields["minute"] == "30"
+
+
+def test_build_scheduler_registers_backtest_cron_when_enabled() -> None:
+    settings = Settings(
+        backtest_enabled=True,
+        backtest_cron_day_of_week="mon",
+        backtest_cron_hour_kst=7,
+        backtest_cron_minute_kst=15,
+    )
+    scheduler = build_scheduler(settings)
+    jobs = {j.id: j for j in scheduler.get_jobs()}
+    assert "market_data_pipeline" in jobs
+    assert "backtest_pipeline" in jobs
+    fields = {f.name: str(f) for f in jobs["backtest_pipeline"].trigger.fields}
+    assert fields["day_of_week"] == "mon"
+    assert fields["hour"] == "7"
+    assert fields["minute"] == "15"
+
+
+def test_build_scheduler_skips_backtest_when_disabled() -> None:
+    settings = Settings(backtest_enabled=False)
+    scheduler = build_scheduler(settings)
+    jobs = {j.id for j in scheduler.get_jobs()}
+    assert jobs == {"market_data_pipeline"}
+
+
+# -----------------------------------------------------------------------------
+# Backtest Pipeline — 시그널/가격 시드 → backtest_result 적재
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_backtest_pipeline_persists_result_rows(
+    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+) -> None:
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+
+    base_date = date(2026, 1, 5)
+
+    async with factory() as session:
+        stock = Stock(stock_code="005930", stock_name="삼성전자", market_type="KOSPI")
+        session.add(stock)
+        await session.flush()
+
+        # 40 영업일치 우상향 가격 (+1%/day) — 5/10/20일 수익률 모두 양수
+        for i in range(40):
+            session.add(StockPrice(
+                stock_id=stock.id,
+                trading_date=base_date + timedelta(days=i),
+                close_price=int(10_000 * (1.01 ** i)),
+            ))
+        # 시그널 1건 (RAPID_DECLINE) seed
+        session.add(Signal(
+            stock_id=stock.id,
+            signal_date=base_date,
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=85, grade="A", detail={"seed": True},
+        ))
+        await session.commit()
+
+    result = await run_backtest_pipeline(
+        period_end=base_date, period_years=1, session_factory=factory,
+    )
+
+    assert result.succeeded is True
+    assert result.execution is not None
+    assert result.execution.signals_processed == 1
+    assert result.execution.returns_calculated == 1
+    assert result.execution.result_rows == 1
+    assert result.period_end == base_date
+    # period_start 는 period_end - 1 year
+    assert result.period_start == date(2025, 1, 5)
+
+    # DB 확인 — backtest_result 에 RAPID_DECLINE 1건 append
+    async with factory() as session:
+        rows = (await session.execute(
+            select(BacktestResult).where(
+                BacktestResult.signal_type == SignalType.RAPID_DECLINE.value
+            )
+        )).scalars().all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.total_signals == 1
+        # 우상향 시드 → 5일 적중률 100% 기대
+        assert row.hit_count_5d == 1
+        assert row.hit_rate_5d == Decimal("100.0000")
+
+
+@pytest.mark.asyncio
+async def test_backtest_pipeline_handles_empty_period(
+    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+) -> None:
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+
+    # 시그널 0 건 — 엔진은 signals_processed=0 으로 조기 종료, result_rows=0
+    result = await run_backtest_pipeline(
+        period_end=date(2020, 6, 30), period_years=1, session_factory=factory,
+    )
+    assert result.succeeded is True
+    assert result.execution is not None
+    assert result.execution.signals_processed == 0
+    assert result.execution.result_rows == 0
