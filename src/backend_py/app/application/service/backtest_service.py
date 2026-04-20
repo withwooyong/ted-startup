@@ -14,6 +14,7 @@ vectorbt 는 Portfolio.from_signals 도 지원하지만 본 도메인은 "개별
 from __future__ import annotations
 
 import logging
+import math
 import time
 from datetime import date, timedelta
 from decimal import Decimal
@@ -36,9 +37,16 @@ HOLDING_PERIODS = (5, 10, 20)
 FUTURE_BUFFER_DAYS = 40  # 영업일 20일 ≈ 달력일 30일 + 여유
 
 
-def _dec(val: float | None, places: int = 4) -> Decimal | None:
-    if val is None or pd.isna(val):
-        return None
+def _dec(val: float, places: int = 4) -> Decimal:
+    # 호출자가 None/NaN 분기를 명시 guard 한 뒤 호출한다는 contract.
+    # NaN 이 도달하면 Decimal('NaN') 을 silently 반환하는 대신 ValueError 로 깨서
+    # 버그를 빠르게 드러낸다 — 이전에는 None 반환 + `_dec(x) or Decimal("0")` fallback
+    # 때문에 "None 도 허용" 으로 오인됐고 Decimal('0.0000') 이 falsy 라 Decimal('0') 로
+    # 교체되는 silent 스케일 왜곡이 있었다.
+    # 시그니처가 `float` 이므로 stdlib 의 `math.isnan` 이 contract 와 자연스럽게 일치.
+    # `pd.isna` 는 배열 입력 시 배열을 돌려줘 `if` 에서 ValueError 를 던지는 함정이 있음.
+    if math.isnan(val):
+        raise ValueError("_dec requires numeric value; caller must pre-guard None/NaN")
     return Decimal(str(round(float(val), places)))
 
 
@@ -148,8 +156,11 @@ class BacktestEngineService:
                 hit_rate = (hits / observed * 100.0) if observed > 0 else 0.0
                 avg_ret = float(series.mean()) if observed > 0 else 0.0
                 setattr(res, f"hit_count_{n}d", hits)
-                setattr(res, f"hit_rate_{n}d", _dec(hit_rate) or Decimal("0"))
-                setattr(res, f"avg_return_{n}d", _dec(avg_ret) or Decimal("0"))
+                # hit_rate·avg_ret 는 `if observed > 0 else 0.0` guard 로 concrete float 보장 —
+                # `_dec` 가 None 을 돌려줄 여지 없음. 이전의 `_dec(x) or Decimal("0")` 은 도달불가
+                # fallback 이었고 (Zero Decimal 이 Python 에서 falsy 라) 의도를 흐리던 안티패턴.
+                setattr(res, f"hit_rate_{n}d", _dec(hit_rate))
+                setattr(res, f"avg_return_{n}d", _dec(avg_ret))
             agg_results.append(res)
             logger.info(
                 "집계 %s: total=%d hit5=%s%% hit10=%s%% hit20=%s%%",

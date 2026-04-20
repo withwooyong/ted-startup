@@ -5,8 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **`_dec` 리팩터 — 도달불가 fallback 제거 + NaN loud fail** (`src/backend_py/app/application/service/backtest_service.py`): 직전 PR #9 리뷰 MEDIUM #2 사전 부채 청산.
+  - 시그니처 `(float | None) -> Decimal | None` → `(float) -> Decimal`. None 반환 경로 제거.
+  - L151-152 `_dec(hit_rate) or Decimal("0")` → `_dec(hit_rate)`. 호출 컨텍스트에서 `hit_rate`/`avg_ret` 는 `if observed > 0 else 0.0` guard 로 concrete float 보장이라 `or` fallback 이 도달불가였고, Zero Decimal falsy 특성 때문에 의도를 흐리는 안티패턴이었음.
+  - NaN 입력은 `ValueError("_dec requires numeric value; caller must pre-guard None/NaN")` 으로 loud fail. `pd.isna` 대신 `math.isnan` 사용 — 시그니처가 `float` 라 stdlib 가 contract 와 자연스럽게 일치, 배열 입력 함정 회피.
+
 ### Added
-- **I6 설정 저장 toast E2E 2건** (`src/frontend/tests/e2e/settings.spec.ts`): 직전 세션 HANDOFF 차기 1순위였던 "I6 (설정 저장 toast) E2E" 완결. `page.route('**/api/admin/notifications/preferences')` 로 PUT 만 인터셉트하고 GET URL(`/api/notifications/preferences`, admin 경로 아님) 은 매칭되지 않아 초기 로딩이 실제 백엔드로 pass-through → `notification_preference` 싱글톤 mutation 0건 보장.
+- **`_dec` 유닛 테스트 1건 + 집계 통합 테스트 1건** (`tests/test_services.py`, 백엔드 **183 → 185**):
+  - `test_dec_always_returns_decimal_and_rejects_nan`: float → Decimal 반환, NaN ValueError, `round(float, 4)` 가 입력 자연 스케일 보존 (예: `_dec(0.0) == Decimal('0.0')`, exp=-1) 을 문서화.
+  - `test_backtest_aggregation_stores_zero_as_decimal`: 모든 수익률 0 시나리오 → `BacktestResult.hit_rate_5d`/`avg_return_5d` 가 None 이 아닌 `Decimal(0)` 으로 저장. 리팩터 후에도 집계 경로가 nullable 컬럼에 None 을 새지 않음을 고정.
+
+---
+
+## [2026-04-20] I6 설정 저장 toast E2E 2건 (`63e992a`, PR #10)
+
+1-PR 세션: HANDOFF 차기 1순위 "I6 (설정 저장 toast) E2E" 완결. E2E 40 → **42 케이스** (I6-1 성공·I6-2 실패 2건 추가). CI 4/4 PASS × 1회.
+
+### Added
+- **I6 설정 저장 toast E2E 2건** (`src/frontend/tests/e2e/settings.spec.ts`, PR #10): `page.route('**/api/admin/notifications/preferences')` 로 PUT 만 인터셉트하고 GET URL(`/api/notifications/preferences`, admin 경로 아님) 은 매칭되지 않아 초기 로딩이 실제 백엔드로 pass-through → `notification_preference` 싱글톤 mutation 0건 보장.
   - **I6-1 (성공 경로)**: `waitForRequest + click` 을 `Promise.all` 로 동기화해 race 제거, `postDataJSON()` 로 form payload 검증 (`daily_summary_enabled`, `min_score`, `signal_types` 포함), `role=status` toast 를 `filter({ hasText: '저장되었습니다' })` 로 정밀 매칭.
   - **I6-2 (실패 경로)**: PUT 500 stub → `filter({ hasText: '서버 오류가 발생했습니다' })` toast 검증.
 
