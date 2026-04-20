@@ -14,10 +14,10 @@ import { SIGNAL_TYPE_LABELS, type SignalType } from '@/types/signal';
 
 const SIGNAL_TYPES: SignalType[] = ['RAPID_DECLINE', 'TREND_REVERSAL', 'SHORT_SQUEEZE'];
 const CHANNEL_KEYS = [
-  'dailySummaryEnabled',
-  'urgentAlertEnabled',
-  'batchFailureEnabled',
-  'weeklyReportEnabled',
+  'daily_summary_enabled',
+  'urgent_alert_enabled',
+  'batch_failure_enabled',
+  'weekly_report_enabled',
 ] as const;
 type ChannelKey = (typeof CHANNEL_KEYS)[number];
 
@@ -38,12 +38,12 @@ export default function SettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
 
   const [form, setForm] = useState<NotificationPreferenceUpdate>({
-    dailySummaryEnabled: true,
-    urgentAlertEnabled: true,
-    batchFailureEnabled: true,
-    weeklyReportEnabled: true,
-    minScore: 60,
-    signalTypes: [...SIGNAL_TYPES],
+    daily_summary_enabled: true,
+    urgent_alert_enabled: true,
+    batch_failure_enabled: true,
+    weekly_report_enabled: true,
+    min_score: 60,
+    signal_types: [...SIGNAL_TYPES],
   });
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
@@ -51,14 +51,14 @@ export default function SettingsPage() {
     getNotificationPreferences()
       .then((pref: NotificationPreference) => {
         setForm({
-          dailySummaryEnabled: pref.dailySummaryEnabled,
-          urgentAlertEnabled: pref.urgentAlertEnabled,
-          batchFailureEnabled: pref.batchFailureEnabled,
-          weeklyReportEnabled: pref.weeklyReportEnabled,
-          minScore: pref.minScore,
-          signalTypes: pref.signalTypes,
+          daily_summary_enabled: pref.daily_summary_enabled,
+          urgent_alert_enabled: pref.urgent_alert_enabled,
+          batch_failure_enabled: pref.batch_failure_enabled,
+          weekly_report_enabled: pref.weekly_report_enabled,
+          min_score: pref.min_score,
+          signal_types: pref.signal_types,
         });
-        setUpdatedAt(pref.updatedAt);
+        setUpdatedAt(pref.updated_at);
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -79,20 +79,20 @@ export default function SettingsPage() {
   const toggleSignalType = (type: SignalType) =>
     setForm(prev => ({
       ...prev,
-      signalTypes: prev.signalTypes.includes(type)
-        ? prev.signalTypes.filter(t => t !== type)
-        : [...prev.signalTypes, type],
+      signal_types: prev.signal_types.includes(type)
+        ? prev.signal_types.filter(t => t !== type)
+        : [...prev.signal_types, type],
     }));
 
   const handleSave = async () => {
-    if (form.signalTypes.length === 0) {
+    if (form.signal_types.length === 0) {
       setToast('최소 한 개의 시그널 타입을 선택해주세요');
       return;
     }
     setSaving(true);
     try {
       const result = await updateNotificationPreferences(form);
-      setUpdatedAt(result.updatedAt);
+      setUpdatedAt(result.updated_at);
       setToast('저장되었습니다');
     } catch (err) {
       setToast(friendlyError(err));
@@ -187,7 +187,7 @@ export default function SettingsPage() {
               className="flex flex-wrap gap-2"
             >
               {SIGNAL_TYPES.map(type => {
-                const active = form.signalTypes.includes(type);
+                const active = form.signal_types.includes(type);
                 return (
                   <button
                     key={type}
@@ -205,7 +205,7 @@ export default function SettingsPage() {
                 );
               })}
             </div>
-            {form.signalTypes.length === 0 && (
+            {form.signal_types.length === 0 && (
               <p className="text-xs text-[#FF4D6A] mt-2">최소 한 개의 타입을 선택해주세요</p>
             )}
           </section>
@@ -217,7 +217,7 @@ export default function SettingsPage() {
                 최소 스코어
               </h2>
               <span className="font-[family-name:var(--font-mono)] text-lg text-[#E8ECF1]">
-                {form.minScore}
+                {form.min_score}
               </span>
             </div>
             <label className="block">
@@ -227,9 +227,9 @@ export default function SettingsPage() {
                 min={0}
                 max={100}
                 step={5}
-                value={form.minScore}
+                value={form.min_score}
                 onChange={e =>
-                  setForm(prev => ({ ...prev, minScore: Number(e.target.value) }))
+                  setForm(prev => ({ ...prev, min_score: Number(e.target.value) }))
                 }
                 className="w-full accent-[#6395FF] focus-visible:outline-2 focus-visible:outline-[#6395FF]/50"
               />
@@ -249,7 +249,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || form.signalTypes.length === 0}
+              disabled={saving || form.signal_types.length === 0}
               className="px-5 py-2 rounded-lg bg-[#6395FF] text-white text-sm font-medium shadow-[0_2px_8px_rgba(99,149,255,0.3)] disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
             >
               {saving ? '저장 중…' : '저장'}

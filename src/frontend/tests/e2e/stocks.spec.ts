@@ -42,4 +42,25 @@ test.describe('F. 주식 상세', () => {
       timeout: 10_000,
     });
   });
+
+  test('F5: 기간 버튼 배타 선택 — 1M/6M 연속 클릭 시 마지막만 pressed', async ({ page }) => {
+    await page.goto('/stocks/005930');
+    await expect(page.getByText('삼성전자').first()).toBeVisible({ timeout: 10_000 });
+
+    const group = page.getByRole('group', { name: '차트 기간 선택' });
+    const m1 = group.getByRole('button', { name: '1M' });
+    const m3 = group.getByRole('button', { name: '3M' });
+    const m6 = group.getByRole('button', { name: '6M' });
+    const y1 = group.getByRole('button', { name: '1Y' });
+
+    await m1.click();
+    await expect(m1).toHaveAttribute('aria-pressed', 'true');
+
+    await m6.click();
+    // 1M/3M/1Y 는 false, 6M 만 true — 배타 선택
+    await expect(m6).toHaveAttribute('aria-pressed', 'true');
+    await expect(m1).toHaveAttribute('aria-pressed', 'false');
+    await expect(m3).toHaveAttribute('aria-pressed', 'false');
+    await expect(y1).toHaveAttribute('aria-pressed', 'false');
+  });
 });
