@@ -8,6 +8,12 @@ const BACKEND_BASE = process.env.BACKEND_INTERNAL_URL || 'http://localhost:8000'
 
 // 요청 본문 크기 상한 — /api/admin/reports 같은 큰 페이로드는 없지만 DoS 방어.
 const MAX_BODY_BYTES = 64 * 1024;
+// 엑셀 업로드 등 multipart 는 백엔드의 10MB 와 맞춘다.
+const MAX_MULTIPART_BYTES = 10 * 1024 * 1024;
+
+function isMultipart(contentType: string | null): boolean {
+  return !!contentType && contentType.toLowerCase().startsWith('multipart/');
+}
 
 // 경로 세그먼트 allowlist. `..` 같은 트래버설을 차단해 /api/ 스코프 밖으로 못 나가게 한다.
 // undici/fetch 가 URL 해석 시 `..` 을 collapse 하면 BACKEND_INTERNAL_URL 루트에 도달할 수 있으므로
@@ -60,8 +66,12 @@ async function relay(
     );
   }
 
+  const contentType = req.headers.get('content-type');
+  const multipart = isMultipart(contentType);
+  const contentLengthLimit = multipart ? MAX_MULTIPART_BYTES : MAX_BODY_BYTES;
+
   const contentLength = Number(req.headers.get('content-length') ?? '0');
-  if (contentLength > MAX_BODY_BYTES) {
+  if (contentLength > contentLengthLimit) {
     return NextResponse.json(
       { status: 413, message: '요청 본문이 너무 큽니다' },
       { status: 413 },
@@ -76,17 +86,30 @@ async function relay(
   const headers: Record<string, string> = {
     'X-API-Key': apiKey,
   };
-  const contentType = req.headers.get('content-type');
   if (contentType) headers['Content-Type'] = contentType;
 
-  let body: string | undefined;
+  let body: BodyInit | undefined;
   if (method !== 'GET' && method !== 'DELETE') {
-    body = await req.text();
-    if (body.length > MAX_BODY_BYTES) {
-      return NextResponse.json(
-        { status: 413, message: '요청 본문이 너무 큽니다' },
-        { status: 413 },
-      );
+    if (multipart) {
+      // multipart 는 바이너리 안전한 ArrayBuffer 로 릴레이 — text() 는 UTF-8 재인코딩 시
+      // 엑셀/이미지 파일 바이트를 손상시킨다.
+      const buf = await req.arrayBuffer();
+      if (buf.byteLength > contentLengthLimit) {
+        return NextResponse.json(
+          { status: 413, message: '요청 본문이 너무 큽니다' },
+          { status: 413 },
+        );
+      }
+      body = buf;
+    } else {
+      const text = await req.text();
+      if (text.length > contentLengthLimit) {
+        return NextResponse.json(
+          { status: 413, message: '요청 본문이 너무 큽니다' },
+          { status: 413 },
+        );
+      }
+      body = text;
     }
   }
 
