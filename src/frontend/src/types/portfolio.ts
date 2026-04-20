@@ -5,7 +5,7 @@
 export type BrokerCode = 'manual' | 'kis' | 'kiwoom';
 export type ConnectionType = 'manual' | 'kis_rest_mock';
 export type TransactionType = 'BUY' | 'SELL';
-export type TransactionSource = 'manual' | 'kis_sync';
+export type TransactionSource = 'manual' | 'kis_sync' | 'excel_import';
 
 export interface Account {
   id: number;
@@ -87,6 +87,20 @@ export interface SyncResult {
   updated_count: number;
   unchanged_count: number;
   stock_created_count: number;
+}
+
+export interface ExcelImportRowError {
+  row: number;
+  reason: string;
+}
+
+export interface ExcelImportResult {
+  account_id: number;
+  total_rows: number;
+  imported: number;
+  skipped_duplicates: number;
+  stock_created_count: number;
+  errors: ExcelImportRowError[];
 }
 
 export interface AlignedSignalItem {

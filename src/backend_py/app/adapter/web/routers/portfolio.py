@@ -5,7 +5,7 @@ from dataclasses import asdict
 from datetime import date
 
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.external import KisClient
@@ -20,6 +20,8 @@ from app.adapter.web._deps import get_kis_client, get_session, require_admin_key
 from app.adapter.web._schemas import (
     AccountCreateRequest,
     AccountResponse,
+    ExcelImportResponse,
+    ExcelImportRowError,
     HoldingResponse,
     PerformanceResponse,
     SignalAlignmentResponse,
@@ -27,6 +29,13 @@ from app.adapter.web._schemas import (
     SyncResponse,
     TransactionCreateRequest,
     TransactionResponse,
+)
+from app.application.service.excel_import_service import (
+    AccountNotFoundForImportError,
+    ExcelImportError,
+    ExcelImportService,
+    TooManyRowsError,
+    UnsupportedExcelFormatError,
 )
 from app.application.service.portfolio_service import (
     AccountAliasConflictError,
@@ -297,3 +306,68 @@ async def list_snapshots(
     start_d = start or (end_d - relativedelta(months=3))
     rows = await PortfolioSnapshotRepository(session).list_between(account_id, start_d, end_d)
     return [SnapshotResponse.model_validate(r) for r in rows]
+
+
+# ---------- Excel Import (P10 온보딩 1단계) ----------
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10MB — 설계서 § 4 검증 기준
+
+
+@router.post(
+    "/accounts/{account_id}/import/excel",
+    response_model=ExcelImportResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def import_transactions_from_excel(
+    account_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+) -> ExcelImportResponse:
+    """KIS 체결내역 엑셀(.xlsx) 업로드 → portfolio_transaction 에 `source='excel_import'` 로 적재.
+
+    - 파일 확장자 `.xlsx` 만 허용 → 415
+    - 파일 크기 > 10MB → 413
+    - 행 수 > 10_000 → 413 (TooManyRowsError 경유)
+    - 필수 컬럼 누락 → 422
+    - 중복 행 (account·stock·date·type·qty·price) 은 skip, 응답에 카운트만 반영
+    """
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="xlsx 파일만 지원합니다.",
+        )
+    payload = await file.read()
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"파일 크기가 한계({MAX_UPLOAD_BYTES} bytes)를 초과합니다.",
+        )
+
+    try:
+        result = await ExcelImportService(session).import_from_xlsx(
+            account_id=account_id, file_bytes=payload
+        )
+    except AccountNotFoundForImportError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnsupportedExcelFormatError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except TooManyRowsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
+    except ExcelImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    return ExcelImportResponse(
+        account_id=account_id,
+        total_rows=result.total_rows,
+        imported=result.imported,
+        skipped_duplicates=result.skipped_duplicates,
+        stock_created_count=result.stock_created_count,
+        errors=[ExcelImportRowError(row=e.row, reason=e.reason) for e in result.errors],
+    )

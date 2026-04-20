@@ -200,6 +200,20 @@ class SyncResponse(BaseModel):
     stock_created_count: int
 
 
+class ExcelImportRowError(BaseModel):
+    row: int
+    reason: str
+
+
+class ExcelImportResponse(BaseModel):
+    account_id: int
+    total_rows: int
+    imported: int
+    skipped_duplicates: int
+    stock_created_count: int
+    errors: list[ExcelImportRowError] = []
+
+
 class AlignedSignalItem(BaseModel):
     signal_date: date
     signal_type: str

@@ -1,86 +1,88 @@
 # Session Handoff
 
-> Last updated: 2026-04-20 (KST, 저녁~밤)
-> Branch: `feature/backtest-dec-refactor` (master 기준 분기, 커밋 1건)
-> Latest commit on master: `63e992a` — I6 설정 저장 toast E2E 2건 추가 (격리 + race 방지) (#10)
+> Last updated: 2026-04-20 (KST, 밤 늦음)
+> Branch: `feature/portfolio-excel-import` (master 기준 분기, 커밋 전)
+> Latest commit on master: `e14a27b` — _dec 리팩터: or Decimal("0") fallback 제거 + NaN loud fail (#11)
 
 ## Current Status
 
-직전 PR #9 리뷰에서 사전 부채로 분리됐던 **`_dec(val) or Decimal("0")` 안티패턴** 을 `/ted-run` 으로 청산. `_dec` 시그니처를 `(float) -> Decimal` 로 단순화하고 `or Decimal("0")` fallback 제거, NaN 입력은 `ValueError` 로 loud fail. 리뷰 MEDIUM 2건 반영 (pd.isna → math.isnan, 회귀 테스트가 실제 대상 검증) 후 로컬 백엔드 수트 **185/185 PASS** (183 → +2 신규), mypy strict on touched file 0 에러. 본 세션은 동일 일자(2026-04-20) 세 번째 작업 완결.
+KIS 실계정 sync 설계 문서 확정(`docs/kis-real-account-sync-plan.md`) 후 **PR 1 (엑셀 거래내역 import)** 구현·리뷰·검증 완료. 온보딩 1단계 — 외부 호출 0, 실 자격증명 없이 동작하는 가장 낮은 위험 경로부터 진입. 리뷰 python HIGH 3 + TS HIGH 1 + MEDIUM 다수 중 HIGH 3건 (iterrows 타입/except 광범위/H2 는 overcall 확인) + 실효성 있는 MEDIUM 4건 반영. 로컬 백엔드 **197/197 PASS** (185 → +12), 프론트 `tsc --noEmit` 0 에러. 커밋/푸시 대기.
 
 ## Completed This Session
 
-| # | Task | 파일 | 비고 |
-|---|------|-----|-----|
-| 1 | `_dec` 시그니처 변경 (`float | None -> Decimal | None` → `float -> Decimal`), 도달불가 `or` fallback 제거 | `backtest_service.py` | 리뷰 MEDIUM #2 사전 부채 청산 |
-| 2 | NaN 입력 → `ValueError` loud fail (`pd.isna` → `math.isnan` 으로 contract 일치) | `backtest_service.py` | 리뷰 MEDIUM #1 반영 |
-| 3 | `_dec` 유닛 테스트 + 집계 통합 테스트 2건 추가 | `tests/test_services.py` | 리뷰 MEDIUM #2 (테스트 대상 오류) 반영 — `Signal.return_*` → `BacktestResult.hit_rate/avg_return` 으로 교체 |
-| 4 | CHANGELOG: Unreleased 에 _dec 리팩터 블록 추가, 이전 Unreleased (PR #10) 는 날짜 블록으로 이동 | `CHANGELOG.md` | |
+당일 4번째 작업. 3PR 연속 머지(#9 #10 #11) + KIS 설계 문서 + PR 1 구현까지.
+
+| # | Task | 파일 |
+|---|------|-----|
+| 1 | KIS 설계 문서 6장 확정 (5개 열린 질문 결정, PR 분할 6개 확정) | `docs/kis-real-account-sync-plan.md` |
+| 2 | openpyxl + python-multipart 의존성 추가 | `pyproject.toml` |
+| 3 | Alembic 마이그레이션 006 — source CHECK 확장 | `migrations/versions/006_portfolio_excel_source.py` |
+| 4 | 파서+서비스 단일 모듈 (ExcelImportService, parse_kis_transaction_xlsx) | `app/application/service/excel_import_service.py` |
+| 5 | 라우터 엔드포인트 + ExcelImportResponse 스키마 | `app/adapter/web/routers/portfolio.py`, `_schemas.py` |
+| 6 | 백엔드 테스트 12건 (parser 5 + service 4 + router 3) | `tests/test_excel_import.py` |
+| 7 | Next.js admin 릴레이에 multipart 분기 (arrayBuffer + 10MB) | `src/app/api/admin/[...path]/route.ts` |
+| 8 | 프론트 `<ExcelImportPanel>` + `importExcelTransactions()` | `components/features/`, `lib/api/portfolio.ts`, `types/portfolio.ts` |
+| 9 | Portfolio 페이지에 패널 연결 + `refreshCurrent` 에러 가드 | `app/portfolio/page.tsx` |
 
 ## In Progress / Pending
 
-- 브랜치 푸시 + `gh pr create` → CI 녹색 확인 → squash merge. 사용자 승인 대기.
+- 커밋 + 푸시 + PR 생성 사용자 승인 대기.
+- 머지 후 PR 2 (kis_rest_real 어댑터 분기) 설계 진입.
 
 ## Key Decisions Made
 
-- **스케일 보존 클레임 철회 (자체 교정)**: 초기 설계안에서 "`_dec(0.0) == Decimal('0.0000')` 스케일 보존" 이라고 썼으나 실제 `round(0.0, 4)` 은 `0.0` 을 돌려주고 `Decimal('0.0')` (exp=-1) 이 된다. 테스트가 실패하며 전제가 틀렸음을 발견 → 회귀의 본질은 "`_dec` never returns None + `or` fallback 제거 + NaN loud fail" 로 재정의하고 테스트를 그에 맞춰 재작성.
-- **리뷰 MEDIUM #2 (테스트 대상 오류) 적극 수용**: 처음엔 `Signal.return_5d` 를 검증했으나 리뷰어가 "이건 `_dec` 변경과 무관하게 변함없다 — 실제 회귀 대상은 `BacktestResult.hit_rate_5d` / `avg_return_5d`" 지적. `BacktestResultRepository.list_by_signal_type` 으로 조회하도록 교체.
-- **structlog 로깅 (리뷰 MEDIUM #3) SKIP**: `_dec` 은 맥락(stock_id, date) 모르는 pure util. 호출처 wrap 은 침습적이고 contract 위반이면 ValueError stack trace 로 충분. Known Issue 로 기록.
-- **기존 3건 F401 unused import (pre-existing) 유지**: `LendingBalance`, `StockPrice`, `ShortSellingRepository` 는 내 변경 이전부터 tests/test_services.py 에 있었음. CI 가 ruff 를 안 돌려서 잔존. 스코프 밖이라 건드리지 않음.
+- **실 KIS 엑셀 샘플 없음 → 컬럼 alias 유연 매칭**: `_COLUMN_ALIASES` 상수로 `(체결일자|거래일자|…)` 매핑. 실 파일 입수 시 alias 보정만 하면 되는 구조. 파서 + 라우터 테스트는 openpyxl 로 작성된 fixture 로 검증.
+- **파서+서비스 단일 파일**: 외부 의존(pandas+openpyxl)과 domain(PortfolioTransaction) 사이 접착 코드를 분리하기보다 cohesive 하게 묶음. 200줄 미만 규모에서 별도 adapter 디렉토리 생성은 과잉.
+- **Python 리뷰 HIGH 3 중 H2 overcall**: 리뷰어가 `session.begin()` 없음을 HIGH 로 지적했으나 `get_session` 이 이미 요청-스코프 commit/rollback 을 처리 → 불필요한 중복. 다른 HIGH 2건만 반영.
+- **`except Exception` → `(ValueError, TypeError)` 한정**: SQLAlchemyError 는 세션을 오염시키므로 잡지 않고 request 레벨 롤백으로 유도. 데이터 문제(price quantize 등) 만 per-row 스킵.
+- **Next.js 릴레이 multipart 분기**: 기존 `await req.text()` + 64KB 제한은 바이너리 업로드 불가. Content-Type `multipart/*` 일 때만 `arrayBuffer()` + 10MB 허용으로 분기. 기존 JSON 엔드포인트에 회귀 없음.
+- **클라이언트 10MB + 서버 10MB 중복 체크 유지**: UX (즉각 피드백) + 방어 (스푸핑 대비) 두 목적. `content-length` 헤더 조작 가능성은 `arrayBuffer().byteLength` 2차 가드로 방어.
 
 ## Known Issues
 
-- **CI 가 ruff/mypy 안 돌림**: `.github/workflows/*.yml` grep 결과 없음. 백엔드 검증은 pytest 만. 스타일/타입 회귀를 놓칠 위험. 별도 PR 후보.
-- **pre-existing F401 3건** (`tests/test_services.py`): CI 가 ruff 를 안 돌려서 누적. 정리 PR 후보.
-- **MEDIUM #4 `setattr` mypy 우회 (리뷰 지적)**: `BacktestResult.hit_rate_{n}d` attribute 를 `setattr(res, f"…", _dec(x))` 로 설정하는 패턴이 mypy strict 에서 검증 불가. `BacktestResult.set_period_stats(n, …)` 메서드 도입 안. 리팩터 규모 중간, 별도 PR.
-- **CI `Docker Build` 병목**: 여전히 2~3m.
-- **carry-over 2026-04-16·17 `lending_balance` T+1 지연**.
-- **218건 stock_name 빈 종목**.
-- **TREND_REVERSAL Infinity 재발 모니터링**: 월요일 07:00 KST 첫 스케줄 실측 남음.
-- **로컬 백엔드 이미지 재빌드 루틴**: 세션 #2 에서 seed 스크립트가 모듈 미포함으로 실패. 이번 세션은 로컬 venv 로 테스트 실행해 우회.
+- **TS H1 (Content-Length 스푸핑)**: 부분 수용. `arrayBuffer()` 이후 `byteLength` 체크가 1차 방어선. Next.js `next.config` 의 `api.bodyParser.sizeLimit` 적용은 App Router Route Handler 에 직접 영향이 없어 보류. Node 런타임 자체 limit 에 의존.
+- **Python M2 중복 판단 N+1**: 행마다 `SELECT EXISTS` 수행. 1,000행이면 SELECT 1,000회. 메모리 집합으로 한 번에 조회 최적화는 후속 PR 이관.
+- **TS M1 upstream.text() 바이너리 손실**: JSON 응답 전용이라 현재 무해. 다운로드 엔드포인트가 이 릴레이로 확장되면 교체 필요.
+- **ruff 아직 CI 미통합**: 이번 PR 도 로컬에서만 검증. CI 에 ruff+mypy 추가 PR 은 차기 후보.
+- **carry-over**: `_dec or Decimal("0")` 사전 부채 정리됨. lending_balance T+1 지연, 218 stock_name 빈, TREND_REVERSAL Infinity 모니터링 유지.
 
 ## Context for Next Session
 
-### 사용자의 원래 목표 (달성)
+### 차기 세션 후보 (KIS sync 시리즈 + 기타)
 
-직전 세션 HANDOFF "차기 세션 후보 1순위 — `_dec(val) or Decimal("0")` 리팩터" 완결.
-
-### 사용자 선호·제약 (재확인)
-
-- **커밋 메시지 한글 필수** — 본 세션 준수
-- **push 는 명시 요청 시에만** — 현재 커밋 전, 푸시 대기
-- **설계 승인 루프**: 구현안 제안 → "진행하자" 확인 후 착수. 설계 중 전제 오류 발견 시 즉시 자체 교정 (스케일 보존 클레임 철회 사례).
-- **리뷰 지적 즉시 반영**: MEDIUM 3건 중 2건 수용 (contract 일치 + 테스트 대상 교정), 1건(structlog) 은 판단 근거 제시 후 SKIP. ted-run 규칙상 MEDIUM 은 수정 후 재리뷰 불필요.
-- **실측 마감 선호** — 로컬 pytest 185/185 PASS + mypy 0 에러 확인.
-
-### 차기 세션 후보 (우선순위 순)
-
-1. **KIS 실계정 sync** — 현재 `kis_rest_mock` 만 지원. 실계좌·실잔고 동기화 미구현. 민감도 높아 보안 리뷰 필수. 엑셀·API 키·OAuth 순서 설계 필요. 수 시간 규모.
-2. **CI 에 ruff + mypy strict 추가** — 현재 pytest 만. 3~5분 소규모 PR. F401/import 정돈 포함 가능.
-3. **`BacktestResult` setattr → 명시 setter 메서드 리팩터** (리뷰 MEDIUM #4): mypy strict 검증 범위 확장. 30분~1시간.
-4. **CI `Docker Build` 최적화** — 3m 병목.
-5. **시드 시그널 실 탐지 경로 교체** — `seed_backtest_e2e.py` score=80 → `SignalDetectionService.detect_all`.
-6. **월요일 07:00 KST 스케줄러 실측** — PR #6·#9 적용 후 `backtest_result` 유한 값 누적 확인. 관찰만.
-7. **로컬 백엔드 이미지 재빌드 루틴 편입**: `/ted-run` Step 3-1 전 `docker compose build backend` 단계 추가 검토.
+1. **PR 2: `kis_rest_real` 어댑터 분기** — `KisClient` 에 `environment: MOCK|REAL` 파라미터, credentials 주입, connection_type enum. 외부 호출 0, In-memory mock 으로 URL/TR_ID 분기만 검증. 2~3h. 직접 의존성 없음.
+2. **PR 3: `brokerage_account_credential` + Fernet 암호화** — PR 2 머지 후. 3~4h.
+3. **CI 에 ruff + mypy strict 추가** — 3~5분 PR. pre-existing F401 정돈 포함 가능.
+4. **Python M2 중복 판단 N+1 최적화** — 1 commit 수준 소형.
 
 ### 가치있는 발견
 
-1. **설계안 → 테스트 → 교정 루프의 가치**: "Decimal('0.0000') 스케일 보존" 전제가 테스트 실패로 2분 만에 드러남. 설계안 검증에서 "assertion 을 말로만 하지 말고 코드로 써서 돌려보면 전제가 빨리 붕괴된다" 는 교훈. 초기 CHANGELOG/HANDOFF 에도 잘못된 표현이 섞였다면 수정 비용 훨씬 컸을 것.
-2. **`round(float, N)` 의 사실**: Python `round` 는 입력 자연 스케일을 그대로 유지 (trailing zero padding 없음). `Decimal('0.0000')` 형태의 스케일을 원하면 `Decimal(str(round(x, 4))).quantize(Decimal('0.0000'))` 처럼 명시 quantize 가 필요. 대부분 DB NUMERIC 이 저장 시 정규화하므로 표시 단에서만 포맷 필요.
-3. **`pd.isna` 배열 함정**: 시그니처가 `float` 인데 내부에서 `pd.isna(val)` 을 쓰면 배열 입력 시 `ValueError: truth value of array` 를 던진다. Contract 와 구현의 import 는 일치시켜야 함. `math.isnan` 이 float 타입에 최적.
-4. **리뷰 지적의 계층**: (a) 표층 - `pd.isna` vs `math.isnan` 같은 tactical 선택, (b) 심층 - "테스트가 진짜 대상을 검증하는가" 같은 premise-questioning. 후자를 빠뜨리면 refactor 는 완성되지만 회귀 방어선은 거짓 증거가 된다. 이번 세션 리뷰어 MEDIUM #2 가 완벽한 심층 지적 예시.
-5. **CI 가 ruff/mypy 를 안 돌리면 `F401` 은 영원히 살아남는다**: 3개의 unused import 가 언제부터 있었는지 git blame 도 귀찮게 남아있을 것. 툴 미통합은 기술부채의 무언의 누적 창구.
-6. **Handoff 이월 항목의 실제 청산 비용**: PR #9 에서 "별도 PR 후보" 로 이월된 MEDIUM #2 는 본 세션에서 총 작업 시간 ~30분 (설계 수정 + 테스트 재작성 포함). Handoff 에 명시적으로 남긴 덕에 후속 세션 맥락 복구 비용 거의 0.
+1. **설계 문서 선행의 가치**: 5개 열린 질문을 문서에서 체크리스트로 만들고 사용자 결정 받은 뒤 PR 1 진입. "엑셀 포함" 결정이 PR 순서 재정렬로 이어졌고, 온보딩 UX 순서(엑셀 → API key → OAuth) 와 PR 순서가 정렬돼 점진적 위험 도입 구조 확보.
+2. **리뷰어 HIGH overcall 판정**: 로컬 트랜잭션 경계 지적 H2 는 `get_session` 이 요청-스코프 관리 중이라 불필요. MEDIUM 이 적절. 리뷰어가 상위 dependency 전체 맥락을 못 볼 때 전형적 overcall. "수용 전 근거 확인" 루프가 중요.
+3. **파서 alias 전략의 방어성**: 실 샘플 부재 상태에서 단일 컬럼명 하드코딩보다 alias 튜플이 훨씬 탄력적. `_COLUMN_ALIASES["executed_at"] = ("체결일자", "거래일자", ...)` 로 확장 여지 확보. 실 파일 들어오면 alias 보정만.
+4. **Next.js App Router body 핸들링 주의**: `req.text()` 는 UTF-8 재인코딩으로 바이너리 손상. `req.arrayBuffer()` 는 한 번만 호출 가능. multipart/binary 릴레이 패턴은 이제 확정.
+5. **TS/Python 병렬 리뷰의 효율**: 동일 PR 을 2개 reviewer 동시 실행 → 한 번에 다양한 관점 지적 수집. 리뷰 간 중복 없음 (각 언어 전문성 분리). ~1분 대기로 통합 보고서.
 
 ## Files Modified This Session
 
 ```
-3 files changed
+10 files touched
 
- src/backend_py/app/application/service/backtest_service.py  | (_dec 시그니처·NaN guard·주석)
- src/backend_py/tests/test_services.py                       | (+2 테스트, +1 import, +1 repo import)
- CHANGELOG.md                                                | (Unreleased 블록 + PR #10 날짜 블록 이관)
- HANDOFF.md                                                  | (본 산출물)
+ CHANGELOG.md                                                                        | (+17)
+ HANDOFF.md                                                                          | (본 산출물)
+ docs/kis-real-account-sync-plan.md                                                  | (신규 ~200 lines)
+ src/backend_py/pyproject.toml                                                       | (+2 deps)
+ src/backend_py/migrations/versions/006_portfolio_excel_source.py                    | (신규)
+ src/backend_py/app/adapter/out/persistence/models/portfolio.py                      | (+'excel_import')
+ src/backend_py/app/application/service/excel_import_service.py                      | (신규 ~260 lines)
+ src/backend_py/app/adapter/web/_schemas.py                                          | (+ExcelImportResponse)
+ src/backend_py/app/adapter/web/routers/portfolio.py                                 | (+import endpoint)
+ src/backend_py/tests/test_excel_import.py                                           | (신규 ~270 lines, 12 테스트)
+ src/frontend/src/app/api/admin/[...path]/route.ts                                   | (multipart 분기)
+ src/frontend/src/types/portfolio.ts                                                 | (+ExcelImportResult)
+ src/frontend/src/lib/api/portfolio.ts                                               | (+importExcelTransactions)
+ src/frontend/src/components/features/ExcelImportPanel.tsx                           | (신규)
+ src/frontend/src/app/portfolio/page.tsx                                             | (+패널 연결)
 ```
 
-본 세션은 **`_dec` 리팩터 단일 축** 에서 구현 → 리뷰 MEDIUM 2건 반영 → 전제 오류 자체 교정 → 테스트 재작성 → 실행 검증까지 완결. 차기 세션은 KIS 실계정 sync 대형 과제 또는 CI 에 ruff/mypy 추가 소규모 PR 중 택1.
+당일 작업 총 4 PR 완료 (#9 #10 #11 + 본 작업). 본 PR 머지 후 KIS PR 시리즈 2/6 (어댑터 분기) 착수 예정.

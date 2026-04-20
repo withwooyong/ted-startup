@@ -28,7 +28,7 @@ VALID_BROKER_CODES = ("manual", "kis", "kiwoom")
 VALID_CONNECTION_TYPES = ("manual", "kis_rest_mock")
 VALID_ENVIRONMENTS = ("mock", "real")
 VALID_TRANSACTION_TYPES = ("BUY", "SELL")
-VALID_SOURCES = ("manual", "kis_sync")
+VALID_SOURCES = ("manual", "kis_sync", "excel_import")
 
 
 class BrokerageAccount(Base):

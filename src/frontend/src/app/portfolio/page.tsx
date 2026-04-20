@@ -14,6 +14,7 @@ import type {
   Holding,
   PerformanceReport,
 } from '@/types/portfolio';
+import { ExcelImportPanel } from '@/components/features/ExcelImportPanel';
 
 function formatNumber(value: string | number | null, opts?: { fraction?: number }): string {
   if (value === null || value === undefined || value === '') return '-';
@@ -280,6 +281,21 @@ export default function PortfolioPage() {
               시그널 정합도
             </Link>
           </section>
+
+          {/* 거래내역 엑셀 import (P10 온보딩 1단계) — 실 계좌 연결 없이도 사용 가능 */}
+          <ExcelImportPanel
+            accountId={selected.id}
+            onSuccess={() => {
+              refreshCurrent().catch((refreshErr: unknown) => {
+                // refreshCurrent 가 throw 하면 여기서 잡아 배너로 알림.
+                const msg = refreshErr instanceof Error ? refreshErr.message : String(refreshErr);
+                setBanner({
+                  kind: 'error',
+                  text: `가져오기 성공했으나 재조회 실패: ${msg}`,
+                });
+              });
+            }}
+          />
 
           {/* Holdings table */}
           <section aria-labelledby="holdings-title">

@@ -1,9 +1,10 @@
 // 모든 포트폴리오 API 는 관리자 키 보호 — Next.js Route Handler 를 경유해
 // 서버 측에서 ADMIN_API_KEY 를 부착한다. 클라이언트 번들엔 키 없음.
-import { adminCall as call } from '@/lib/api/admin';
+import { ADMIN_BASE, adminCall as call } from '@/lib/api/admin';
 import type {
   Account,
   AccountCreateRequest,
+  ExcelImportResult,
   Holding,
   PerformanceReport,
   SignalAlignmentReport,
@@ -67,6 +68,36 @@ export async function syncFromKis(accountId: number): Promise<SyncResult> {
   return call<SyncResult>(`/portfolio/accounts/${accountId}/sync`, {
     method: 'POST',
   });
+}
+
+export async function importExcelTransactions(
+  accountId: number,
+  file: File,
+): Promise<ExcelImportResult> {
+  // multipart 업로드는 JSON 공통 헬퍼(adminCall) 를 쓸 수 없다 — Content-Type 을
+  // 브라우저가 boundary 포함해 자동 생성하도록 두고, 릴레이(/api/admin/…) 가
+  // 바이너리를 그대로 백엔드로 forward 한다.
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(
+    `${ADMIN_BASE}/portfolio/accounts/${accountId}/import/excel`,
+    {
+      method: 'POST',
+      body: formData,
+      cache: 'no-store',
+    },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as {
+      message?: string;
+      detail?: string;
+    };
+    const msg = body.message || body.detail || `API Error: ${res.status}`;
+    const err = new Error(msg) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return (await res.json()) as ExcelImportResult;
 }
 
 export async function getSignalAlignment(

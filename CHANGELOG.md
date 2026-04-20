@@ -5,7 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **엑셀 거래내역 import (KIS §1 PR 1)** — `docs/kis-real-account-sync-plan.md` § 5 PR 1 착수. 증권사 체결내역 `.xlsx` 를 `portfolio_transaction` 에 `source='excel_import'` 로 적재하는 온보딩 1단계 완결. 외부 호출 0, 실계좌 자격증명 없이 동작.
+  - `POST /api/portfolio/accounts/{id}/import/excel` (multipart/form-data) — 10MB/10_000행 가드, `filter alias` 기반 컬럼 매칭, 중복 스킵(account·stock·date·type·qty·price tuple), stock 미등록 시 자동 생성.
+  - 신규 모듈 `app/application/service/excel_import_service.py` — 파서(`parse_kis_transaction_xlsx`) + 서비스(`ExcelImportService`) 단일 파일. 실 KIS 샘플 부재 상태라 컬럼 alias `(체결일자/거래일자/…, 종목코드/상품번호/…, 체결수량/거래수량/…)` 로 유연 매칭.
+  - 프론트 `<ExcelImportPanel>` (Portfolio 페이지) — 파일 선택 → 업로드 → 실패 행 상세 펼치기(details/summary).
+  - Next.js admin 릴레이 라우터에 multipart 경로 분기 추가: `arrayBuffer()` 바이너리 포워드 + multipart 만 10MB 허용 (기존 64KB text 경로는 유지).
+
 ### Changed
+- **`portfolio_transaction.source`** CHECK 제약 확장: `('manual', 'kis_sync', 'excel_import')`. Alembic migration `006_portfolio_excel_source.py` (ALTER DROP/ADD). 기존 행 영향 없음.
+- `VALID_SOURCES` (Python) + `TransactionSource` (TypeScript) 에 `'excel_import'` 반영.
+- 백엔드 테스트 **185 → 197** (+12: parser 5 + service 4 + router 3).
+
+### Changed (이전)
 - **`_dec` 리팩터 — 도달불가 fallback 제거 + NaN loud fail** (`src/backend_py/app/application/service/backtest_service.py`): 직전 PR #9 리뷰 MEDIUM #2 사전 부채 청산.
   - 시그니처 `(float | None) -> Decimal | None` → `(float) -> Decimal`. None 반환 경로 제거.
   - L151-152 `_dec(hit_rate) or Decimal("0")` → `_dec(hit_rate)`. 호출 컨텍스트에서 `hit_rate`/`avg_ret` 는 `if observed > 0 else 0.0` guard 로 concrete float 보장이라 `or` fallback 이 도달불가였고, Zero Decimal falsy 특성 때문에 의도를 흐리는 안티패턴이었음.
