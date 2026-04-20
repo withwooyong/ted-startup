@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     scheduler_hour_kst: int = Field(default=6, ge=0, le=23, description="일일 실행 시각(KST 24h)")
     scheduler_minute_kst: int = Field(default=0, ge=0, le=59)
 
+    # ---- Backtest Scheduler ----
+    # scheduler_enabled=True 일 때만 의미가 있다. False 면 market_data 는 돌고 backtest 만 스킵.
+    # 주 1회 실행: 월요일 07:00 KST (market_data 배치 1시간 후). 직전 3년 구간을 재계산.
+    # 누적 append 방식이라 GET /api/backtest 는 period_end DESC LIMIT 1 로 최신만 노출.
+    backtest_enabled: bool = Field(default=True, description="scheduler_enabled=True 일 때 backtest cron 등록 여부")
+    backtest_cron_day_of_week: str = Field(default="mon", description="APScheduler day_of_week 표현식")
+    backtest_cron_hour_kst: int = Field(default=7, ge=0, le=23)
+    backtest_cron_minute_kst: int = Field(default=0, ge=0, le=59)
+    backtest_period_years: int = Field(default=3, ge=1, le=3, description="직전 N년 구간 재계산 (엔진 최대 3년)")
+
     # ---- OpenAI (AI 분석 리포트 — Plan B) ----
     # 플랜 §12 #9: mini(수집) + flagship(분석) + nano(리패키징) 3단 라우팅.
     # MVP 는 flagship 단독 호출만 필수. mini 는 web_search 활성 시만 호출, nano 는 기본 passthrough.
