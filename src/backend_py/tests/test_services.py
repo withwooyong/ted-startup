@@ -194,3 +194,92 @@ async def test_backtest_no_signals_returns_empty_result(session: AsyncSession) -
     )
     assert result.signals_processed == 0
     assert result.result_rows == 0
+
+
+@pytest.mark.asyncio
+async def test_backtest_handles_zero_close_price_without_infinity(session: AsyncSession) -> None:
+    """상장폐지/정지 종목의 close_price=0 이 있어도 Infinity 발생 없이 정상 집계.
+
+    2026-04-20 베이스라인 측정에서 TREND_REVERSAL avg_return=Infinity 로 INSERT 실패가
+    재현된 케이스. close_price=0 은 NaN 마스킹으로 걸러져 해당 signal 의 return_Nd 는 None,
+    집계 avg_return 은 유한 Decimal 로 저장돼야 한다.
+    """
+    stock = await _seed_stock(session, "900999", "테스트폐지주")
+
+    base_date = date(2026, 1, 5)
+    # 40 영업일치 가격 — 기준일(index 0) 만 close=0, 나머지는 정상 10_000 +i
+    prices = []
+    for i in range(40):
+        d = base_date + timedelta(days=i)
+        close = 0 if i == 0 else 10_000 + i * 100
+        prices.append({"stock_id": stock.id, "trading_date": d, "close_price": close})
+    await StockPriceRepository(session).upsert_many(prices)
+
+    # 시그널은 기준일(close=0) 에 발생 — 분모 0 이라 과거 로직은 Infinity 산출
+    await SignalRepository(session).add(Signal(
+        stock_id=stock.id, signal_date=base_date,
+        signal_type=SignalType.TREND_REVERSAL.value,
+        score=85, grade="A", detail={"zero": True},
+    ))
+
+    result = await BacktestEngineService(session).execute(
+        period_start=base_date, period_end=base_date
+    )
+    # INSERT 성공 (NumericValueOutOfRangeError 미발생) 이 핵심 회귀 방어
+    assert result.signals_processed == 1
+    assert result.result_rows == 1
+
+    refreshed = (await SignalRepository(session).list_by_date(base_date))[0]
+    # close=0 기준일은 분모로 못 써 return 은 None 이어야 함
+    assert refreshed.return_5d is None
+    assert refreshed.return_10d is None
+    assert refreshed.return_20d is None
+
+
+@pytest.mark.asyncio
+async def test_backtest_preserves_minus_hundred_when_future_close_zero(
+    session: AsyncSession,
+) -> None:
+    """기준일 가격은 정상이고 미래 시점에 종가가 0(전손)으로 찍힌 경우 -100% 로 기록돼야 한다.
+
+    단순히 분자·분모 둘 다 마스킹하면 이 케이스가 None 으로 사라져 승률·평균수익 집계가
+    왜곡된다. 분모만 가드하는 구현이 제대로 작동하는지 고정한다.
+    """
+    stock = await _seed_stock(session, "900888", "전손주")
+    base_date = date(2026, 2, 1)
+
+    # 기준일 = 10_000, +5 영업일 후 = 0 (전손), 그 뒤는 0 유지
+    rows = [
+        {"stock_id": stock.id, "trading_date": base_date, "close_price": 10_000},
+    ]
+    for i in range(1, 5):
+        rows.append({
+            "stock_id": stock.id, "trading_date": base_date + timedelta(days=i),
+            "close_price": 9_000 - i * 500,
+        })
+    # 5일째부터 20일까지 전부 0 — 전손 상태 유지
+    for i in range(5, 21):
+        rows.append({
+            "stock_id": stock.id, "trading_date": base_date + timedelta(days=i),
+            "close_price": 0,
+        })
+    await StockPriceRepository(session).upsert_many(rows)
+
+    await SignalRepository(session).add(Signal(
+        stock_id=stock.id, signal_date=base_date,
+        signal_type=SignalType.SHORT_SQUEEZE.value,
+        score=75, grade="B", detail={"delisted": True},
+    ))
+
+    result = await BacktestEngineService(session).execute(
+        period_start=base_date, period_end=base_date
+    )
+    assert result.signals_processed == 1
+    assert result.result_rows == 1
+
+    refreshed = (await SignalRepository(session).list_by_date(base_date))[0]
+    # base=10000, future=0 → (0/10000 - 1) * 100 = -100.0
+    assert refreshed.return_5d is not None
+    assert Decimal("-100.01") < refreshed.return_5d < Decimal("-99.99")
+    assert refreshed.return_20d is not None
+    assert Decimal("-100.01") < refreshed.return_20d < Decimal("-99.99")

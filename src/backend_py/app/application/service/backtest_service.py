@@ -83,11 +83,19 @@ class BacktestEngineService:
         price_wide = price_df.pivot(index="date", columns="stock_id", values="close").sort_index()
         # 모든 거래일이 인덱스 — 영업일 단위 shift 계산(행 기준)이 그대로 "N영업일 후"
         price_wide = price_wide.astype("float64")
+        # 분모(기준일 가격)만 NaN 마스킹. 상장폐지/거래정지 종목은 일부 날짜에 close_price=0 인데
+        # 기준일이 0 이면 (future/0-1)=Infinity 가 퍼져 INSERT 시 NumericValueOutOfRangeError 발생.
+        # 분자는 마스킹하지 않음 — 미래 시점에 0 이 되면 (0/base-1)=-100% 라는 유효한 전손 수익률이
+        # 그대로 기록돼야 집계가 왜곡되지 않는다.
+        price_base = price_wide.where(price_wide > 0)
 
         # 2. N-영업일 후 종가 (price_wide.shift(-N)) → 수익률 = (future/base - 1) * 100
         returns: dict[int, pd.DataFrame] = {
-            n: (price_wide.shift(-n) / price_wide - 1.0) * 100.0 for n in HOLDING_PERIODS
+            n: (price_wide.shift(-n) / price_base - 1.0) * 100.0 for n in HOLDING_PERIODS
         }
+        # inf/-inf → NaN 필수 치환. 아래 집계 경로(`series.dropna().mean()`)는 NaN 만 제거하고
+        # inf 는 남긴다 — 단일 inf 가 평균을 Decimal('Infinity') 로 만들어 DB INSERT 가 실패.
+        returns = {n: df.where(np.isfinite(df)) for n, df in returns.items()}
 
         # 3. 시그널 발생일 × stock_id 교차점 벡터 lookup → 각 시그널의 수익률 기록
         returns_calculated = 0
