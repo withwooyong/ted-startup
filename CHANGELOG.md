@@ -7,6 +7,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-20] 시그널 튜닝 · 알림 가드 · 설정 페이지 복구 (`e6c4345` · `c344e89` · `6b3b56f`)
+
+3-PR 세션: HANDOFF 1·2·3 순위 연속 완결 + 예상 외 프로덕션 버그 복구.
+master 에 커밋 **3건** 추가 (PR #6·#7·#8 모두 머지 + delete-branch, CI 4/4 PASS × 3회).
+백엔드 테스트 178 → **181** (신규 6건: NotificationService 필터·실패·no-op 5 + batch Step 3 배선 1,
+테스트 스위트 내 기존 카운트 편차는 signal tuning 경계 +1 포함). E2E 31 → **38 케이스**
+(A4 + F5 + I1~I5 = 7건 신규, 설정 페이지 E2E 최초 도입).
+
+### Changed
+- **시그널 탐지 임계값·가중치 재정비** (`e6c4345`, PR #6): 3년 백필 70,609 건에서 저등급 비중 과다(SHORT_SQUEEZE 81% C-grade, TREND_REVERSAL 22% D-grade, RAPID_DECLINE 62% A-grade 편향) 확인 후 기준치 상향.
+  - RAPID_DECLINE: 임계 -10% → **-12%**, base 계수 `abs*3` → `abs*2.5`, 버퍼 `+20` → `+10`
+  - TREND_REVERSAL: `score >= 50` 필터 신규 추가 (크로스 감지 후 품질 게이트)
+  - SHORT_SQUEEZE: `MIN_SCORE` 40 → **60**
+  - 예상 감소율: 70,609 → 30,234 (**-57.2%**). 기존 신호는 append 모델로 보존, 월요일 07:00 KST 스케줄러가 새 기준으로 재탐지하며 자연 검증.
+- **설정 페이지 snake_case 통일** (`6b3b56f`, PR #8): `types/notification.ts` 만 camelCase 로 작성돼 있어 프로젝트 컨벤션(snake_case)에서 이탈. 전체 프로젝트와 일관화.
+- **`.github/workflows/ci.yml` 에는 변경 없음** — 테스트 개수만 늘었고 워크플로는 기존 그대로 동작.
+
+### Added
+- **NotificationService 단위 테스트 5건** (`c344e89`, PR #7, `tests/test_notification_service.py`): `test_min_score_filter_drops_below_threshold` / `test_signal_types_filter_drops_disabled_types` / `test_telegram_disabled_skips_db_access` / `test_partial_send_failure_counts_successes_only` / `test_empty_signals_short_circuits_before_db`. 기존 테스트는 포매팅(N+1 방어 / HTML escape / 한글 라벨) 만 검증해 필터 조건 · 실패 처리 · no-op 경로가 회귀 무방비 상태였음.
+- **batch 파이프라인 Step 3 통합 테스트** (`c344e89`, `tests/test_batch.py`): `test_pipeline_step3_dispatches_seeded_signal_to_telegram` — 사전 seed 된 시그널이 KRX 빈 응답 상황에서도 MockTransport 로 Telegram 호출까지 도달하는지 검증. `_notify` 콜백 배선 오류로 `sent=0` 조용히 실패하는 회귀를 감지.
+- **RAPID_DECLINE 경계 테스트** (`e6c4345`, `tests/test_services.py`): `test_rapid_decline_ignores_minus_eleven_percent` — 새 -12% 임계에서 -11% 는 더 이상 신호가 아님을 명시적으로 고정.
+- **E2E 설정 페이지 섹션 신규** (`6b3b56f`, PR #8, `tests/e2e/settings.spec.ts`): I1~I5 5 케이스 — 진입·채널 스위치 토글·시그널 타입 칩 토글·validation(`disabled` + 경고)·슬라이더 값 라벨 갱신. 저장 경로(I6)는 DB 싱글톤 mutation 격리 전략 확정 후 별도 PR.
+- **E2E A4 · F5** (`6b3b56f`): `navigation.spec.ts` 에 NavHeader "설정" 링크 테스트 추가, `stocks.spec.ts` 에 차트 기간 배타 선택(1M/6M `aria-pressed` 상호배타) 검증 추가.
+- **HomePage POM 확장**: `settingsLink` / `openSettings()` 추가로 설정 네비게이션 재사용 가능.
+
+### Fixed
+- **`/settings` 페이지 런타임 크래시 복구** (`6b3b56f`, PR #8): 백엔드 API 응답이 snake_case 인데 `types/notification.ts` 만 camelCase 로 작성돼 있어 `pref.signalTypes` 가 undefined → `.includes()` 호출 시 크래시. 로딩 스켈레톤 후 Chrome 에러 페이지 "This page couldn't load" 로 전환되던 상태. 타입·페이지·form state 를 전부 snake_case 로 통일해 복구. Next Route Handler(`/api/admin/notifications/preferences/route.ts`) 는 passthrough 라 수정 불필요. 기존 E2E 가 이 페이지를 안 건드려서 감지 못 했던 케이스 — I1~I5 가 이후 회귀 방어.
+
+### Technical Notes
+- **승인 루프 준수**: PR #6 은 A/B 옵션 제안 → A 선택 → 구현, PR #8 은 스코프 확장 제안(A/B/C) → A 선택 → 구현. 프로덕션 설정 페이지 버그 발견 시 "E2E 만 하고 덮기" 대신 "같이 수정" 을 사용자 확인 후 진행.
+- **격리 전략 일관성**: NotificationService 테스트는 `httpx.MockTransport` + testcontainers + `db_cleaner` TRUNCATE, E2E 설정 테스트는 "로컬 React state 만 조작, 저장 PUT 안 누름" 으로 싱글톤 mutation 회피.
+- **로컬 실측**: 각 PR 전 전체 pytest 175/181 pass, 최종 E2E 37/37 (H5 는 로컬 seed 미적용 환경 이슈로 제외, CI 에서는 seed 실행되므로 정상). ruff/mypy/tsc 전부 통과.
+
+---
+
 ## [2026-04-20] 백테스트 주간 스케줄러 + E2E 실데이터 전환 (`ce0ecba` · `5ffef6d`)
 
 2-PR 세션: 전 세션 carry-over 1순위였던 `backtest_result` 0건 기술부채 해소.
