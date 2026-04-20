@@ -28,4 +28,13 @@ test.describe('A. 내비게이션·접근성', () => {
     await expect(portfolio.accountTab('e2e-manual')).toBeVisible();
     await expect(portfolio.accountTab('e2e-kis')).toBeVisible();
   });
+
+  test('A4: NavHeader의 "설정" 클릭 → /settings + aria-current', async ({ page }) => {
+    const home = new HomePage(page);
+    await home.goto();
+    await home.openSettings();
+
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(home.settingsLink).toHaveAttribute('aria-current', 'page');
+  });
 });
