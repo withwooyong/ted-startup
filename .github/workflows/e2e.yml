@@ -78,6 +78,11 @@ jobs:
         # seed_ui_demo 는 계좌·보유를 다루지 않으므로 별도 스크립트로 분리.
         run: docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend python -m scripts.seed_e2e_accounts
 
+      - name: Seed backtest signals + run backtest
+        # /backtest 페이지가 실데이터로 렌더되도록 signal 3종 시드 + backtest 1회 실행.
+        # H5 (실데이터) 케이스가 이 시드를 전제로 동작.
+        run: docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend python -m scripts.seed_backtest_e2e
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

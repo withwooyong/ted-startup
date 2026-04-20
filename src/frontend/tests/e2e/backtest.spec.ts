@@ -93,4 +93,24 @@ test.describe('H. 백테스트', () => {
       timeout: 10_000,
     });
   });
+
+  test('H5: 실데이터 — 3개 SignalType 라벨 + 차트 렌더', async ({ page }) => {
+    // scripts/seed_backtest_e2e 가 선행돼 backtest_result 3행이 적재된 상태 가정.
+    // stub 없이 실제 /api/backtest 응답 사용 — 경로 회귀 방어선.
+    await page.goto('/backtest');
+
+    // empty state 는 나타나면 안 됨
+    await expect(page.getByText('백테스팅을 아직 실행하지 않았어요')).toHaveCount(0);
+
+    // 3개 SignalType 라벨이 실데이터에서 모두 나타나는지 확인.
+    // 데스크톱 table 과 모바일 card 가 동시에 DOM 에 존재할 수 있으므로 first() 로 제한.
+    await expect(page.getByText('대차 급감').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('추세 전환').first()).toBeVisible();
+    await expect(page.getByText('숏스퀴즈').first()).toBeVisible();
+
+    // 차트 섹션 헤딩 렌더
+    await expect(
+      page.getByRole('heading', { level: 2, name: '보유기간별 평균 수익률' }),
+    ).toBeVisible();
+  });
 });
