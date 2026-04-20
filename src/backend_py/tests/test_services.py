@@ -61,9 +61,9 @@ async def test_rapid_decline_signal_generated_when_change_rate_below_threshold(
     signals = await SignalRepository(session).list_by_date(today)
     rapid = [s for s in signals if s.signal_type == SignalType.RAPID_DECLINE.value]
     assert len(rapid) == 1
-    # 15.5 * 3 = 46.5 → base 46, consec 15, +20 → 81 (A 등급)
-    assert rapid[0].score >= 80
-    assert rapid[0].grade == "A"
+    # 15.5 * 2.5 = 38.75 → base 38, consec 15, +10 → 63 (B 등급)
+    assert rapid[0].score == 63
+    assert rapid[0].grade == "B"
 
 
 @pytest.mark.asyncio
@@ -80,6 +80,28 @@ async def test_no_signal_when_change_rate_above_threshold(session: AsyncSession)
                 "change_rate": "-5.0",  # 임계 초과 못함
                 "change_quantity": -50_000,
                 "consecutive_decrease_days": 1,
+            }
+        ]
+    )
+    result = await SignalDetectionService(session).detect_all(today)
+    assert result.rapid_decline == 0
+
+
+@pytest.mark.asyncio
+async def test_rapid_decline_ignores_minus_eleven_percent(session: AsyncSession) -> None:
+    """2026-04-20 튜닝: 임계값 -10% → -12%. -11% 는 더 이상 신호로 잡히지 않음."""
+    stock = await _seed_stock(session, "051910", "LG화학")
+    today = date(2026, 4, 17)
+    await LendingBalanceRepository(session).upsert_many(
+        [
+            {
+                "stock_id": stock.id,
+                "trading_date": today,
+                "balance_quantity": 2_000_000,
+                "balance_amount": 20_000_000_000,
+                "change_rate": "-11.0",
+                "change_quantity": -220_000,
+                "consecutive_decrease_days": 2,
             }
         ]
     )

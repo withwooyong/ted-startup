@@ -1,8 +1,12 @@
 """3종 시그널 탐지 — Java 로직 1:1 포팅, pandas 벡터화.
 
-- RAPID_DECLINE: 대차잔고 change_rate <= -10% → base(abs*3) + consec(*5) + 20, cap 100
-- TREND_REVERSAL: 대차잔고 5MA vs 20MA 골든→데드 크로스 검출(어제 >= 오늘 <)
-- SHORT_SQUEEZE: balance+volume+price+short_ratio 부분점수 합이 40 이상
+- RAPID_DECLINE: 대차잔고 change_rate <= -12% → base(abs*2.5) + consec(*5) + 10, cap 100
+- TREND_REVERSAL: 대차잔고 5MA vs 20MA 골든→데드 크로스 검출(어제 >= 오늘 <), score >= 50
+- SHORT_SQUEEZE: balance+volume+price+short_ratio 부분점수 합이 60 이상
+
+2026-04-20 임계값 튜닝: 3년 백필 결과(70,609건, hit_rate ~45%)에서 저등급 비중이 과도.
+SHORT_SQUEEZE C-grade 81%, TREND_REVERSAL D-grade 22%, RAPID_DECLINE A-grade 62% —
+각 타입별 기준치를 재정비해 상위 신호만 남도록 조정했다.
 """
 from __future__ import annotations
 
@@ -27,12 +31,13 @@ from app.application.dto.results import DetectionResult
 
 logger = logging.getLogger(__name__)
 
-RAPID_DECLINE_THRESHOLD = Decimal("-10.0")
+RAPID_DECLINE_THRESHOLD = Decimal("-12.0")
 TREND_MA_SHORT = 5
 TREND_MA_LONG = 20
 TREND_HISTORY_DAYS = TREND_MA_LONG + 10
+TREND_REVERSAL_MIN_SCORE = 50
 VOLUME_HISTORY_DAYS = 30
-SHORT_SQUEEZE_MIN_SCORE = 40
+SHORT_SQUEEZE_MIN_SCORE = 60
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -163,9 +168,9 @@ class SignalDetectionService:
         existing.add(key)
 
         abs_change = abs(float(lb.change_rate))
-        base = min(60, int(abs_change * 3))
+        base = min(60, int(abs_change * 2.5))
         consec = min(20, int(lb.consecutive_decrease_days or 0) * 5)
-        score = min(100, base + consec + 20)
+        score = min(100, base + consec + 10)
         detail = {
             "balanceChangeRate": str(lb.change_rate),
             "changeQuantity": int(lb.change_quantity or 0),
@@ -203,11 +208,6 @@ class SignalDetectionService:
         if not cross:
             return None
 
-        key = (stock_id, SignalType.TREND_REVERSAL.value)
-        if key in existing:
-            return None
-        existing.add(key)
-
         divergence = abs(short_today - long_today) / long_today * 100 if long_today else 0
         divergence_score = min(40, int(divergence * 10))
         speed = (
@@ -215,6 +215,13 @@ class SignalDetectionService:
         )
         speed_score = min(30, int(speed * 15))
         score = min(100, divergence_score + speed_score + 30)
+        if score < TREND_REVERSAL_MIN_SCORE:
+            return None
+
+        key = (stock_id, SignalType.TREND_REVERSAL.value)
+        if key in existing:
+            return None
+        existing.add(key)
         detail = {
             "maShort": round(short_today, 2),
             "maLong": round(long_today, 2),
