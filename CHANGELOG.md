@@ -7,6 +7,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-20] 백테스트 주간 스케줄러 + E2E 실데이터 전환 (`ce0ecba` · `5ffef6d`)
+
+2-PR 세션: 전 세션 carry-over 1순위였던 `backtest_result` 0건 기술부채 해소.
+master 에 커밋 **2건** 추가 (PR #4·#5 모두 머지 + delete-branch, CI 4/4 PASS × 2회).
+백엔드 테스트 174 → **178** (신규 4건: 스케줄러 등록 2 + 파이프라인 실적재 2),
+E2E 30 → **31 케이스** (H5 실데이터 추가).
+
+### Added
+- **백테스트 주간 cron** (`ce0ecba`, PR #4): `app/batch/backtest_job.py` 신규 — `run_backtest_pipeline(period_end, period_years)` 래퍼 + `fire_backtest_pipeline` APScheduler 콜백. `app/batch/scheduler.py` 에 `backtest_enabled=True` 일 때 **월요일 07:00 KST** 트리거 등록 (`market_data` 06:00 배치 1시간 후 주 1회 실행, 직전 3년 재계산).
+- **`Settings.backtest_*` 필드 5개** (`ce0ecba`): `backtest_enabled`/`backtest_cron_day_of_week`/`backtest_cron_hour_kst`/`backtest_cron_minute_kst`/`backtest_period_years` (기본 True · mon · 07:00 · 3년). `scheduler_enabled` 와 독립 — 전체 스케줄러는 켠 채 backtest 만 끌 수 있음.
+- **`scripts/run_backtest.py` CLI** (`ce0ecba`): one-shot 수동 실행. `--from/--to` 명시 또는 `--years N` 로 직전 N년. 시드·수동 재실행 겸용. 엔진을 직접 호출하는 경로와 래퍼 경유 두 분기 분리.
+- **`scripts/seed_backtest_e2e.py`** (`5ffef6d`, PR #5): SignalType 3종 × 삼성전자 기준 signal 1건씩 insert → `run_backtest_pipeline(period_years=1)` 호출. `(stock_id, signal_date, signal_type)` 중복 skip 으로 멱등. 005930 stock 미존재 시 graceful skip.
+- **E2E H5 실데이터 케이스** (`5ffef6d`): stub 없이 `/backtest` 방문 → "대차 급감"·"추세 전환"·"숏스퀴즈" 3종 라벨 + "보유기간별 평균 수익률" 차트 h2 렌더 확인. H3/H4 는 미래 회귀 방어선으로 stub 유지.
+- **유닛 테스트 4건** (`ce0ecba`): `test_build_scheduler_registers_backtest_cron_when_enabled` / `test_build_scheduler_skips_backtest_when_disabled` / `test_backtest_pipeline_persists_result_rows` (testcontainers + 시그널·가격 시드 → `backtest_result` 적재 검증) / `test_backtest_pipeline_handles_empty_period`.
+
+### Changed
+- **`.github/workflows/e2e.yml`** (`5ffef6d`): `Seed E2E accounts` 다음 단계로 `Seed backtest signals + run backtest` 추가. H5 가 이 시드 전제로 동작.
+- **`app/main.py` lifespan 로그** (`ce0ecba`): backtest 스케줄(day_of_week/hour/minute) 포함하도록 보강.
+- **`tests/test_batch.py`** (`ce0ecba`): 기존 `test_build_scheduler_registers_weekday_cron` 를 `backtest_enabled=False` 명시로 단독 검증 유지. unused import(`Any`, `AsyncMock`) 함께 정리.
+
+### Fixed
+- **ruff SIM117** (`5ffef6d` 작업 중): `seed_backtest_e2e.py` 의 중첩 `async with` 를 single 로 병합.
+
+---
+
 ## [2026-04-19 → 2026-04-20] E2E · 데이터 버그 체인 · KIS mock · CI 녹색 (`99445b3` … `46f08bb`)
 
 3-PR 세션: 포트폴리오 E2E 도입 → CI 첫 실행 녹색화 → 코드 리뷰 MEDIUM 5 + LOW 4 정리.
