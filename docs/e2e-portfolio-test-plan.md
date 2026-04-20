@@ -4,11 +4,12 @@
 - **대상 플로우**: 홈 → 포트폴리오 리스트 → 계좌 상세/얼라인먼트
 - **도구**: Playwright (설치 전)
 - **실행 환경**: 로컬 프로덕션 compose (`docker-compose.prod.yml`, Caddy 경유 `https://localhost`)
-- **상태**: Phase 1+2 + F/G/H + A4/F5/I 확장 완료 (2026-04-20, 로컬 **38/38** 통과 ~8~18s, CI 5회 연속 녹색)
+- **상태**: Phase 1+2 + F/G/H + A4/F5/I 확장 완료 (2026-04-20, 로컬 **42/42** 통과 ~8~18s, CI 5회 연속 녹색)
   - Phase 1 (읽기, A/B/D): 16 케이스 — PR #1
   - Phase 2 (쓰기·에러, C/E): 4 케이스 — PR #1 (C2 는 KIS in-memory mock 으로 독립화, PR #2)
   - 확장 (F 주식상세 4→5 + G AI 리포트 2 + H 백테스트 4→5, H5 실데이터 케이스 PR #5) — PR #1·#2·#3·#5
   - UI 확장 (A4 + F5 + I1~I5 = **7** 케이스) — PR #8
+  - 저장 경로 (I6-1 성공 / I6-2 실패 stub) = **2** 케이스 — 본 PR
   - CI 워크플로 `.github/workflows/e2e.yml` 활성: compose up → seed(ui_demo + e2e_accounts + **backtest_e2e**) → E2E → 아티팩트 업로드
 
 ---
@@ -58,8 +59,10 @@
 | I3 | 시그널 타입 칩 클릭 | `aria-pressed` 토글 (기본값은 3종 전부 true) |
 | I4 | 타입 3개 전부 해제 | 저장 버튼 `disabled`, "최소 한 개의 타입을 선택해주세요" 경고 노출 |
 | I5 | 최소 스코어 슬라이더 조작(ArrowLeft ×2) | 라벨 숫자 60 → 50 갱신 (step=5) |
+| I6-1 | 저장 클릭 → PUT 200 stub | `role=status` toast "저장되었습니다" + PUT payload 에 form 값 반영 + `최근 업데이트:` 라벨 갱신 |
+| I6-2 | 저장 클릭 → PUT 500 stub | toast "서버 오류가 발생했습니다…" |
 
-> **저장 경로(I6)는 DB 싱글톤 mutation** — 격리 전략(`page.route` 인터셉트 or `afterEach` 복원) 확정 후 별도 PR. I1~I5 는 로컬 React state 조작만 수행하므로 기본값 보존.
+> **I6 격리 전략**: `page.route('**/api/admin/notifications/preferences', …)` 로 PUT 메서드만 인터셉트, GET 초기 로딩은 `route.fallback()` 로 pass-through. 실제 백엔드에 닿지 않아 `notification_preference` 싱글톤 mutation 0건.
 
 ### B. 포트폴리오 리스트 (핵심)
 

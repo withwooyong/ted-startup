@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **I6 설정 저장 toast E2E 2건** (`src/frontend/tests/e2e/settings.spec.ts`): 직전 세션 HANDOFF 차기 1순위였던 "I6 (설정 저장 toast) E2E" 완결. `page.route('**/api/admin/notifications/preferences')` 로 PUT 만 인터셉트하고 GET URL(`/api/notifications/preferences`, admin 경로 아님) 은 매칭되지 않아 초기 로딩이 실제 백엔드로 pass-through → `notification_preference` 싱글톤 mutation 0건 보장.
+  - **I6-1 (성공 경로)**: `waitForRequest + click` 을 `Promise.all` 로 동기화해 race 제거, `postDataJSON()` 로 form payload 검증 (`daily_summary_enabled`, `min_score`, `signal_types` 포함), `role=status` toast 를 `filter({ hasText: '저장되었습니다' })` 로 정밀 매칭.
+  - **I6-2 (실패 경로)**: PUT 500 stub → `filter({ hasText: '서버 오류가 발생했습니다' })` toast 검증.
+
+### Changed
+- **`docs/e2e-portfolio-test-plan.md`** I 섹션: I6-1·I6-2 행 추가, 격리 전략 주석 갱신 ("별도 PR" → `page.route` 인터셉트), 상태 라인 "40/40 → **42/42**" 로 갱신.
+
 ---
 
 ## [2026-04-20] 백테스트 Infinity 버그 수정 + close_price 분모 가드 (`74938cf`)
