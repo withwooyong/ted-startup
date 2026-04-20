@@ -169,6 +169,63 @@ async def test_pipeline_runs_three_steps_on_trading_day(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_step3_dispatches_seeded_signal_to_telegram(
+    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+) -> None:
+    """Step 3(notify) 배선 회귀 가드.
+
+    trading_date 에 시그널 1건을 사전 seed 하고, KRX 는 빈 응답이라 collect/detect 는 새 데이터 없음.
+    이 상황에서도 Step 3 이 DB 에서 기존 시그널을 읽어 Telegram 으로 발송하는지 검증.
+    리팩터로 `_notify` 콜백이 미배선되면 sent=0 으로 조용히 실패 → 이 테스트가 감지.
+    """
+    import json
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    trading_date = date(2026, 4, 17)
+
+    # 사전 seed — 같은 날짜에 stock + notification_preference + signal 1건
+    async with factory() as session:
+        stock = Stock(stock_code="035420", stock_name="NAVER", market_type="KOSPI")
+        session.add(stock)
+        await session.flush()
+        session.add(Signal(
+            stock_id=stock.id, signal_date=trading_date,
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=90, grade="A", detail={"seed": True},
+        ))
+        await session.commit()
+
+    captured: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+    telegram = TelegramClient(
+        Settings(telegram_bot_token="fake", telegram_chat_id="-1001"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    result = await run_market_data_pipeline(
+        trading_date=trading_date,
+        krx_client=_FakeKrx(),  # type: ignore[arg-type]
+        telegram_client=telegram,
+        session_factory=factory,
+    )
+
+    assert result.skipped is False
+    outcomes = {s.name: s for s in result.steps}
+    assert outcomes["notify"].succeeded is True
+    assert outcomes["notify"].summary == {"sent": 1}, \
+        f"seed 된 시그널이 Telegram 으로 발송돼야 함. 실제: {outcomes['notify'].summary}"
+    assert len(captured) == 1, "Telegram 호출 정확히 1회"
+    body = captured[0]
+    assert body["parse_mode"] == "HTML"
+    assert "대차잔고 급감" in str(body["text"]), "한글 라벨이 메시지에 포함돼야 함"
+    assert "NAVER" in str(body["text"])
+
+
+@pytest.mark.asyncio
 async def test_pipeline_collect_failure_is_isolated(
     engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
 ) -> None:
