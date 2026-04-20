@@ -7,6 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-20] 백테스트 Infinity 버그 수정 + close_price 분모 가드 (`74938cf`)
+
+1-PR 세션: 직전 세션 HANDOFF 1순위 차기 후보였던 **TREND_REVERSAL `avg_return=Infinity` INSERT 실패** 를 `/ted-run` 파이프라인으로 처리. master 에 커밋 **1건** 추가 (PR #9 머지 + delete-branch, CI 4/4 PASS). 백엔드 테스트 181 → **183** (신규 2건: close=0 베이스 / future=0 전손).
+
+### Fixed
+- **`BacktestEngineService` Infinity 발생 경로 차단** (`74938cf`, PR #9): 상장폐지/정지 종목의 `close_price=0` 이 분모로 쓰여 `(future/0-1) = Infinity` 가 `series.mean()` 으로 전파 → `BacktestResult.avg_return_Nd` NUMERIC(10,4) 범위 초과 → `NumericValueOutOfRangeError`. 2-layer guard 적용.
+  - **Layer 1 (분모 마스킹)**: `price_base = price_wide.where(price_wide > 0)`. 분자는 원본 유지해 `future=0 & base>0` 케이스가 `(0/base-1) = -100%` 라는 유효한 전손 수익률로 기록되게 함. 분자·분모 동시 마스킹 시 -100% 가 `None` 으로 유실돼 집계 왜곡 발생 (리뷰 HIGH #1 지적).
+  - **Layer 2 (isfinite 필수 가드)**: `returns = {n: df.where(np.isfinite(df)) for n, df in returns.items()}`. 집계 경로의 `series.dropna().mean()` 은 NaN 만 제거하고 inf 는 남기므로 단일 inf 가 평균을 `Decimal('Infinity')` 로 만듦. "방어선" 이 아니라 **필수** (리뷰 HIGH #2 지적).
+
+### Added
+- **회귀 테스트 2건** (`74938cf`, `tests/test_services.py`):
+  - `test_backtest_handles_zero_close_price_without_infinity`: 기준일 `close=0` → `signal.return_Nd=None`, `BacktestResult` INSERT 성공 (NumericValueOutOfRangeError 미발생).
+  - `test_backtest_preserves_minus_hundred_when_future_close_zero`: `base=10000, future=0` (d+5..d+20) → `return_Nd ≈ -100` 유지. 분모만 마스킹하는 설계가 전손 수익률을 보존함을 고정.
+
+### Process Notes
+- **`/ted-run` 파이프라인 첫 실측**: 구현 → 리뷰 → 빌드 → 커밋 4단계 자동 연결. 리뷰 단계에서 HIGH 2건 + MEDIUM 1건 지적받고 즉시 수정 반영. 리뷰어가 uncommitted 변경을 git tree 에서 못 읽는 툴링 제약은 있었지만, 지적 사항이 매우 구체적이라 수정 대조 + 회귀 테스트 통과로 효력 검증 가능했음.
+- **리뷰 MEDIUM #2 (`_dec(val) or Decimal("0")` fragile 패턴)**: 사전 부채로 분류, 별도 PR 로 이관 가능.
+
+---
+
 ## [2026-04-20] 시그널 튜닝 · 알림 가드 · 설정 페이지 복구 (`e6c4345` · `c344e89` · `6b3b56f`)
 
 3-PR 세션: HANDOFF 1·2·3 순위 연속 완결 + 예상 외 프로덕션 버그 복구.

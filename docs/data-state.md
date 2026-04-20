@@ -49,3 +49,5 @@ docker compose exec backend python -m scripts.fix_stock_names --date 2023-06-01
 
 - **2026-04-16, 17 lending_balance = 0건**: KRX T+1 제공 지연. 주말/공휴일 경계에서 당일 대차잔고는 다음 영업일에야 올라옴. 시그널 탐지는 해당 날짜에 balance 기반 항목(RAPID/SQUEEZE)을 건너뛰고 TREND(과거 MA 기반)만 산출.
 - **signal 테이블 716일 커버 vs stock_price 752일**: 첫 20일은 TREND_REVERSAL 의 MA20 히스토리 부족으로 탐지 스킵 + 4/16, 4/17 은 위 사유. 정상.
+- **stock_price.close_price = 0 (2026-04-20 추가)**: 상장폐지/거래정지 종목이 일부 날짜에 `close_price=0` 으로 기록됨 (상폐 직전 정지 구간). 이대로 백테스트 분모로 들어가면 `(future/0-1) = Infinity` 로 집계가 망가진다. `BacktestEngineService` 가 2-layer guard (분모 NaN 마스킹 + isfinite) 로 필터링하므로 `backtest_result` 에는 영향 없음. 분자 쪽 0 은 **유효한 -100% 전손 수익률** 으로 보존되어 집계에 반영된다.
+- **기존 70k 시그널 vs 신규 임계값 (2026-04-20)**: PR #6 로 임계값 상향(RAPID -12%, TREND score≥50, SQUEEZE MIN_SCORE=60) 적용됐지만 `signal` 테이블의 기존 70,609건(2023-06 ~ 2026-04-15)은 옛 기준 데이터. `append` 모델상 자연 보존. 월요일 07:00 KST 배치부터 새 기준 신호가 누적된다. `GET /api/backtest` 는 `period_end DESC LIMIT 1` 로 최신 집계만 노출하므로 프론트에는 새 기준 결과만 보임.
