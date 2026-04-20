@@ -15,6 +15,7 @@ from app.adapter.out.persistence.models import (
     StockPrice,
 )
 from app.adapter.out.persistence.repositories import (
+    BacktestResultRepository,
     LendingBalanceRepository,
     ShortSellingRepository,
     SignalRepository,
@@ -25,6 +26,7 @@ from app.application.service import (
     BacktestEngineService,
     SignalDetectionService,
 )
+from app.application.service.backtest_service import _dec
 
 
 async def _seed_stock(session: AsyncSession, code: str = "005930", name: str = "삼성전자") -> Stock:
@@ -283,3 +285,74 @@ async def test_backtest_preserves_minus_hundred_when_future_close_zero(
     assert Decimal("-100.01") < refreshed.return_5d < Decimal("-99.99")
     assert refreshed.return_20d is not None
     assert Decimal("-100.01") < refreshed.return_20d < Decimal("-99.99")
+
+
+def test_dec_always_returns_decimal_and_rejects_nan() -> None:
+    """`_dec` 의 contract 고정 — 리뷰 MEDIUM #2 사전 부채 청산 회귀 방어.
+
+    구 구현은 `Decimal | None` 을 돌려줄 수 있어 호출자가 `_dec(x) or Decimal("0")`
+    같은 도달불가 fallback 에 의존하는 안티패턴이 있었다. 새 contract 는
+    1) float 입력은 항상 Decimal 반환,
+    2) NaN 은 ValueError 로 loud fail (caller 의 pre-guard 강제) 이다.
+
+    참고: `round(float, 4)` 는 입력의 자연 스케일을 그대로 보존한다.
+    `_dec(0.0) == Decimal('0.0')` (exp=-1), `_dec(12.34567) == Decimal('12.3457')`
+    (exp=-4) — DB 에 저장될 때 NUMERIC(10,4) 가 스케일을 정규화한다.
+    """
+    zero = _dec(0.0)
+    assert isinstance(zero, Decimal)
+    assert zero == Decimal("0")  # 값 비교는 스케일 무관
+
+    # places=4 반올림 동작 — half-to-even
+    assert _dec(12.34567) == Decimal("12.3457")
+    assert _dec(-100.0) == Decimal("-100.0")
+
+    with pytest.raises(ValueError, match="pre-guard"):
+        _dec(float("nan"))
+
+
+@pytest.mark.asyncio
+async def test_backtest_aggregation_stores_zero_as_decimal(session: AsyncSession) -> None:
+    """집계 `BacktestResult.hit_rate_5d`/`avg_return_5d` 가 Decimal(0) 로 저장 —
+    리팩터된 `_dec` 경로에서 None 이 새지 않음을 고정.
+
+    `BacktestResult.*` 컬럼은 nullable NUMERIC(10,4) 이라 만약 `_dec` 가 None 을
+    돌려주고 `or Decimal("0")` fallback 이 지워지면 NULL 로 저장될 수 있는 구조.
+    호출 컨텍스트에서 `_dec` 가 None 을 반환할 수 없다는 불변을 통합 경로로 검증.
+    """
+    stock = await _seed_stock(session, "905555", "제로수익주")
+    base_date = date(2026, 3, 10)
+
+    # 기준일부터 40일간 가격 일정 — 어느 N-영업일 shift 에도 return=0 이 나오는 구성
+    flat_rows = [
+        {"stock_id": stock.id, "trading_date": base_date + timedelta(days=i), "close_price": 10_000}
+        for i in range(40)
+    ]
+    await StockPriceRepository(session).upsert_many(flat_rows)
+
+    await SignalRepository(session).add(Signal(
+        stock_id=stock.id, signal_date=base_date,
+        signal_type=SignalType.RAPID_DECLINE.value,
+        score=70, grade="B", detail={"flat": True},
+    ))
+
+    outcome = await BacktestEngineService(session).execute(
+        period_start=base_date, period_end=base_date
+    )
+    assert outcome.signals_processed == 1
+    assert outcome.result_rows == 1
+
+    bt_results = await BacktestResultRepository(session).list_by_signal_type(
+        SignalType.RAPID_DECLINE.value
+    )
+    # 기간이 단일일이라 1행만 생성된 것이 정상. 여러 period 로 늘어나는 회귀가 있으면 바로 드러남.
+    assert len(bt_results) == 1
+    bt = bt_results[0]
+
+    # hit_rate = 0/1 * 100 = 0.0, avg_return = 0.0 — 둘 다 None 이 아닌 Decimal(0) 으로 저장
+    assert bt.hit_rate_5d is not None
+    assert isinstance(bt.hit_rate_5d, Decimal)
+    assert bt.hit_rate_5d == Decimal("0")
+    assert bt.avg_return_5d is not None
+    assert isinstance(bt.avg_return_5d, Decimal)
+    assert bt.avg_return_5d == Decimal("0")
