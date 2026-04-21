@@ -91,3 +91,24 @@ ops/              # Caddy 등 운영 설정
 - 백엔드: PEP 8 + `ruff` + `mypy --strict`, 120자, 4-space
 - 프론트: 토스 스타일, 2-space, Server Component 기본, `any` 금지
 - 커밋 메시지: 한글
+
+## 운영 보안 주의사항
+
+### KIS OpenAPI 토큰 revoke 한계
+
+한국투자증권 OpenAPI 는 발급된 `access_token` 을 **서버측에서 명시적으로 폐기(revoke)하는 엔드포인트를 제공하지 않는다**. 토큰은 발급 후 **24시간 고정 TTL** 로 만료될 때까지 유효.
+
+**운영상 영향:**
+- Settings 에서 자격증명(`app_key`/`app_secret`)을 삭제해도 **기존에 발급된 토큰은 만료 시점까지 여전히 유효**. 새 토큰 발급이 막힐 뿐.
+- 자격증명이 유출된 것으로 **의심되면**: KIS 웹사이트에서 즉시 `app_key` 재발급(roll) → 기존 키·파생 토큰은 KIS 측에서 무효화됨.
+- 자격증명 삭제 후 24시간 이내는 "만료 대기 창" 으로 간주하고 운영 로그·알림 모니터링 강화 권장.
+
+**설계 결정**: `docs/kis-real-account-sync-plan.md § 6 결정 #4` — KIS 의 한계 수용, 본 시스템은 credential 저장소 삭제만 지원. 토큰 유효 기간 단축은 KIS 정책 의존.
+
+### 로깅 민감 데이터 보호
+
+PR 6 부터 structlog processor 가 로그 전체를 스캔해 자동 마스킹:
+- **키 기반**: `app_key` · `app_secret` · `access_token` · `authorization` · `password` 등 민감 키의 값은 `[MASKED]` 로 치환
+- **패턴 기반**: JWT 3-segment + 40자 이상 hex 는 `[MASKED_JWT]` / `[MASKED_HEX]` 로 scrub
+
+구현: `app/observability/logging.py`. 새 민감 키는 `SENSITIVE_KEYS` 집합에 추가.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
     app_name: str = "ted-signal-backend"
     app_env: str = Field(default="local", description="local | dev | prod")
     port: int = 8000
+    # PR 6: 구조화 로깅(structlog) 레벨. "local" env 는 ConsoleRenderer, 그 외 JSONRenderer.
+    # Literal 로 enum 제약 — 오타 env var (`LOG_LEVEL=BOGUS`) 는 Pydantic 검증에서 즉시 실패.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="structlog / stdlib root logger 레벨"
+    )
     # 화이트리스트 방식 — 빈 값이면 CORS 미들웨어는 아무 출처도 허용하지 않음.
     # 로컬 개발 시 .env에 CORS_ALLOW_ORIGINS=http://localhost:3000 형태로 명시.
     cors_allow_origins: list[str] = Field(default_factory=list)
