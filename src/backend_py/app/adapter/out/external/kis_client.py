@@ -1,11 +1,13 @@
-"""한국투자증권(KIS) 모의투자 REST 어댑터.
+"""한국투자증권(KIS) REST 어댑터 — 모의·실거래 2환경 지원.
 
-- 모의 전용: base_url 은 `https://openapivts.koreainvestment.com:29443` 하드코드(Settings 기본값).
-- OAuth2 access_token 은 24h TTL — 프로세스 인스턴스에 캐시, 만료 300초 전 자동 재발급.
-- 실거래 진입 차단: TR_ID 는 `VTTC` 접두 모의 코드만 사용. prod URL로 교체 시도 시 RuntimeError.
+- 환경별 base_url + TR_ID:
+  * MOCK: `https://openapivts.koreainvestment.com:29443` / 잔고 TR_ID `VTTC8434R`
+  * REAL: `https://openapi.koreainvestment.com:9443` / 잔고 TR_ID `TTTC8434R`
+- OAuth2 access_token 은 24h TTL — 클라이언트 인스턴스에 캐시, 만료 300초 전 자동 재발급.
+- 실거래는 반드시 `credentials` 주입 필수 (PR 3 이후 DB 저장소와 연결). 미주입 시 즉시 예외.
 
 지원 API(MVP):
-- `fetch_balance(...)`: 잔고조회(`/uapi/domestic-stock/v1/trading/inquire-balance`, TR_ID=VTTC8434R)
+- `fetch_balance(...)`: 잔고조회(`/uapi/domestic-stock/v1/trading/inquire-balance`)
   - output1: 보유 종목 리스트 → `KisHoldingRow`
   - output2: 평가/예수금 요약(본 MVP 에서는 미사용)
 """
@@ -15,6 +17,7 @@ import logging
 import time
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -24,7 +27,46 @@ from app.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
+
+class KisEnvironment(StrEnum):
+    """KIS OpenAPI 호출 환경.
+
+    MOCK 은 모의투자(openapivts) — `VTTC*` TR_ID 계열.
+    REAL 은 실거래(openapi) — `TTTC*` TR_ID 계열.
+    """
+
+    MOCK = "mock"
+    REAL = "real"
+
+
+@dataclass(frozen=True, slots=True)
+class KisCredentials:
+    """KIS API 자격증명 — 생성자에서 주입받는 값 객체.
+
+    PR 3 이후 `brokerage_account_credential` DB 저장소에서 Fernet 복호화해 이 DTO 를
+    조립하게 됨. 현재는 MOCK Settings 경로에서만 내부 생성.
+
+    `__repr__` 는 app_secret/account_no 를 마스킹해 실수로 로그에 직렬화돼도
+    평문이 남지 않게 함. `app_key` 는 마지막 4자리만 노출 (PR 4 masked view 와 일치).
+    """
+
+    app_key: str
+    app_secret: str
+    account_no: str
+
+    def __repr__(self) -> str:  # noqa: D401 — 로그 노출 차단이 핵심 책임
+        return (
+            f"KisCredentials(app_key=••••{self.app_key[-4:] if len(self.app_key) >= 4 else '****'}, "
+            f"app_secret=<masked>, account_no=<masked>)"
+        )
+
+
 _MOCK_BASE_URL = "https://openapivts.koreainvestment.com:29443"
+_REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
+_TR_ID_BALANCE: dict[KisEnvironment, str] = {
+    KisEnvironment.MOCK: "VTTC8434R",
+    KisEnvironment.REAL: "TTTC8434R",
+}
 _TOKEN_RENEW_MARGIN_SECONDS = 300.0  # 만료 5분 전에 재발급
 
 # Test-only constant. Returned only from the internal httpx.MockTransport when
@@ -161,28 +203,47 @@ class KisClient:
         self,
         settings: Settings | None = None,
         *,
+        environment: KisEnvironment = KisEnvironment.MOCK,
+        credentials: KisCredentials | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         s = settings or get_settings()
         self._settings = s
-        if s.kis_base_url_mock != _MOCK_BASE_URL:
-            # 안전장치: 모의 URL 외 진입 차단
-            raise KisNotConfiguredError(
-                f"모의 base_url 만 허용. 현재={s.kis_base_url_mock}"
-            )
-        self._base_url = s.kis_base_url_mock
-        self._app_key = s.kis_app_key_mock
-        self._app_secret = s.kis_app_secret_mock
-        self._account_no = s.kis_account_no_mock
+        self._environment = environment
+
+        if environment is KisEnvironment.MOCK:
+            # base_url 은 환경 상수로 직접 고정 — Settings 커스터마이징이 실 URL 을
+            # "mock" 으로 위장해 주입하는 경로를 원천 차단.
+            self._base_url = _MOCK_BASE_URL
+            if credentials is None:
+                self._app_key = s.kis_app_key_mock
+                self._app_secret = s.kis_app_secret_mock
+                self._account_no = s.kis_account_no_mock
+            else:
+                self._app_key = credentials.app_key
+                self._app_secret = credentials.app_secret
+                self._account_no = credentials.account_no
+        else:  # KisEnvironment.REAL
+            # 실거래는 credentials 주입 필수 — Settings 에는 실 자격증명을 두지 않는다.
+            # PR 3 에서 `brokerage_account_credential` 저장소가 Fernet 복호화 후 주입.
+            if credentials is None:
+                raise KisNotConfiguredError(
+                    "실 환경(KisEnvironment.REAL)은 credentials 주입 필수 — "
+                    "PR 3 이후 credential 저장소 연동 필요"
+                )
+            self._base_url = _REAL_BASE_URL
+            self._app_key = credentials.app_key
+            self._app_secret = credentials.app_secret
+            self._account_no = credentials.account_no
+
         timeout = httpx.Timeout(
             connect=5.0, read=s.kis_request_timeout_seconds,
             write=s.kis_request_timeout_seconds, pool=5.0,
         )
-        # 명시적 transport 가 없을 때만 in-memory 모드 자동 주입.
-        # 테스트에서 주입하는 MockTransport 는 우선 — 런타임 플래그에 영향 안 받음.
-        if transport is None and s.kis_use_in_memory_mock:
+        # In-memory MockTransport 는 MOCK 환경에서만 자동 주입. REAL 환경에서 사용하려면
+        # 테스트가 명시적으로 `transport=...` 를 건네야 함 (실 URL 호출 안전장치).
+        if transport is None and environment is KisEnvironment.MOCK and s.kis_use_in_memory_mock:
             transport = _build_in_memory_transport()
-            # in-memory 모드엔 configured 체크를 우회할 수 있도록 더미 자격증명 주입.
             self._app_key = self._app_key or "in-memory-app-key"
             self._app_secret = self._app_secret or "in-memory-app-secret"
             self._account_no = self._account_no or "0000000000-01"
@@ -262,7 +323,8 @@ class KisClient:
             "authorization": f"Bearer {token}",
             "appkey": self._app_key,
             "appsecret": self._app_secret,
-            "tr_id": "VTTC8434R",  # 모의 전용 TR_ID
+            # 환경별 TR_ID 분기: MOCK→VTTC8434R, REAL→TTTC8434R
+            "tr_id": _TR_ID_BALANCE[self._environment],
             "custtype": "P",  # 개인
         }
         params = {

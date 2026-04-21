@@ -6,18 +6,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **엑셀 거래내역 import (KIS §1 PR 1)** — `docs/kis-real-account-sync-plan.md` § 5 PR 1 착수. 증권사 체결내역 `.xlsx` 를 `portfolio_transaction` 에 `source='excel_import'` 로 적재하는 온보딩 1단계 완결. 외부 호출 0, 실계좌 자격증명 없이 동작.
-  - `POST /api/portfolio/accounts/{id}/import/excel` (multipart/form-data) — 10MB/10_000행 가드, `filter alias` 기반 컬럼 매칭, 중복 스킵(account·stock·date·type·qty·price tuple), stock 미등록 시 자동 생성.
-  - 신규 모듈 `app/application/service/excel_import_service.py` — 파서(`parse_kis_transaction_xlsx`) + 서비스(`ExcelImportService`) 단일 파일. 실 KIS 샘플 부재 상태라 컬럼 alias `(체결일자/거래일자/…, 종목코드/상품번호/…, 체결수량/거래수량/…)` 로 유연 매칭.
-  - 프론트 `<ExcelImportPanel>` (Portfolio 페이지) — 파일 선택 → 업로드 → 실패 행 상세 펼치기(details/summary).
-  - Next.js admin 릴레이 라우터에 multipart 경로 분기 추가: `arrayBuffer()` 바이너리 포워드 + multipart 만 10MB 허용 (기존 64KB text 경로는 유지).
+- **KIS sync PR 2 — `kis_rest_real` 어댑터 분기 스캐폴딩**: 설계 문서 `docs/kis-real-account-sync-plan.md` § 5 PR 2. 외부 호출 0, credential 저장소(PR 3) 미연결 상태에서 분기 구조만 선제 구축.
+  - `KisEnvironment(StrEnum)`: `MOCK` / `REAL` — OpenAPI 환경 구분.
+  - `KisCredentials` DTO (`frozen=True, slots=True`): `app_key`·`app_secret`·`account_no`. `__repr__` 마스킹 (`app_secret`/`account_no` `<masked>`, `app_key` 끝 4자리만 노출).
+  - `KisClient.__init__(environment, credentials)` 파라미터 추가. MOCK 경로 100% 하위호환 (credentials 미주입 시 Settings 경로 유지). MOCK `base_url` 은 `_MOCK_BASE_URL` 상수 직접 할당 — Settings 커스터마이징으로 실 URL 을 mock 으로 위장하는 경로 차단.
+  - REAL 경로: `_REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"`, 잔고 TR_ID `TTTC8434R` (vs MOCK `VTTC8434R`). credentials 미주입 시 `KisNotConfiguredError`.
+  - `VALID_CONNECTION_TYPES` 에 `'kis_rest_real'` 추가 + DB CHECK 마이그레이션 `007_kis_real_connection`.
+  - `SyncPortfolioFromKisUseCase` 분기: `kis_rest_real` + `environment='real'` 조합이면 `KisCredentialsNotWiredError` (PR 3 대기용 명시 장벽). 라우터는 **HTTP 501 Not Implemented** 로 매핑 (503 대신 — 의미론상 "기능 미구현" 이 정확).
+  - 백엔드 테스트 **197 → 204** (+7: REAL URL/TR_ID 1, REAL credentials 필수 1, MOCK credentials 주입 1, `__repr__` 마스킹 1, use case 분기 2, enum/CHECK 동기화 assert 1).
+
+### Process Notes
+- 리뷰 HIGH 1 + MEDIUM 4 중 HIGH 1 (MOCK base_url 상수 직접 할당) + MEDIUM 2 (503→501) + MEDIUM 3 (동기화 assert) 반영. MEDIUM 1 (`__str__` 명시) + MEDIUM 4 (downgrade DO$$ 체크) 는 ROI 낮아 기록만.
+- Alembic revision ID `007_portfolio_kis_real_connection` 은 VARCHAR(32) 초과 → `007_kis_real_connection` 으로 단축 (테스트 실패로 발견).
+
+---
+
+## [2026-04-20] KIS sync 설계 + 엑셀 거래내역 import (`6ea71fe`, PR #12)
+
+1-PR 세션: **KIS 실계정 sync 6 PR 시리즈** 설계 확정 + **PR 1 (엑셀 거래내역 import)** 완결. 외부 호출 0, 실 자격증명 없이 동작하는 온보딩 1단계. CI 4/4 PASS × 1회. 백엔드 테스트 **185 → 197** (+12).
+
+### Added
+- **설계 문서** `docs/kis-real-account-sync-plan.md`: 6 PR 분할 (엑셀 → 어댑터 분기 → Fernet credential → 등록 UI → 실 sync → 로깅 마스킹), 5개 열린 질문 결정 (env var Fernet, 로컬 단일 사용자, 엑셀 포함, token revoke 한계 수용, CI 더미 Fernet fixture).
+- **엑셀 거래내역 import** — 온보딩 1단계 완결:
+  - `POST /api/portfolio/accounts/{id}/import/excel` (multipart/form-data) — 10MB/10_000행 가드, 컬럼 alias 매칭, 중복 스킵(account·stock·date·type·qty·price tuple), stock 미등록 시 자동 생성.
+  - 신규 모듈 `app/application/service/excel_import_service.py` — 파서(`parse_kis_transaction_xlsx`) + 서비스(`ExcelImportService`) 단일 파일. 실 KIS 샘플 부재라 컬럼 alias `(체결일자/거래일자/…, 종목코드/상품번호/…, 체결수량/거래수량/…)` 로 유연 매칭.
+  - 프론트 `<ExcelImportPanel>` (Portfolio 페이지) — 파일 선택 → 업로드 → 실패 행 details 펼치기.
+  - Next.js admin 릴레이 라우터에 multipart 경로 분기: `arrayBuffer()` 바이너리 포워드 + multipart 만 10MB 허용 (기존 64KB text 경로 유지).
 
 ### Changed
 - **`portfolio_transaction.source`** CHECK 제약 확장: `('manual', 'kis_sync', 'excel_import')`. Alembic migration `006_portfolio_excel_source.py` (ALTER DROP/ADD). 기존 행 영향 없음.
 - `VALID_SOURCES` (Python) + `TransactionSource` (TypeScript) 에 `'excel_import'` 반영.
-- 백엔드 테스트 **185 → 197** (+12: parser 5 + service 4 + router 3).
 
-### Changed (이전)
+### Process Notes
+- **리뷰 HIGH 3 + MEDIUM 다수 반영** (python-reviewer + typescript-reviewer 병렬). Python HIGH 2 (iterrows 타입 / except 범위) 반영, HIGH 3 (session.begin 부재) 는 `get_session` 이 요청-스코프 관리 → overcall 판정. TS HIGH (Content-Length 스푸핑) 은 `arrayBuffer().byteLength` 2차 가드로 방어.
+- **설계 전제 자체 교정**: 초기 "스케일 보존" 표현이 `round(0.0, 4)=0.0` 로 인해 틀렸음이 테스트 실패로 2분 내 드러남. 회귀 방어선을 재정의하고 테스트 재작성 — 설계안 검증에 코드 실행 루프가 중요함 재확인.
+
+---
+
+## [2026-04-20] _dec 리팩터: or Decimal("0") fallback 제거 + NaN loud fail (`e14a27b`, PR #11)
+
+1-PR 세션: PR #9 리뷰 MEDIUM #2 사전 부채 청산. `_dec` 시그니처 단순화 + 도달불가 fallback 제거 + NaN loud fail. 백엔드 테스트 **183 → 185** (+2). CI 4/4 PASS × 1회.
+
+### Changed
 - **`_dec` 리팩터 — 도달불가 fallback 제거 + NaN loud fail** (`src/backend_py/app/application/service/backtest_service.py`): 직전 PR #9 리뷰 MEDIUM #2 사전 부채 청산.
   - 시그니처 `(float | None) -> Decimal | None` → `(float) -> Decimal`. None 반환 경로 제거.
   - L151-152 `_dec(hit_rate) or Decimal("0")` → `_dec(hit_rate)`. 호출 컨텍스트에서 `hit_rate`/`avg_ret` 는 `if observed > 0 else 0.0` guard 로 concrete float 보장이라 `or` fallback 이 도달불가였고, Zero Decimal falsy 특성 때문에 의도를 흐리는 안티패턴이었음.

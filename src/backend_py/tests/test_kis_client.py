@@ -6,7 +6,14 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from app.adapter.out.external import KisAuthError, KisClient, KisClientError
+from app.adapter.out.external import (
+    KisAuthError,
+    KisClient,
+    KisClientError,
+    KisCredentials,
+    KisEnvironment,
+    KisNotConfiguredError,
+)
 from app.config.settings import Settings
 
 
@@ -222,3 +229,111 @@ async def test_explicit_transport_overrides_in_memory_flag() -> None:
         await client.fetch_balance()
 
     assert handler_called, "명시적 transport 가 우선 적용되어야 함"
+
+
+# -----------------------------------------------------------------------------
+# PR 2 — kis_rest_real 환경 분기 (외부 호출 0, MockTransport 로 URL·TR_ID 검증)
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_real_environment_uses_prod_url_and_tr_id() -> None:
+    """REAL 환경: base_url = openapi.koreainvestment.com:9443, TR_ID = TTTC8434R."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            # 실 호스트로 향하는지 검증 — scheme/host/port 모두 확인.
+            captured["token_host"] = request.url.host
+            captured["token_port"] = request.url.port
+            captured["token_scheme"] = request.url.scheme
+            return _ok_token_response()
+        if request.url.path.endswith("/inquire-balance"):
+            captured["balance_tr_id"] = request.headers.get("tr_id")
+            captured["balance_host"] = request.url.host
+            captured["balance_port"] = request.url.port
+            return _balance_response()
+        return httpx.Response(500)
+
+    real_creds = KisCredentials(
+        app_key="REAL-APP-KEY",
+        app_secret="REAL-APP-SECRET",
+        account_no="99998888-01",
+    )
+    transport = httpx.MockTransport(handler)
+    async with KisClient(
+        _settings(),
+        environment=KisEnvironment.REAL,
+        credentials=real_creds,
+        transport=transport,
+    ) as client:
+        await client.fetch_balance()
+
+    assert captured["token_scheme"] == "https"
+    assert captured["token_host"] == "openapi.koreainvestment.com"
+    assert captured["token_port"] == 9443
+    assert captured["balance_tr_id"] == "TTTC8434R"
+    assert captured["balance_host"] == "openapi.koreainvestment.com"
+
+
+@pytest.mark.asyncio
+async def test_real_environment_requires_credentials() -> None:
+    """REAL 환경에서 credentials 미주입 → KisNotConfiguredError 로 loud fail."""
+    with pytest.raises(KisNotConfiguredError, match="credentials 주입 필수"):
+        KisClient(_settings(), environment=KisEnvironment.REAL, credentials=None)
+
+
+@pytest.mark.asyncio
+async def test_mock_environment_accepts_explicit_credentials() -> None:
+    """MOCK 환경에서도 credentials 주입 가능 — Settings 값을 override."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return _ok_token_response()
+        captured["appkey"] = request.headers.get("appkey")
+        captured["tr_id"] = request.headers.get("tr_id")
+        return _balance_response()
+
+    injected = KisCredentials(
+        app_key="INJECTED-KEY",
+        app_secret="INJECTED-SECRET",
+        account_no="11112222-03",
+    )
+    transport = httpx.MockTransport(handler)
+    async with KisClient(
+        _settings(app_key="FROM-SETTINGS"),
+        environment=KisEnvironment.MOCK,
+        credentials=injected,
+        transport=transport,
+    ) as client:
+        await client.fetch_balance()
+
+    # 주입 값이 Settings 을 오버라이드 + MOCK 은 여전히 VTTC8434R
+    assert captured["appkey"] == "INJECTED-KEY"
+    assert captured["tr_id"] == "VTTC8434R"
+
+
+def test_valid_connection_types_matches_db_check_constraint() -> None:
+    """`VALID_CONNECTION_TYPES` (Python) 와 migration 007 의 DB CHECK 리스트가 동기화되어 있는지 assert.
+
+    PR 4+ 에서 새 connection_type 을 추가할 때 한 쪽만 고치면 런타임에서야 CheckViolation
+    이 드러나는 경로를 조기에 잡는다.
+    """
+    from app.adapter.out.persistence.models.portfolio import VALID_CONNECTION_TYPES
+
+    assert set(VALID_CONNECTION_TYPES) == {"manual", "kis_rest_mock", "kis_rest_real"}
+
+
+def test_kis_credentials_repr_masks_secret() -> None:
+    """KisCredentials.__repr__ 는 app_secret/account_no 를 마스킹, app_key 는 끝 4자리만."""
+    creds = KisCredentials(
+        app_key="ABCDEFGHIJKL3456",
+        app_secret="super-secret-value",
+        account_no="99998888-01",
+    )
+    rendered = repr(creds)
+    assert "3456" in rendered  # 끝 4자리 노출
+    assert "super-secret-value" not in rendered
+    assert "99998888" not in rendered
+    assert "<masked>" in rendered

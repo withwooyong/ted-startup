@@ -1,9 +1,9 @@
 """P10 포트폴리오 도메인 — Repository · UseCase · Router 통합 테스트."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date
 from decimal import Decimal
-from typing import AsyncIterator
 
 import httpx
 import pytest
@@ -14,18 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapter.out.external import KisClient
 from app.adapter.out.persistence.models import (
     BrokerageAccount,
-    PortfolioHolding,
     PortfolioSnapshot,
     Signal,
     SignalType,
     Stock,
-    StockPrice,
 )
 from app.adapter.out.persistence.repositories import (
     BrokerageAccountRepository,
     PortfolioHoldingRepository,
     PortfolioSnapshotRepository,
-    PortfolioTransactionRepository,
     SignalRepository,
     StockPriceRepository,
     StockRepository,
@@ -38,6 +35,7 @@ from app.application.service.portfolio_service import (
     ComputeSnapshotUseCase,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
+    KisCredentialsNotWiredError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
     SignalAlignmentUseCase,
@@ -47,7 +45,6 @@ from app.application.service.portfolio_service import (
 )
 from app.config.settings import Settings, get_settings
 from app.main import create_app
-
 
 # -----------------------------------------------------------------------------
 # Fixtures
@@ -499,6 +496,53 @@ async def test_sync_rejects_manual_connection_type(session: AsyncSession) -> Non
     kis = _build_mock_kis_client([])
     async with kis as client:
         with pytest.raises(UnsupportedConnectionError):
+            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
+                account_id=account.id
+            )
+
+
+@pytest.mark.asyncio
+async def test_sync_kis_rest_real_raises_credentials_not_wired(
+    session: AsyncSession,
+) -> None:
+    """PR 2: `kis_rest_real` + environment='real' 계좌 → `KisCredentialsNotWiredError`.
+
+    credential 저장소는 PR 3 에서 추가되므로 본 PR 에서는 명시적 차단.
+    `BrokerageAccount` 를 Repository 로 직접 삽입 — RegisterAccountUseCase 는
+    아직 environment='real' 을 허용하지 않음 (PR 4 소관).
+    """
+    account = await BrokerageAccountRepository(session).add(
+        BrokerageAccount(
+            account_alias="kis-real",
+            broker_code="kis",
+            connection_type="kis_rest_real",
+            environment="real",
+        )
+    )
+    kis = _build_mock_kis_client([])
+    async with kis as client:
+        with pytest.raises(KisCredentialsNotWiredError, match="PR 3"):
+            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
+                account_id=account.id
+            )
+
+
+@pytest.mark.asyncio
+async def test_sync_kis_rest_real_requires_real_environment(
+    session: AsyncSession,
+) -> None:
+    """`kis_rest_real` + environment='mock' 조합 → `InvalidRealEnvironmentError`."""
+    account = await BrokerageAccountRepository(session).add(
+        BrokerageAccount(
+            account_alias="kis-real-wrong-env",
+            broker_code="kis",
+            connection_type="kis_rest_real",
+            environment="mock",  # 의도적 불일치
+        )
+    )
+    kis = _build_mock_kis_client([])
+    async with kis as client:
+        with pytest.raises(InvalidRealEnvironmentError, match="environment='real'"):
             await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
                 account_id=account.id
             )
