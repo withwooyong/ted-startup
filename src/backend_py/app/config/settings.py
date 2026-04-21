@@ -105,9 +105,7 @@ class Settings(BaseSettings):
         default="openai",
         description="현재 지원: openai. 추후 perplexity_claude 로 Plan A 전환",
     )
-    ai_report_cache_hours: int = Field(
-        default=24, ge=1, le=168, description="동일 (stock_code, report_date) 캐시 TTL"
-    )
+    ai_report_cache_hours: int = Field(default=24, ge=1, le=168, description="동일 (stock_code, report_date) 캐시 TTL")
     ai_report_web_search_enabled: bool = Field(
         default=False,
         description="True 시 Tier2 web_search(mini) 호출. MVP 기본 False",

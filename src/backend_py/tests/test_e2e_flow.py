@@ -4,6 +4,7 @@ KrxClient 는 Fake 로 대체(pykrx/KRX 네트워크 제거)하고 나머지 경
 Router → Service → Repository → PG → Router → 응답)는 실제 구현 그대로 사용.
 Phase 7 목표인 "collect 결과가 실제로 signals 엔드포인트에 노출되는가" 검증.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -34,20 +35,37 @@ class _StubKrxClient(KrxClient):
     def __init__(self) -> None:  # type: ignore[no-untyped-def]
         self._stub_prices = [
             StockPriceRow(
-                stock_code="005930", stock_name="삼성전자", market_type="KOSPI",
-                close_price=78_500, open_price=78_000, high_price=79_200, low_price=77_800,
-                volume=15_234_567, market_cap=468_500_000_000_000, change_rate=Decimal("0.64"),
+                stock_code="005930",
+                stock_name="삼성전자",
+                market_type="KOSPI",
+                close_price=78_500,
+                open_price=78_000,
+                high_price=79_200,
+                low_price=77_800,
+                volume=15_234_567,
+                market_cap=468_500_000_000_000,
+                change_rate=Decimal("0.64"),
             ),
             StockPriceRow(
-                stock_code="000660", stock_name="SK하이닉스", market_type="KOSPI",
-                close_price=245_000, open_price=243_500, high_price=247_000, low_price=242_000,
-                volume=3_456_789, market_cap=178_300_000_000_000, change_rate=Decimal("-1.21"),
+                stock_code="000660",
+                stock_name="SK하이닉스",
+                market_type="KOSPI",
+                close_price=245_000,
+                open_price=243_500,
+                high_price=247_000,
+                low_price=242_000,
+                volume=3_456_789,
+                market_cap=178_300_000_000_000,
+                change_rate=Decimal("-1.21"),
             ),
         ]
         self._stub_shorts = [
             ShortSellingRow(
-                stock_code="005930", stock_name="삼성전자",
-                short_volume=1_200_000, short_amount=94_000_000_000, short_ratio=Decimal("7.88"),
+                stock_code="005930",
+                stock_name="삼성전자",
+                short_volume=1_200_000,
+                short_amount=94_000_000_000,
+                short_ratio=Decimal("7.88"),
             )
         ]
         self._stub_lendings = [
@@ -55,8 +73,10 @@ class _StubKrxClient(KrxClient):
             # 수집 단계에선 balance_quantity/amount 만 upsert 되므로 change_rate 는 0 으로 저장됨.
             # 따라서 이 E2E 는 squeeze 는 안 뜨고 RAPID_DECLINE 도 안 뜰 수 있다 — 수집→탐지 체인 자체 검증이 목적.
             LendingBalanceRow(
-                stock_code="005930", stock_name="삼성전자",
-                balance_quantity=12_345_678, balance_amount=987_654_321_000,
+                stock_code="005930",
+                stock_name="삼성전자",
+                balance_quantity=12_345_678,
+                balance_amount=987_654_321_000,
             )
         ]
 
@@ -71,9 +91,7 @@ class _StubKrxClient(KrxClient):
 
 
 @pytest_asyncio.fixture
-async def e2e_app(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[FastAPI]:
+async def e2e_app(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
     get_settings.cache_clear()
     app = create_app()
@@ -138,9 +156,7 @@ async def test_stock_detail_returns_upserted_stock_after_collect(
     resp = await e2e_client.post("/api/batch/collect", params={"date": target.isoformat()}, headers=admin)
     assert resp.status_code == 200
 
-    resp = await e2e_client.get(
-        "/api/stocks/005930", params={"from": "2026-04-01", "to": target.isoformat()}
-    )
+    resp = await e2e_client.get("/api/stocks/005930", params={"from": "2026-04-01", "to": target.isoformat()})
     assert resp.status_code == 200, resp.text
     detail = resp.json()
     assert detail["stock"]["stock_code"] == "005930"

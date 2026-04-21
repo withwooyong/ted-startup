@@ -1,4 +1,5 @@
 """Application services."""
+
 from __future__ import annotations
 
 from app.application.service.backtest_service import BacktestEngineService

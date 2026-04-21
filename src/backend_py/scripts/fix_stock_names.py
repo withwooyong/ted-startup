@@ -13,6 +13,7 @@
   docker compose exec backend python -m scripts.fix_stock_names
   docker compose exec backend python -m scripts.fix_stock_names --date 2026-04-15
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,20 +39,15 @@ async def run(target_date: date) -> int:
 
     sessionmaker = get_sessionmaker()
     updated = 0
-    async with sessionmaker() as session:
-        async with session.begin():
-            stmt = select(Stock).where(
-                or_(Stock.stock_name.is_(None), Stock.stock_name == "")
-            )
-            rows = (await session.execute(stmt)).scalars().all()
-            print(f"[fix-names] DB 에서 빈 이름 {len(rows)} 건 발견", flush=True)
-            for r in rows:
-                new_name = name_map.get(r.stock_code)
-                if new_name:
-                    await session.execute(
-                        update(Stock).where(Stock.id == r.id).values(stock_name=new_name)
-                    )
-                    updated += 1
+    async with sessionmaker() as session, session.begin():
+        stmt = select(Stock).where(or_(Stock.stock_name.is_(None), Stock.stock_name == ""))
+        rows = (await session.execute(stmt)).scalars().all()
+        print(f"[fix-names] DB 에서 빈 이름 {len(rows)} 건 발견", flush=True)
+        for r in rows:
+            new_name = name_map.get(r.stock_code)
+            if new_name:
+                await session.execute(update(Stock).where(Stock.id == r.id).values(stock_name=new_name))
+                updated += 1
 
     await get_engine().dispose()
     print(f"[fix-names] 완료 — {updated} 건 업데이트 (미매칭 {len(rows) - updated})", flush=True)
@@ -61,7 +57,9 @@ async def run(target_date: date) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="stock 테이블의 빈 stock_name 일괄 복구")
     parser.add_argument(
-        "--date", type=str, default=None,
+        "--date",
+        type=str,
+        default=None,
         help="KRX 조회 기준일 YYYY-MM-DD (기본: 오늘)",
     )
     args = parser.parse_args()

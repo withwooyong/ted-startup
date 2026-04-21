@@ -1,4 +1,5 @@
 """Persistence adapter — SQLAlchemy 2.0 async."""
+
 from __future__ import annotations
 
 from app.adapter.out.persistence.base import Base

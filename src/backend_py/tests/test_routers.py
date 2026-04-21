@@ -6,6 +6,7 @@
   트랜잭션 격리(rollback) 유지
 - ASGITransport + httpx.AsyncClient 로 실제 라우팅·직렬화 경로 검증
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -34,9 +35,7 @@ from app.main import create_app
 
 
 @pytest_asyncio.fixture
-async def app_with_session(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[FastAPI]:
+async def app_with_session(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     """테스트 세션을 주입한 FastAPI 앱 — admin_api_key 고정."""
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
     get_settings.cache_clear()
@@ -67,23 +66,27 @@ async def client(app_with_session: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 
 
 @pytest.mark.asyncio
-async def test_list_signals_filters_by_date_and_type(
-    session: AsyncSession, client: httpx.AsyncClient
-) -> None:
-    stock = await StockRepository(session).add(
-        Stock(stock_code="005930", stock_name="삼성전자", market_type="KOSPI")
-    )
+async def test_list_signals_filters_by_date_and_type(session: AsyncSession, client: httpx.AsyncClient) -> None:
+    stock = await StockRepository(session).add(Stock(stock_code="005930", stock_name="삼성전자", market_type="KOSPI"))
     sr = SignalRepository(session)
     await sr.add(
         Signal(
-            stock_id=stock.id, signal_date=date(2026, 4, 17),
-            signal_type=SignalType.RAPID_DECLINE.value, score=85, grade="A", detail={},
+            stock_id=stock.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=85,
+            grade="A",
+            detail={},
         )
     )
     await sr.add(
         Signal(
-            stock_id=stock.id, signal_date=date(2026, 4, 17),
-            signal_type=SignalType.SHORT_SQUEEZE.value, score=70, grade="B", detail={},
+            stock_id=stock.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.SHORT_SQUEEZE.value,
+            score=70,
+            grade="B",
+            detail={},
         )
     )
 
@@ -152,21 +155,30 @@ async def test_list_latest_backtest_results_returns_one_per_type(
 ) -> None:
     repo = BacktestResultRepository(session)
     # 같은 시그널 타입으로 2건(이전/최근) → 최근 1건만 반환돼야 함
-    await repo.add(BacktestResult(
-        signal_type=SignalType.RAPID_DECLINE.value,
-        period_start=date(2025, 1, 1), period_end=date(2025, 6, 30),
-        total_signals=50,
-    ))
-    await repo.add(BacktestResult(
-        signal_type=SignalType.RAPID_DECLINE.value,
-        period_start=date(2025, 7, 1), period_end=date(2025, 12, 31),
-        total_signals=80,
-    ))
-    await repo.add(BacktestResult(
-        signal_type=SignalType.TREND_REVERSAL.value,
-        period_start=date(2025, 1, 1), period_end=date(2025, 12, 31),
-        total_signals=30,
-    ))
+    await repo.add(
+        BacktestResult(
+            signal_type=SignalType.RAPID_DECLINE.value,
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 6, 30),
+            total_signals=50,
+        )
+    )
+    await repo.add(
+        BacktestResult(
+            signal_type=SignalType.RAPID_DECLINE.value,
+            period_start=date(2025, 7, 1),
+            period_end=date(2025, 12, 31),
+            total_signals=80,
+        )
+    )
+    await repo.add(
+        BacktestResult(
+            signal_type=SignalType.TREND_REVERSAL.value,
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 12, 31),
+            total_signals=30,
+        )
+    )
 
     resp = await client.get("/api/backtest")
     assert resp.status_code == 200

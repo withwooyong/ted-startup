@@ -4,6 +4,7 @@
 - Service: FakeLLMProvider 로 외부 LLM 호출 제거하고 파이프라인·캐시·소스 보강 검증.
 - Router: FakeLLMProvider + DART MockTransport 로 E2E 검증.
 """
+
 from __future__ import annotations
 
 import json
@@ -77,9 +78,7 @@ class FakeLLMProvider:
         self.collect_calls += 1
         return []
 
-    async def analyze(
-        self, *, tier1: Tier1Payload, tier2: list[Tier2QualitativeItem]
-    ) -> GeneratedReport:
+    async def analyze(self, *, tier1: Tier1Payload, tier2: list[Tier2QualitativeItem]) -> GeneratedReport:
         self.analyze_calls += 1
         if self._raise is not None:
             raise self._raise
@@ -108,46 +107,55 @@ def _dart_mock_transport() -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/company.json"):
-            return httpx.Response(200, json={
-                "status": "000",
-                "corp_code": "00126380",
-                "corp_name": "삼성전자",
-                "stock_code": "005930",
-                "ceo_nm": "이재용",
-                "corp_cls": "Y",
-                "hm_url": "www.samsung.com",
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "status": "000",
+                    "corp_code": "00126380",
+                    "corp_name": "삼성전자",
+                    "stock_code": "005930",
+                    "ceo_nm": "이재용",
+                    "corp_cls": "Y",
+                    "hm_url": "www.samsung.com",
+                },
+            )
         if path.endswith("/list.json"):
-            return httpx.Response(200, json={
-                "status": "000",
-                "list": [
-                    {
-                        "corp_code": "00126380",
-                        "corp_name": "삼성전자",
-                        "stock_code": "005930",
-                        "report_nm": "주요사항보고서(자기주식취득결정)",
-                        "rcept_no": "20260301000001",
-                        "rcept_dt": "20260301",
-                        "flr_nm": "삼성전자",
-                    },
-                ],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "status": "000",
+                    "list": [
+                        {
+                            "corp_code": "00126380",
+                            "corp_name": "삼성전자",
+                            "stock_code": "005930",
+                            "report_nm": "주요사항보고서(자기주식취득결정)",
+                            "rcept_no": "20260301000001",
+                            "rcept_dt": "20260301",
+                            "flr_nm": "삼성전자",
+                        },
+                    ],
+                },
+            )
         if path.endswith("/fnlttSinglAcntAll.json"):
-            return httpx.Response(200, json={
-                "status": "000",
-                "list": [
-                    {
-                        "account_nm": "매출액",
-                        "fs_div": "CFS",
-                        "fs_nm": "연결재무제표",
-                        "sj_div": "IS",
-                        "sj_nm": "손익계산서",
-                        "thstrm_nm": "제 56 기",
-                        "thstrm_amount": "300,000,000,000,000",
-                        "currency": "KRW",
-                    },
-                ],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "status": "000",
+                    "list": [
+                        {
+                            "account_nm": "매출액",
+                            "fs_div": "CFS",
+                            "fs_nm": "연결재무제표",
+                            "sj_div": "IS",
+                            "sj_nm": "손익계산서",
+                            "thstrm_nm": "제 56 기",
+                            "thstrm_amount": "300,000,000,000,000",
+                            "currency": "KRW",
+                        },
+                    ],
+                },
+            )
         return httpx.Response(500)
 
     return httpx.MockTransport(handler)
@@ -156,12 +164,8 @@ def _dart_mock_transport() -> httpx.MockTransport:
 async def _seed_stock_and_mapping(
     session: AsyncSession, *, stock_code: str = "005930", corp_code: str = "00126380"
 ) -> Stock:
-    stock = await StockRepository(session).add(
-        Stock(stock_code=stock_code, stock_name="삼성전자", market_type="KOSPI")
-    )
-    await DartCorpMappingRepository(session).upsert_many(
-        [(stock_code, corp_code, "삼성전자")]
-    )
+    stock = await StockRepository(session).add(Stock(stock_code=stock_code, stock_name="삼성전자", market_type="KOSPI"))
+    await DartCorpMappingRepository(session).upsert_many([(stock_code, corp_code, "삼성전자")])
     return stock
 
 
@@ -192,13 +196,14 @@ async def test_openai_provider_analyze_parses_json_schema_output() -> None:
                 {"tier": 1, "type": "dart", "url": "https://dart.fss.or.kr/x", "label": "공시"},
             ],
         }
-        return httpx.Response(200, json={
-            "id": "chatcmpl-fake",
-            "choices": [
-                {"message": {"role": "assistant", "content": json.dumps(content)}}
-            ],
-            "usage": {"prompt_tokens": 1000, "completion_tokens": 500},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-fake",
+                "choices": [{"message": {"role": "assistant", "content": json.dumps(content)}}],
+                "usage": {"prompt_tokens": 1000, "completion_tokens": 500},
+            },
+        )
 
     transport = httpx.MockTransport(handler)
     async with OpenAIProvider(_openai_settings(), transport=transport) as provider:
@@ -267,10 +272,13 @@ async def test_openai_provider_filters_unsafe_source_urls() -> None:
                 {"tier": 2, "type": "news", "url": "ftp://example.com/x", "label": "비허용 스킴"},
             ],
         }
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": json.dumps(content)}}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps(content)}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            },
+        )
 
     transport = httpx.MockTransport(handler)
     async with OpenAIProvider(_openai_settings(), transport=transport) as provider:
@@ -285,10 +293,12 @@ async def test_openai_provider_filters_unsafe_source_urls() -> None:
 def test_openai_provider_rejects_http_base_url() -> None:
     # SSRF 방어: http://169.254.169.254 같은 메타데이터 엔드포인트 진입 차단
     with pytest.raises(OpenAIProviderError):
-        OpenAIProvider(Settings(
-            openai_api_key="sk-x",
-            openai_base_url="http://169.254.169.254/latest",
-        ))
+        OpenAIProvider(
+            Settings(
+                openai_api_key="sk-x",
+                openai_base_url="http://169.254.169.254/latest",
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -309,13 +319,21 @@ async def test_openai_provider_collect_qualitative_no_op_when_disabled() -> None
 @pytest.mark.asyncio
 async def test_service_generates_and_caches_report(session: AsyncSession) -> None:
     stock = await _seed_stock_and_mapping(session)
-    await StockPriceRepository(session).upsert_many([
-        {"stock_id": stock.id, "trading_date": date.today() - timedelta(days=1), "close_price": 72000},
-    ])
-    await SignalRepository(session).add(Signal(
-        stock_id=stock.id, signal_date=date.today() - timedelta(days=2),
-        signal_type=SignalType.RAPID_DECLINE.value, score=80, grade="A", detail={},
-    ))
+    await StockPriceRepository(session).upsert_many(
+        [
+            {"stock_id": stock.id, "trading_date": date.today() - timedelta(days=1), "close_price": 72000},
+        ]
+    )
+    await SignalRepository(session).add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=date.today() - timedelta(days=2),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=80,
+            grade="A",
+            detail={},
+        )
+    )
 
     provider = FakeLLMProvider()
     transport = _dart_mock_transport()
@@ -362,9 +380,7 @@ async def test_service_raises_when_stock_unknown(session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_service_raises_when_corp_code_not_mapped(session: AsyncSession) -> None:
     # 종목은 있지만 DART 매핑이 없는 케이스
-    await StockRepository(session).add(
-        Stock(stock_code="111111", stock_name="미매핑", market_type="KOSPI")
-    )
+    await StockRepository(session).add(Stock(stock_code="111111", stock_name="미매핑", market_type="KOSPI"))
     provider = FakeLLMProvider()
     transport = _dart_mock_transport()
     async with DartClient(Settings(dart_api_key="FAKE"), transport=transport) as dart:
@@ -379,9 +395,7 @@ async def test_service_raises_when_corp_code_not_mapped(session: AsyncSession) -
 
 
 @pytest_asyncio.fixture
-async def app_with_session(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[FastAPI]:
+async def app_with_session(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
     get_settings.cache_clear()
     app = create_app()
@@ -397,9 +411,11 @@ async def app_with_session(
             await client.close()
 
     async def _override_llm() -> AsyncIterator[LLMProvider]:
-        yield FakeLLMProvider(sources=[
-            ReportSource(tier=1, type="krx", url="https://krx.co.kr/x", label="KRX"),
-        ])
+        yield FakeLLMProvider(
+            sources=[
+                ReportSource(tier=1, type="krx", url="https://krx.co.kr/x", label="KRX"),
+            ]
+        )
 
     app.dependency_overrides[prod_get_session] = _override_session
     app.dependency_overrides[prod_get_dart] = _override_dart
@@ -426,7 +442,8 @@ async def test_reports_endpoint_generates_and_returns_404_for_unknown(
     await _seed_stock_and_mapping(session)
     transport = httpx.ASGITransport(app=app_with_session)
     async with httpx.AsyncClient(
-        transport=transport, base_url="http://test",
+        transport=transport,
+        base_url="http://test",
         headers={"X-API-Key": "test-admin-key"},
     ) as c:
         resp = await c.post("/api/reports/005930")
@@ -473,9 +490,11 @@ async def test_reports_endpoint_rate_limited_after_quota(
             await client.close()
 
     async def _override_llm() -> AsyncIterator[LLMProvider]:
-        yield FakeLLMProvider(sources=[
-            ReportSource(tier=1, type="krx", url="https://krx.co.kr/x", label="KRX"),
-        ])
+        yield FakeLLMProvider(
+            sources=[
+                ReportSource(tier=1, type="krx", url="https://krx.co.kr/x", label="KRX"),
+            ]
+        )
 
     app.dependency_overrides[prod_get_session] = _override_session
     app.dependency_overrides[prod_get_dart] = _override_dart
@@ -485,7 +504,8 @@ async def test_reports_endpoint_rate_limited_after_quota(
         await _seed_stock_and_mapping(session)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://test",
+            transport=transport,
+            base_url="http://test",
             headers={"X-API-Key": "rl-test-key"},
         ) as c:
             # 쿼터 내 2회는 통과 (2회차는 캐시 히트)

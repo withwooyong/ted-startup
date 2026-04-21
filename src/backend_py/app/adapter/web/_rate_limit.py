@@ -9,6 +9,7 @@ FastAPI + slowapi 통합 패턴:
 key_func 는 `X-API-Key` 헤더 우선, 없으면 원격 IP 로 fallback.
 관리자 키가 노출될 경우 공격자가 IP 우회해도 같은 키로 묶이도록 의도.
 """
+
 from __future__ import annotations
 
 from fastapi import Request

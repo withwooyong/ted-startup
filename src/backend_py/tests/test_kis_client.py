@@ -1,4 +1,5 @@
 """KisClient 단위 테스트 — httpx.MockTransport 로 네트워크 없이 검증."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -155,9 +156,7 @@ async def test_token_is_cached_across_calls() -> None:
 async def test_raises_auth_error_when_token_endpoint_fails() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                401, json={"error_description": "invalid appkey"}
-            )
+            return httpx.Response(401, json={"error_description": "invalid appkey"})
         return httpx.Response(200, json={})
 
     transport = httpx.MockTransport(handler)

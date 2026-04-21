@@ -14,6 +14,7 @@
 - DART 엔드포인트 부분 실패는 경고 로그 후 빈 데이터로 진행
 - 분석 단계 실패는 예외 전파(호출자가 500/502 매핑)
 """
+
 from __future__ import annotations
 
 import logging
@@ -106,9 +107,7 @@ class AnalysisReportService:
 
     # ------------------------------------------------------------------
 
-    async def generate(
-        self, *, stock_code: str, force_refresh: bool = False
-    ) -> ReportOutcome:
+    async def generate(self, *, stock_code: str, force_refresh: bool = False) -> ReportOutcome:
         today_kst = datetime.now(KST).date()
 
         if not force_refresh:
@@ -123,8 +122,7 @@ class AnalysisReportService:
         mapping = await self._mapping_repo.find_by_stock_code(stock_code)
         if mapping is None:
             raise CorpCodeNotMappedError(
-                f"dart_corp_mapping 미등록: stock_code={stock_code}. "
-                "DART bulk sync 를 먼저 수행하세요."
+                f"dart_corp_mapping 미등록: stock_code={stock_code}. DART bulk sync 를 먼저 수행하세요."
             )
 
         tier1 = await self._collect_tier1(stock, mapping.corp_code, today_kst)
@@ -165,9 +163,7 @@ class AnalysisReportService:
     # Tier1 collection
     # ------------------------------------------------------------------
 
-    async def _collect_tier1(
-        self, stock: Stock, corp_code: str, today: date
-    ) -> Tier1Payload:
+    async def _collect_tier1(self, stock: Stock, corp_code: str, today: date) -> Tier1Payload:
         company = await self._fetch_company_safe(corp_code)
         disclosures = await self._fetch_disclosures_safe(corp_code, today)
         financials = await self._fetch_financials_safe(corp_code, today)
@@ -202,15 +198,11 @@ class AnalysisReportService:
             hm_url=info.hm_url,
         )
 
-    async def _fetch_disclosures_safe(
-        self, corp_code: str, today: date
-    ) -> list[Tier1DisclosureItem]:
+    async def _fetch_disclosures_safe(self, corp_code: str, today: date) -> list[Tier1DisclosureItem]:
         bgn = (today - timedelta(days=self.DISCLOSURE_WINDOW_DAYS)).strftime("%Y%m%d")
         end = today.strftime("%Y%m%d")
         try:
-            rows = await self._dart.fetch_disclosures(
-                corp_code, bgn_de=bgn, end_de=end, page_count=30
-            )
+            rows = await self._dart.fetch_disclosures(corp_code, bgn_de=bgn, end_de=end, page_count=30)
         except DartClientError as exc:
             logger.warning("DART disclosures 조회 실패(corp=%s): %s", corp_code, exc)
             return []
@@ -224,9 +216,7 @@ class AnalysisReportService:
             for r in rows
         ]
 
-    async def _fetch_financials_safe(
-        self, corp_code: str, today: date
-    ) -> list[Tier1FinancialItem]:
+    async def _fetch_financials_safe(self, corp_code: str, today: date) -> list[Tier1FinancialItem]:
         # 사업보고서 기준 연도 추정 — 보고서 공시 지연을 고려해 전년도
         bsns_year = today.year - 1
         try:
@@ -236,7 +226,9 @@ class AnalysisReportService:
         except DartClientError as exc:
             logger.warning(
                 "DART fnlttSinglAcntAll 조회 실패(corp=%s, year=%d): %s",
-                corp_code, bsns_year, exc,
+                corp_code,
+                bsns_year,
+                exc,
             )
             return []
         return [
@@ -251,9 +243,7 @@ class AnalysisReportService:
             for r in stmt.rows
         ]
 
-    async def _fetch_prices(
-        self, stock_id: int, today: date
-    ) -> list[Tier1PricePoint]:
+    async def _fetch_prices(self, stock_id: int, today: date) -> list[Tier1PricePoint]:
         start = today - timedelta(days=self.PRICE_WINDOW_DAYS)
         rows = await self._price_repo.list_between(stock_id, start, today)
         return [
@@ -265,9 +255,7 @@ class AnalysisReportService:
             for r in rows
         ]
 
-    async def _fetch_signals(
-        self, stock_id: int, today: date
-    ) -> list[Tier1SignalItem]:
+    async def _fetch_signals(self, stock_id: int, today: date) -> list[Tier1SignalItem]:
         rows = await self._signal_repo.list_by_stock(stock_id, limit=20)
         return [
             Tier1SignalItem(
@@ -283,9 +271,7 @@ class AnalysisReportService:
     # Source merging / Output
     # ------------------------------------------------------------------
 
-    def _merge_tier1_sources(
-        self, generated: GeneratedReport, tier1: Tier1Payload
-    ) -> list[ReportSource]:
+    def _merge_tier1_sources(self, generated: GeneratedReport, tier1: Tier1Payload) -> list[ReportSource]:
         """모델이 빠뜨린 공식 링크를 Tier1 최상단 공시 / 기업홈 순으로 보강.
         저장 직전 is_safe_public_url 로 스킴 재검증해 javascript:/file: 등 차단.
         """

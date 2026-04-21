@@ -8,6 +8,7 @@
 SHORT_SQUEEZE C-grade 81%, TREND_REVERSAL D-grade 22%, RAPID_DECLINE A-grade 62% —
 각 타입별 기준치를 재정비해 상위 신호만 남도록 조정했다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -83,24 +84,15 @@ class SignalDetectionService:
 
         # 추세전환용 히스토리(lending_balance 수량)
         trend_from = trading_date - timedelta(days=TREND_HISTORY_DAYS)
-        lending_hist = await lending_repo.list_by_stocks_between(
-            stock_ids, trend_from, trading_date
-        )
+        lending_hist = await lending_repo.list_by_stocks_between(stock_ids, trend_from, trading_date)
         trend_df = pd.DataFrame(
-            [
-                {"stock_id": lb.stock_id, "date": lb.trading_date, "qty": int(lb.balance_quantity)}
-                for lb in lending_hist
-            ]
+            [{"stock_id": lb.stock_id, "date": lb.trading_date, "qty": int(lb.balance_quantity)} for lb in lending_hist]
         )
 
         # 숏스퀴즈용 볼륨 히스토리 (당일 제외)
         vol_from = trading_date - timedelta(days=VOLUME_HISTORY_DAYS)
-        vol_hist = await price_repo.list_by_stocks_between(
-            stock_ids, vol_from, trading_date - timedelta(days=1)
-        )
-        vol_df = pd.DataFrame(
-            [{"stock_id": sp.stock_id, "volume": int(sp.volume)} for sp in vol_hist]
-        )
+        vol_hist = await price_repo.list_by_stocks_between(stock_ids, vol_from, trading_date - timedelta(days=1))
+        vol_df = pd.DataFrame([{"stock_id": sp.stock_id, "volume": int(sp.volume)} for sp in vol_hist])
         avg_volume_by_stock: dict[int, float] = {}
         if not vol_df.empty:
             # groupby().mean().to_dict() 는 Hashable/Any 키로 좁혀지지 않아 cast.
@@ -130,8 +122,13 @@ class SignalDetectionService:
                 to_save.append(sig)
 
             sig = self._short_squeeze(
-                stock.id, trading_date, lb, sp, ss,
-                avg_volume_by_stock.get(sid, 0.0), existing_keys,
+                stock.id,
+                trading_date,
+                lb,
+                sp,
+                ss,
+                avg_volume_by_stock.get(sid, 0.0),
+                existing_keys,
             )
             if sig:
                 to_save.append(sig)
@@ -144,20 +141,19 @@ class SignalDetectionService:
         elapsed = int((time.monotonic() - start) * 1000)
         logger.info(
             "시그널 탐지 완료 rapid=%d trend=%d squeeze=%d elapsed=%dms",
-            rapid, trend, squeeze, elapsed,
+            rapid,
+            trend,
+            squeeze,
+            elapsed,
         )
-        return DetectionResult(
-            rapid_decline=rapid, trend_reversal=trend, short_squeeze=squeeze, elapsed_ms=elapsed
-        )
+        return DetectionResult(rapid_decline=rapid, trend_reversal=trend, short_squeeze=squeeze, elapsed_ms=elapsed)
 
     # ------------------------------------------------------------------
     # 개별 탐지 로직
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _rapid_decline(
-        stock_id: int, trading_date: date, lb: Any, existing: set[tuple[int, str]]
-    ) -> Signal | None:
+    def _rapid_decline(stock_id: int, trading_date: date, lb: Any, existing: set[tuple[int, str]]) -> Signal | None:
         if lb is None or lb.change_rate is None:
             return None
         if Decimal(lb.change_rate) > RAPID_DECLINE_THRESHOLD:
@@ -177,14 +173,19 @@ class SignalDetectionService:
             "consecutiveDecreaseDays": int(lb.consecutive_decrease_days or 0),
         }
         return Signal(
-            stock_id=stock_id, signal_date=trading_date,
+            stock_id=stock_id,
+            signal_date=trading_date,
             signal_type=SignalType.RAPID_DECLINE.value,
-            score=score, grade=_grade(score), detail=detail,
+            score=score,
+            grade=_grade(score),
+            detail=detail,
         )
 
     @staticmethod
     def _trend_reversal(
-        stock_id: int, trading_date: date, hist: pd.DataFrame | None,
+        stock_id: int,
+        trading_date: date,
+        hist: pd.DataFrame | None,
         existing: set[tuple[int, str]],
     ) -> Signal | None:
         if hist is None or len(hist) < TREND_MA_LONG + 1:
@@ -210,9 +211,7 @@ class SignalDetectionService:
 
         divergence = abs(short_today - long_today) / long_today * 100 if long_today else 0
         divergence_score = min(40, int(divergence * 10))
-        speed = (
-            abs((short_today - short_yest) / short_yest * 100) if short_yest else 0
-        )
+        speed = abs((short_today - short_yest) / short_yest * 100) if short_yest else 0
         speed_score = min(30, int(speed * 15))
         score = min(100, divergence_score + speed_score + 30)
         if score < TREND_REVERSAL_MIN_SCORE:
@@ -228,15 +227,23 @@ class SignalDetectionService:
             "crossType": "GOLDEN_CROSS",  # Java 용어 보존
         }
         return Signal(
-            stock_id=stock_id, signal_date=trading_date,
+            stock_id=stock_id,
+            signal_date=trading_date,
             signal_type=SignalType.TREND_REVERSAL.value,
-            score=score, grade=_grade(score), detail=detail,
+            score=score,
+            grade=_grade(score),
+            detail=detail,
         )
 
     @staticmethod
     def _short_squeeze(
-        stock_id: int, trading_date: date, lb: Any, sp: Any, ss: Any,
-        avg_volume: float, existing: set[tuple[int, str]],
+        stock_id: int,
+        trading_date: date,
+        lb: Any,
+        sp: Any,
+        ss: Any,
+        avg_volume: float,
+        existing: set[tuple[int, str]],
     ) -> Signal | None:
         if lb is None or sp is None:
             return None
@@ -279,7 +286,10 @@ class SignalDetectionService:
             "consecutiveDecreaseDays": int(lb.consecutive_decrease_days or 0),
         }
         return Signal(
-            stock_id=stock_id, signal_date=trading_date,
+            stock_id=stock_id,
+            signal_date=trading_date,
             signal_type=SignalType.SHORT_SQUEEZE.value,
-            score=total, grade=_grade(total), detail=detail,
+            score=total,
+            grade=_grade(total),
+            detail=detail,
         )

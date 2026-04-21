@@ -3,6 +3,7 @@
 어댑터 경계에서 프레임워크·드라이버에 독립된 Pydantic 모델을 주고받아
 이후 Repository 업서트 단계에서 dict 로 변환한다(ORM 메타데이터 의존 제거).
 """
+
 from __future__ import annotations
 
 from decimal import Decimal

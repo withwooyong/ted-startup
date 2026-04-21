@@ -1,4 +1,5 @@
 """Repository 계층 — 각 애그리게이트 별 async Repository."""
+
 from __future__ import annotations
 
 from app.adapter.out.persistence.repositories.analysis_report import AnalysisReportRepository

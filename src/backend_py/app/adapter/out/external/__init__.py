@@ -1,4 +1,5 @@
 """외부 연동 어댑터 모음."""
+
 from __future__ import annotations
 
 from app.adapter.out.external._records import (

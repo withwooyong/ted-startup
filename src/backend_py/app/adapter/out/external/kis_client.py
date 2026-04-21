@@ -11,6 +11,7 @@
   - output1: 보유 종목 리스트 → `KisHoldingRow`
   - output2: 평가/예수금 요약(본 MVP 에서는 미사용)
 """
+
 from __future__ import annotations
 
 import logging
@@ -113,10 +114,7 @@ def _build_in_memory_transport() -> httpx.MockTransport:
                     "expires_in": 86400,
                 },
             )
-        if (
-            path == "/uapi/domestic-stock/v1/trading/inquire-balance"
-            and request.method == "GET"
-        ):
+        if path == "/uapi/domestic-stock/v1/trading/inquire-balance" and request.method == "GET":
             return httpx.Response(
                 200,
                 json={
@@ -163,9 +161,7 @@ class KisNotConfiguredError(KisClientError):
 def _account_parts(account_no: str) -> tuple[str, str]:
     digits = account_no.replace("-", "").strip()
     if len(digits) < 10:
-        raise KisNotConfiguredError(
-            f"KIS 계좌번호는 숫자 10자리여야 함 (현재 {len(digits)}자리)"
-        )
+        raise KisNotConfiguredError(f"KIS 계좌번호는 숫자 10자리여야 함 (현재 {len(digits)}자리)")
     return digits[:8], digits[8:10]
 
 
@@ -228,8 +224,7 @@ class KisClient:
             # PR 3 에서 `brokerage_account_credential` 저장소가 Fernet 복호화 후 주입.
             if credentials is None:
                 raise KisNotConfiguredError(
-                    "실 환경(KisEnvironment.REAL)은 credentials 주입 필수 — "
-                    "PR 3 이후 credential 저장소 연동 필요"
+                    "실 환경(KisEnvironment.REAL)은 credentials 주입 필수 — PR 3 이후 credential 저장소 연동 필요"
                 )
             self._base_url = _REAL_BASE_URL
             self._app_key = credentials.app_key
@@ -237,8 +232,10 @@ class KisClient:
             self._account_no = credentials.account_no
 
         timeout = httpx.Timeout(
-            connect=5.0, read=s.kis_request_timeout_seconds,
-            write=s.kis_request_timeout_seconds, pool=5.0,
+            connect=5.0,
+            read=s.kis_request_timeout_seconds,
+            write=s.kis_request_timeout_seconds,
+            pool=5.0,
         )
         # In-memory MockTransport 는 MOCK 환경에서만 자동 주입. REAL 환경에서 사용하려면
         # 테스트가 명시적으로 `transport=...` 를 건네야 함 (실 URL 호출 안전장치).
@@ -248,9 +245,7 @@ class KisClient:
             self._app_secret = self._app_secret or "in-memory-app-secret"
             self._account_no = self._account_no or "0000000000-01"
             logger.info("KIS in-memory mock transport 활성화 — 외부 호출 없음")
-        self._client = httpx.AsyncClient(
-            base_url=self._base_url, timeout=timeout, transport=transport
-        )
+        self._client = httpx.AsyncClient(base_url=self._base_url, timeout=timeout, transport=transport)
         self._access_token: str | None = None
         self._token_expires_at: float = 0.0
 
@@ -292,9 +287,7 @@ class KisClient:
         except httpx.HTTPError as exc:
             raise KisAuthError(f"토큰 요청 네트워크 오류: {exc}") from exc
         if resp.status_code != 200:
-            raise KisAuthError(
-                f"토큰 요청 실패: HTTP {resp.status_code} body={resp.text[:200]}"
-            )
+            raise KisAuthError(f"토큰 요청 실패: HTTP {resp.status_code} body={resp.text[:200]}")
         data = resp.json()
         raw_token = data.get("access_token")
         if not isinstance(raw_token, str) or not raw_token:
@@ -362,15 +355,11 @@ class KisClient:
             params=params,
         )
         if resp.status_code != 200:
-            raise KisClientError(
-                f"잔고조회 실패: HTTP {resp.status_code} body={resp.text[:300]}"
-            )
+            raise KisClientError(f"잔고조회 실패: HTTP {resp.status_code} body={resp.text[:300]}")
         body = resp.json()
         rt_cd = body.get("rt_cd")
         if rt_cd not in ("0", 0):
-            raise KisClientError(
-                f"잔고조회 응답 오류: rt_cd={rt_cd} msg={body.get('msg1')}"
-            )
+            raise KisClientError(f"잔고조회 응답 오류: rt_cd={rt_cd} msg={body.get('msg1')}")
         output1 = body.get("output1") or []
         rows: list[KisHoldingRow] = []
         for row in output1:

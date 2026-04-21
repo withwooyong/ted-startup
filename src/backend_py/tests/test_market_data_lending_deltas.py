@@ -3,6 +3,7 @@
 대차잔고 전일 대비 변동률·연속 감소일수 계산 규칙 회귀 방지.
 모듈 레벨 함수 직접 호출 + 실 LendingBalance 모델 인스턴스로 검증.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -68,8 +69,6 @@ class TestComputeLendingDeltas:
             (1, 3, Decimal("-66.6667")),  # 반올림 확인 (4자리)
         ],
     )
-    def test_rate_quantization_four_decimals(
-        self, today_qty: int, prev_qty: int, expected_rate: Decimal
-    ) -> None:
+    def test_rate_quantization_four_decimals(self, today_qty: int, prev_qty: int, expected_rate: Decimal) -> None:
         _, r, _ = self.fn(today_qty=today_qty, prev=_prev(prev_qty))
         assert r == expected_rate

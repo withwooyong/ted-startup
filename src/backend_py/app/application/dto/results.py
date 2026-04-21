@@ -1,4 +1,5 @@
 """UseCase 결과 DTO."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict

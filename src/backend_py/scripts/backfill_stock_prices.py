@@ -13,6 +13,7 @@ stock_price · short_selling 등을 실데이터로 채운다.
   docker compose exec backend python -m scripts.backfill_stock_prices --days 252
   docker compose exec backend python -m scripts.backfill_stock_prices --end 2026-04-17
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,8 +82,7 @@ def run(*, days: int, end: date, timeout_s: float) -> int:
         else:
             fail += 1
             print(
-                f"[backfill] [{i:>3}/{len(targets)}] {d} FAIL({status}) "
-                f"({elapsed:.1f}s) {body}",
+                f"[backfill] [{i:>3}/{len(targets)}] {d} FAIL({status}) ({elapsed:.1f}s) {body}",
                 flush=True,
             )
 
@@ -100,15 +100,21 @@ def main() -> None:
         description="과거 N 영업일 stock_price 백필 (POST /api/batch/collect 반복)",
     )
     parser.add_argument(
-        "--days", type=int, default=752,
+        "--days",
+        type=int,
+        default=752,
         help="영업일 개수 (기본 752 ≈ 3년)",
     )
     parser.add_argument(
-        "--end", type=str, default=None,
+        "--end",
+        type=str,
+        default=None,
         help="기준 종료일 YYYY-MM-DD (기본: 오늘)",
     )
     parser.add_argument(
-        "--timeout", type=float, default=120.0,
+        "--timeout",
+        type=float,
+        default=120.0,
         help="단일 호출 타임아웃 초 (기본 120s)",
     )
     args = parser.parse_args()

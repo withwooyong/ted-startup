@@ -4,6 +4,7 @@ Revision ID: 001_init_schema
 Revises:
 Create Date: 2026-04-18
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

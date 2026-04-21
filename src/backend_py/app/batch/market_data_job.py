@@ -10,6 +10,7 @@ Step 3 (notify):  NotificationService 로 전송
   Python 구현은 KRX 수집 실패 시에도 전일 기준 탐지가 가능하도록 유연하게 처리
 - 전체 결과는 단일 PipelineResult 로 집계
 """
+
 from __future__ import annotations
 
 import logging
@@ -69,7 +70,8 @@ async def run_market_data_pipeline(
     if not force_when_non_trading and not is_trading_day(trading_date):
         logger.info("거래일 아님 — 파이프라인 skip: %s (%s)", trading_date, trading_date.strftime("%A"))
         return PipelineResult(
-            trading_date=trading_date, skipped=True,
+            trading_date=trading_date,
+            skipped=True,
             skipped_reason=f"non-trading day ({trading_date.strftime('%A')})",
         )
 
@@ -112,11 +114,10 @@ async def run_market_data_pipeline(
     # Step 3: notify — detect 성공 시만
     if any(s.name == "detect" and s.succeeded for s in steps):
         async with factory() as session:
+
             async def _notify() -> int:
                 # 같은 세션에서 다시 로드해 Telegram 발송
-                signals: list[Signal] = list(
-                    await SignalRepository(session).list_between(trading_date, trading_date)
-                )
+                signals: list[Signal] = list(await SignalRepository(session).list_between(trading_date, trading_date))
                 return await NotificationService(session, telegram).notify_signals(signals)
 
             outcome = await _run_step(
@@ -129,7 +130,9 @@ async def run_market_data_pipeline(
     else:
         steps.append(
             StepOutcome(
-                name="notify", succeeded=False, elapsed_ms=0,
+                name="notify",
+                succeeded=False,
+                elapsed_ms=0,
                 error="detect step 실패로 notify 생략",
             )
         )
@@ -137,12 +140,12 @@ async def run_market_data_pipeline(
     await telegram.close()
 
     total = int((time.monotonic() - pipeline_start) * 1000)
-    result = PipelineResult(
-        trading_date=trading_date, skipped=False, steps=steps, total_elapsed_ms=total
-    )
+    result = PipelineResult(trading_date=trading_date, skipped=False, steps=steps, total_elapsed_ms=total)
     logger.info(
         "파이프라인 종료 date=%s elapsed=%dms 성공=%s",
-        trading_date, total, result.succeeded,
+        trading_date,
+        total,
+        result.succeeded,
     )
     return result
 

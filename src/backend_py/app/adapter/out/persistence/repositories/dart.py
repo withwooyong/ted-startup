@@ -1,4 +1,5 @@
 """DART 기업코드 매핑 Repository."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
@@ -28,15 +29,9 @@ class DartCorpMappingRepository:
         stmt = select(DartCorpMapping).where(DartCorpMapping.corp_code == corp_code)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def upsert_many(
-        self, rows: Iterable[tuple[str, str, str]]
-    ) -> int:
+    async def upsert_many(self, rows: Iterable[tuple[str, str, str]]) -> int:
         """(stock_code, corp_code, corp_name) 튜플을 일괄 upsert."""
-        payload = [
-            {"stock_code": s, "corp_code": c, "corp_name": n}
-            for s, c, n in rows
-            if s and c
-        ]
+        payload = [{"stock_code": s, "corp_code": c, "corp_name": n} for s, c, n in rows if s and c]
         if not payload:
             return 0
         stmt = pg_insert(DartCorpMapping).values(payload)

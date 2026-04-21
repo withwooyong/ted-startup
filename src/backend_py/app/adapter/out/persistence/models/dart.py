@@ -1,4 +1,5 @@
 """DART 관련 ORM 모델."""
+
 from __future__ import annotations
 
 from datetime import datetime

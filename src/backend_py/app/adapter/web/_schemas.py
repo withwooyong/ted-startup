@@ -3,6 +3,7 @@
 OpenAPI 문서화와 타입 안정성을 동시에 제공. ORM 모델은 직접 노출하지 않고
 이 스키마로 변환해 필드 노출 범위를 제어.
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -17,6 +18,7 @@ class _Base(BaseModel):
 
 
 # ---------- Signals ----------
+
 
 class SignalResponse(_Base):
     id: int
@@ -39,6 +41,7 @@ class LatestSignalsResponse(BaseModel):
     signal_date 가 None 이면 시그널 테이블이 비어있음.
     대시보드가 "오늘 기준 빈 상태"를 피하려고 사용.
     """
+
     signal_date: date | None = None
     signals: list[SignalResponse] = Field(default_factory=list)
 
@@ -67,6 +70,7 @@ class StockDetailResponse(BaseModel):
 
 # ---------- Backtest ----------
 
+
 class BacktestResultResponse(_Base):
     id: int
     signal_type: str
@@ -86,6 +90,7 @@ class BacktestResultResponse(_Base):
 
 
 # ---------- Notification Preference ----------
+
 
 class NotificationPreferenceResponse(_Base):
     id: int
@@ -121,9 +126,7 @@ PriceNonNegative = Annotated[Decimal, Field(ge=Decimal("0"))]
 class AccountCreateRequest(BaseModel):
     account_alias: AliasStr
     broker_code: Annotated[str, Field(pattern=r"^(manual|kis|kiwoom)$")]
-    connection_type: Annotated[
-        str, Field(pattern=r"^(manual|kis_rest_mock|kis_rest_real)$")
-    ]
+    connection_type: Annotated[str, Field(pattern=r"^(manual|kis_rest_mock|kis_rest_real)$")]
     # connection_type 과의 조합 검증은 UseCase 에서 수행. 여기선 enum 범위만 방어.
     environment: Annotated[str, Field(pattern=r"^(mock|real)$")] = "mock"
 

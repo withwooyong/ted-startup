@@ -25,11 +25,7 @@ class StockRepository:
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_active(self) -> Sequence[Stock]:
-        stmt = (
-            select(Stock)
-            .where(Stock.is_active.is_(True), Stock.deleted_at.is_(None))
-            .order_by(Stock.stock_code)
-        )
+        stmt = select(Stock).where(Stock.is_active.is_(True), Stock.deleted_at.is_(None)).order_by(Stock.stock_code)
         return (await self._session.execute(stmt)).scalars().all()
 
     async def list_by_ids(self, stock_ids: Sequence[int]) -> Sequence[Stock]:

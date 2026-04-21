@@ -22,6 +22,4 @@ class ShortSelling(Base):
     short_volume: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     short_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     short_ratio: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

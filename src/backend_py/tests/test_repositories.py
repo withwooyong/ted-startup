@@ -1,4 +1,5 @@
 """Repository CRUD 통합 테스트 — 7개 테이블 최소 1 시나리오씩."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -71,15 +72,11 @@ async def test_stock_price_upsert_conflict_updates(session: AsyncSession) -> Non
     stock = await stock_repo.add(Stock(stock_code="000660", stock_name="SK하이닉스", market_type="KOSPI"))
 
     repo = StockPriceRepository(session)
-    n1 = await repo.upsert_many(
-        [{"stock_id": stock.id, "trading_date": date(2026, 4, 17), "close_price": 245000}]
-    )
+    n1 = await repo.upsert_many([{"stock_id": stock.id, "trading_date": date(2026, 4, 17), "close_price": 245000}])
     assert n1 == 1
 
     # 동일 (stock_id, trading_date) → 업데이트
-    n2 = await repo.upsert_many(
-        [{"stock_id": stock.id, "trading_date": date(2026, 4, 17), "close_price": 250000}]
-    )
+    n2 = await repo.upsert_many([{"stock_id": stock.id, "trading_date": date(2026, 4, 17), "close_price": 250000}])
     assert n2 == 1
 
     fetched = await repo.find_by_stock_and_date(stock.id, date(2026, 4, 17))

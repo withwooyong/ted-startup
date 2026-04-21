@@ -5,6 +5,7 @@
 
 설계 문서: docs/kis-real-account-sync-plan.md (§ 5 PR 1)
 """
+
 from __future__ import annotations
 
 import io
@@ -116,9 +117,7 @@ def _resolve_columns(df_columns: list[str]) -> dict[str, str]:
         else:
             missing.append(std_key)
     if missing:
-        raise UnsupportedExcelFormatError(
-            f"필수 컬럼 누락: {missing}. 지원 alias: {dict(_COLUMN_ALIASES)}"
-        )
+        raise UnsupportedExcelFormatError(f"필수 컬럼 누락: {missing}. 지원 alias: {dict(_COLUMN_ALIASES)}")
     return resolved
 
 
@@ -243,9 +242,7 @@ class ExcelImportService:
         self._stock_repo = StockRepository(session)
         self._tx_repo = PortfolioTransactionRepository(session)
 
-    async def import_from_xlsx(
-        self, *, account_id: int, file_bytes: bytes
-    ) -> ImportResult:
+    async def import_from_xlsx(self, *, account_id: int, file_bytes: bytes) -> ImportResult:
         account = await self._account_repo.get(account_id)
         if account is None:
             raise AccountNotFoundForImportError(f"account_id={account_id} 없음")

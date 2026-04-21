@@ -4,6 +4,7 @@
 - HTML parse_mode 는 현 Java TelegramClient 와 동일한 계약 유지.
 - httpx.AsyncClient 를 재사용하되 테스트에서 MockTransport 주입 가능.
 """
+
 from __future__ import annotations
 
 import logging

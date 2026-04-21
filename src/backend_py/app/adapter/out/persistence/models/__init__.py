@@ -3,6 +3,7 @@
 주의: `Base.metadata`에 모든 모델을 등록하려면 이 패키지가 임포트돼야 한다.
 Alembic env.py 및 테스트 conftest가 이 모듈을 임포트해서 메타데이터를 확보한다.
 """
+
 from __future__ import annotations
 
 from app.adapter.out.persistence.models.analysis_report import AnalysisReport

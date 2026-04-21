@@ -3,6 +3,7 @@
 NotificationPreference 에 따라 대상 시그널을 필터링(min_score, signal_types)하고
 Telegram 으로 발송한다. Telegram 비활성 시 no-op 반환.
 """
+
 from __future__ import annotations
 
 import html
@@ -42,10 +43,7 @@ class NotificationService:
         pref = await pref_repo.get_or_create()
 
         enabled_types = set(pref.signal_types or [])
-        filtered = [
-            s for s in signals
-            if s.score >= pref.min_score and s.signal_type in enabled_types
-        ]
+        filtered = [s for s in signals if s.score >= pref.min_score and s.signal_type in enabled_types]
         if not filtered:
             return 0
 

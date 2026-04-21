@@ -380,6 +380,15 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 
 ## 💡 이 프로젝트(ted-startup)의 실전 학습 포인트
 
+### 🆕 CI lint/type 게이트 (PR #(예정), 2026-04-22)
+
+| 상황 | 교훈 | 참고 |
+|------|------|------|
+| ruff format 미도입 레포 | CI 게이트 추가 PR 시작 시 98 파일 포매팅 부채 존재 가능성 확인 → `format .` 을 같은 PR 에 묶어 한 번에 정리 | `backend-lint` job |
+| pre-existing mypy 부채 | `app/` 범위로만 strict 게이트. tests/scripts 는 mock 다량으로 ROI 낮음 → 향후 확대 후보 | mypy `[tool.mypy]` 전역 strict |
+| lint job 을 test 앞에 | `backend-test` 가 `needs: [backend-lint]` — 1~2초 내 빠르게 실패 신호 제공, 불필요한 testcontainers 기동 회피 | `.github/workflows/ci.yml` |
+| 리스트 컴프리헨션 내 narrowing | `dict.get()` 두 번 호출해도 mypy 는 narrowing 불가 → `for` 루프로 풀어 로컬 변수 1회 바인딩 | `signals.py` L86 |
+
 ### 🆕 KIS sync 시리즈 (PR #12~#16, 2026-04, Python 스택)
 
 | 상황 | 교훈 | 참고 |

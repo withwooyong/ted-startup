@@ -7,6 +7,7 @@ Revision ID: 003_portfolio_schema
 Revises: 002_notification_preference
 Create Date: 2026-04-18
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -1,4 +1,5 @@
 """/api/notifications/preferences 조회/수정."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends

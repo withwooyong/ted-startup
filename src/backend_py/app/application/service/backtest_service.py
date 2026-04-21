@@ -11,6 +11,7 @@ vectorbt 는 Portfolio.from_signals 도 지원하지만 본 도메인은 "개별
 수익률"이라 pandas shift/pct_change 로 충분하다. vectorbt 는 적중률/평균수익 집계에
 동일하게 제공하는 통계 편의 기능을 위해 도입해 두고, 이후 Sharpe·MDD 등 확장 시 활용한다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,9 +66,7 @@ class BacktestEngineService:
         signals = list(await signal_repo.list_between(period_start, period_end))
         if not signals:
             elapsed = int((time.monotonic() - start) * 1000)
-            return BacktestExecutionResult(
-                signals_processed=0, returns_calculated=0, result_rows=0, elapsed_ms=elapsed
-            )
+            return BacktestExecutionResult(signals_processed=0, returns_calculated=0, result_rows=0, elapsed_ms=elapsed)
 
         # 1. 시세 벌크 로드 → 피벗 테이블 (index=trading_date, columns=stock_id, values=close_price)
         stock_ids = sorted({s.stock_id for s in signals})
@@ -78,15 +77,14 @@ class BacktestEngineService:
             logger.warning("백테스트 구간 내 주가 데이터 없음")
             elapsed = int((time.monotonic() - start) * 1000)
             return BacktestExecutionResult(
-                signals_processed=len(signals), returns_calculated=0, result_rows=0,
+                signals_processed=len(signals),
+                returns_calculated=0,
+                result_rows=0,
                 elapsed_ms=elapsed,
             )
 
         price_df = pd.DataFrame(
-            [
-                {"stock_id": p.stock_id, "date": p.trading_date, "close": int(p.close_price)}
-                for p in prices
-            ]
+            [{"stock_id": p.stock_id, "date": p.trading_date, "close": int(p.close_price)} for p in prices]
         )
         price_wide = price_df.pivot(index="date", columns="stock_id", values="close").sort_index()
         # 모든 거래일이 인덱스 — 영업일 단위 shift 계산(행 기준)이 그대로 "N영업일 후"
@@ -164,7 +162,11 @@ class BacktestEngineService:
             agg_results.append(res)
             logger.info(
                 "집계 %s: total=%d hit5=%s%% hit10=%s%% hit20=%s%%",
-                sig_type.value, total, res.hit_rate_5d, res.hit_rate_10d, res.hit_rate_20d,
+                sig_type.value,
+                total,
+                res.hit_rate_5d,
+                res.hit_rate_10d,
+                res.hit_rate_20d,
             )
 
         await result_repo.add_many(agg_results)
@@ -173,7 +175,10 @@ class BacktestEngineService:
         elapsed = int((time.monotonic() - start) * 1000)
         logger.info(
             "백테스팅 완료 signals=%d returns=%d results=%d elapsed=%dms",
-            len(signals), returns_calculated, len(agg_results), elapsed,
+            len(signals),
+            returns_calculated,
+            len(agg_results),
+            elapsed,
         )
         return BacktestExecutionResult(
             signals_processed=len(signals),

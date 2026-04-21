@@ -7,6 +7,7 @@ Revision ID: 008_brokerage_credential
 Revises: 007_kis_real_connection
 Create Date: 2026-04-21
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

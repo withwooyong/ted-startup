@@ -11,6 +11,7 @@
 - plaintext 는 어떤 경로로도 로그에 쓰지 않는다. `__repr__` 에 민감값 없음.
 - 예외 메시지에도 복호화 대상 바이트/plaintext 를 포함하지 않는다.
 """
+
 from __future__ import annotations
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -48,16 +49,12 @@ class CredentialCipher:
 
     def __init__(self, master_key: str, *, current_version: int = 1) -> None:
         if not master_key:
-            raise MasterKeyNotConfiguredError(
-                "KIS_CREDENTIAL_MASTER_KEY 가 비어있음 — 운영 환경은 env var 주입 필수"
-            )
+            raise MasterKeyNotConfiguredError("KIS_CREDENTIAL_MASTER_KEY 가 비어있음 — 운영 환경은 env var 주입 필수")
         try:
             fernet = Fernet(master_key.encode())
         except ValueError as exc:
             # Fernet 은 32 바이트 url-safe base64 키를 요구. 형식 불일치 시 명확한 에러.
-            raise MasterKeyNotConfiguredError(
-                f"KIS_CREDENTIAL_MASTER_KEY 형식 오류: {exc}"
-            ) from exc
+            raise MasterKeyNotConfiguredError(f"KIS_CREDENTIAL_MASTER_KEY 형식 오류: {exc}") from exc
         self._fernets: dict[int, Fernet] = {current_version: fernet}
         self._current_version = current_version
 
@@ -82,12 +79,8 @@ class CredentialCipher:
         """
         fernet = self._fernets.get(key_version)
         if fernet is None:
-            raise UnknownKeyVersionError(
-                f"key_version={key_version} 미등록 — 마스터키 회전 상태 확인 필요"
-            )
+            raise UnknownKeyVersionError(f"key_version={key_version} 미등록 — 마스터키 회전 상태 확인 필요")
         try:
             return fernet.decrypt(cipher).decode("utf-8")
         except InvalidToken as exc:
-            raise DecryptionFailedError(
-                f"Fernet 복호화 실패 (key_version={key_version})"
-            ) from exc
+            raise DecryptionFailedError(f"Fernet 복호화 실패 (key_version={key_version})") from exc

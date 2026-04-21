@@ -1,12 +1,37 @@
 # Session Handoff
 
-> Last updated: 2026-04-22 (KST, 직전 세션 2026-04-21 마감분 정리 — **KIS sync 시리즈 완결**)
-> Branch: `master` (origin 동기화 완료, uncommitted 없음)
-> Latest commit: `1483940` — KIS sync PR 6: 로깅 마스킹 (시리즈 최종) (#20)
+> Last updated: 2026-04-22 (KST, 당일 세션 — **CI lint/type 게이트 추가 작업 중**)
+> Branch: `chore/ci-lint-type-gate` (master 기반 신규 feature branch, uncommitted 변경 있음)
+> Latest commit: `1483940` — KIS sync PR 6: 로깅 마스킹 (시리즈 최종) (#20) ← 아직 master 최신 HEAD
 
-## Current Status
+## Current Status (2026-04-22)
 
-**KIS sync 시리즈 6 PR 전원 머지 완료 + 4개 부수 문서/설정 PR 까지 깔끔히 종료**. 본 세션 한 번에 **6개 PR** 머지 (#16 → #20, 세션 시작 시점 `3db778f` 기준):
+**CI 에 ruff + mypy strict 게이트 추가 PR 준비 완료** (커밋 대기).
+
+### 이번 세션 변경 요약
+
+| 항목 | 내용 |
+|---|---|
+| CI | `.github/workflows/ci.yml` 에 `backend-lint` job 신설 (ruff check + format check + mypy app). `backend-test` 를 `needs: [backend-lint]` 로 의존 |
+| ruff format | `src/backend_py` 전체 **98 파일 일괄 재포매팅** (로직 변경 0건, 기계적) |
+| ruff check | `scripts/fix_stock_names.py` · `scripts/seed_e2e_accounts.py` SIM117 2건 autofix |
+| mypy | `app/adapter/web/routers/signals.py` L86 리스트 컴프리헨션 → `for` 루프 리팩터. `Stock \| None` union-attr 2건 해소 |
+| 문서 | CHANGELOG `[Unreleased]` 신규 엔트리, PIPELINE-GUIDE 실전학습 CI lint 게이트 교훈 4건 추가 |
+
+### 로컬 검증 결과
+- `uv run ruff check .` ✅
+- `uv run ruff format --check .` ✅ 123 files already formatted
+- `uv run mypy app` ✅ no issues in 80 source files
+- `uv run pytest -q` ✅ **295 passed, 1 deselected** — 회귀 0건
+
+### 미처리
+
+- 커밋 + 푸시 + PR 생성 (**사용자 명시 요청 대기**)
+- CI 4/4 PASS 확인 후 squash merge
+
+## Prior Session (2026-04-21, 마감)
+
+**KIS sync 시리즈 6 PR 전원 머지 완료 + 4개 부수 문서/설정 PR 까지 깔끔히 종료**. 한 세션에 **6개 PR** 머지 (#16 → #20, 세션 시작 시점 `3db778f` 기준):
 
 | PR | 제목 | 커밋 | 성격 |
 |---|---|---|---|
@@ -18,7 +43,7 @@
 
 세션 시작 시점 머지 상태는 PR #14 (`3db778f`) 까지 — 본 세션에서 PR 5·6 구현 + 부수 PR 3건 + 1 PR 5 CI 확인 후 squash merge 로 시리즈 완결. 백엔드 테스트 **197 → 295** (+98 누적). CI **6회 연속 4/4 PASS**.
 
-## Completed This Session (2026-04-21, 6 PR 머지)
+## Completed 2026-04-21 Session (6 PR 머지)
 
 ### PR #16 — KIS sync PR 5 (연결 테스트 + 실 sync wire)
 

@@ -1,4 +1,5 @@
 """포트폴리오 도메인 Repository — 계좌/보유/거래/스냅샷."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -33,11 +34,7 @@ class BrokerageAccountRepository:
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
     async def list_active(self) -> Sequence[BrokerageAccount]:
-        stmt = (
-            select(BrokerageAccount)
-            .where(BrokerageAccount.is_active.is_(True))
-            .order_by(BrokerageAccount.id)
-        )
+        stmt = select(BrokerageAccount).where(BrokerageAccount.is_active.is_(True)).order_by(BrokerageAccount.id)
         return (await self._session.execute(stmt)).scalars().all()
 
 
@@ -45,9 +42,7 @@ class PortfolioHoldingRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def find_by_account_and_stock(
-        self, account_id: int, stock_id: int
-    ) -> PortfolioHolding | None:
+    async def find_by_account_and_stock(self, account_id: int, stock_id: int) -> PortfolioHolding | None:
         stmt = select(PortfolioHolding).where(
             PortfolioHolding.account_id == account_id,
             PortfolioHolding.stock_id == stock_id,
@@ -78,9 +73,7 @@ class PortfolioTransactionRepository:
         await self._session.refresh(tx)
         return tx
 
-    async def list_by_account(
-        self, account_id: int, *, limit: int = 100
-    ) -> Sequence[PortfolioTransaction]:
+    async def list_by_account(self, account_id: int, *, limit: int = 100) -> Sequence[PortfolioTransaction]:
         stmt = (
             select(PortfolioTransaction)
             .where(PortfolioTransaction.account_id == account_id)
@@ -116,9 +109,7 @@ class PortfolioSnapshotRepository:
         )
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def list_between(
-        self, account_id: int, start: date, end: date
-    ) -> Sequence[PortfolioSnapshot]:
+    async def list_between(self, account_id: int, start: date, end: date) -> Sequence[PortfolioSnapshot]:
         stmt = (
             select(PortfolioSnapshot)
             .where(

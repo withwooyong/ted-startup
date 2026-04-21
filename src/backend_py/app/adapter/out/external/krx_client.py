@@ -11,6 +11,7 @@
 - 대차잔고(get_shorting_balance_by_ticker)는 현재 pykrx 스키마 불일치 이슈가 있어
   실패 시 빈 리스트 + 경고 로그만 남기고 UseCase 가 나머지 스텝을 진행할 수 있게 한다.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -90,9 +91,7 @@ class KrxClient:
         if ohlcv is None or ohlcv.empty:
             return []
         if "시가총액" not in ohlcv.columns:
-            cap = await self._call_pykrx(
-                "get_market_cap_by_ticker", date_str, market="ALL"
-            )
+            cap = await self._call_pykrx("get_market_cap_by_ticker", date_str, market="ALL")
             if cap is not None and not cap.empty and "시가총액" in cap.columns:
                 ohlcv = ohlcv.join(cap[["시가총액"]], how="left")
 
@@ -117,9 +116,7 @@ class KrxClient:
         전종목 이름을 얻을 수 있다. 실패 시 빈 dict — Repository 의 '빈 이름 보존' 로직이 처리.
         """
         try:
-            df = await self._call_pykrx(
-                "get_market_price_change_by_ticker", date_str, date_str, market="ALL"
-            )
+            df = await self._call_pykrx("get_market_price_change_by_ticker", date_str, date_str, market="ALL")
         except Exception as e:  # noqa: BLE001
             logger.warning("KRX 종목명 맵 실패(%s): %s", type(e).__name__, e)
             return {}
@@ -156,6 +153,7 @@ class KrxClient:
     @staticmethod
     def _invoke_ticker_list(date_str: str, market: str) -> list[str]:
         from pykrx import stock
+
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             result = stock.get_market_ticker_list(date_str, market=market)
@@ -220,9 +218,7 @@ class KrxClient:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _to_stock_price_row(
-        code: str, row: Any, market_type: str, stock_name: str = ""
-    ) -> StockPriceRow:
+    def _to_stock_price_row(code: str, row: Any, market_type: str, stock_name: str = "") -> StockPriceRow:
         # stock_name 우선순위: 명시적 전달 > row 의 "종목명" 컬럼 > 빈 문자열
         # pykrx get_market_ohlcv_by_ticker 는 종목명 컬럼을 반환하지 않으므로 외부 매핑 필수.
         return StockPriceRow(
@@ -262,10 +258,6 @@ class KrxClient:
         return LendingBalanceRow(
             stock_code=str(code),
             stock_name=str(row.get("종목명", "")),
-            balance_quantity=_int(
-                row.get("공매도잔고", row.get("잔고수량", row.get("BAL_QTY", 0)))
-            ),
-            balance_amount=_int(
-                row.get("공매도금액", row.get("잔고금액", row.get("BAL_AMT", 0)))
-            ),
+            balance_quantity=_int(row.get("공매도잔고", row.get("잔고수량", row.get("BAL_QTY", 0)))),
+            balance_amount=_int(row.get("공매도금액", row.get("잔고금액", row.get("BAL_AMT", 0)))),
         )

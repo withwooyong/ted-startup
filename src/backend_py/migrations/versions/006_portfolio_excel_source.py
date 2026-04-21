@@ -7,6 +7,7 @@ Revision ID: 006_portfolio_excel_source
 Revises: 005_analysis_report
 Create Date: 2026-04-20
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

@@ -1,4 +1,5 @@
 """AnalysisReport Repository — 24h 캐시 키 기반 조회·저장."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -14,9 +15,7 @@ class AnalysisReportRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def find_by_cache_key(
-        self, stock_code: str, report_date: date
-    ) -> AnalysisReport | None:
+    async def find_by_cache_key(self, stock_code: str, report_date: date) -> AnalysisReport | None:
         stmt = (
             select(AnalysisReport)
             .where(
