@@ -7,7 +7,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-21] KIS sync PR 6: 로깅 마스킹 (시리즈 최종, 커밋 대기)
+## [2026-04-21] docs: 모바일 반응형 계획서 현행화 (`7b11d88`, PR #19)
+
+모바일 반응형 개선 작업계획서(`docs/mobile-responsive-plan.md`)를 **착수 전 현행화** — 작성(2026-04-20) 이후 머지된 PR #12·#15·#16 으로 UI 표면 유입 재진단.
+
+### Changed
+- 대상 스택: Next.js 15 → **16.2.4** + React 19.2.4 반영
+- 수정 공격 지점: 3군데 → 5군데 확장
+- **P1 신규**: RealAccountSection 3-버튼 (연결 테스트·수정·삭제) 모바일 레이아웃 (B3), Portfolio sync 버튼 라벨 확장 (C4)
+- **D2 스킵**: 푸터 면책 `<details>` 접기 — 실제 3줄 짧은 문구, 필요성 낮음
+- 예상 작업량 3~3.5 → **3.5~4 man-day**
+- §9 변경 이력 섹션 신설
+
+---
+
+## [2026-04-21] docs: PIPELINE-GUIDE 현행화 + README 프로미넌트 링크 (`57dd562`, PR #18)
+
+신규 프로젝트 진행 시 가장 중요한 엔트리 문서 현행화.
+
+### Changed
+- **README**: 상단 "🚨 필독" call-out 박스 + PIPELINE-GUIDE.md 링크 프로미넌트화. 핵심 문서 섹션에서도 이모지 + "신규 프로젝트 진행 시 가장 먼저 읽을 문서" 명시
+- **PIPELINE-GUIDE §2 필수 준비물**: Java 21 → **Python 3.12 + FastAPI + Next.js 16** 반영. `.claude/settings.local.json` · `gh` CLI 언급
+- **PIPELINE-GUIDE §8 Q3 코드리뷰**: `java-reviewer` 단독 → **언어별 reviewer 매핑 표** (python/typescript/kotlin/java/go/rust). 병렬 리뷰 실전 패턴 섹션 (본 프로젝트 PR #12~#16 에서 검증)
+- **PIPELINE-GUIDE §실전 학습**: 🆕 KIS sync 시리즈 (PR #12~#16) 교훈 11건 추가. Sprint 1~3 Java 시대는 참고용 보존. 공통 워크플로우 섹션 (`/ted-run` · feature branch + squash · CI 4/4 게이트 · `/handoff` · Co-Authored-By) 신설
+
+---
+
+## [2026-04-21] chore: .claude/settings.local.json 을 .gitignore 에 추가 (`2a97e27`, PR #17)
+
+### Added
+- `.claude/settings.local.json` — 로컬 개인 설정 오버라이드 (`includeCoAuthoredBy` 등). 관례상 `.local` 접미는 "커밋 제외" 의미 → `.gitignore` 명시
+- `.gitignore` 에 `.claude/settings.local.json` 한 줄 추가
+
+---
+
+## [2026-04-21] KIS sync PR 6: 로깅 마스킹 (시리즈 최종) (`1483940`, PR #20)
 
 **KIS sync 시리즈 완결** (6/6). PR 5 에서 실 KIS 외부 호출이 열린 직후 노출된 위험을 처리. structlog 기반 구조화 로깅 + 2층 민감 데이터 방어 (키 기반 `[MASKED]` 치환 + JWT/hex 정규식 scrub). 백엔드 테스트 **239 → 295** (+56). 리뷰 HIGH 3건 + MEDIUM 3건 + LOW 1건 수용.
 
