@@ -3,6 +3,19 @@
 AI Agent Team Platform — Claude Code 기반 멀티에이전트 SDLC 자동화 플랫폼.
 요구사항 한 줄로 기획 → 설계 → 개발 → 테스트 → 배포까지 16개 AI 전문가 에이전트가 순차/병렬 처리한다.
 
+---
+
+> ## 🚨 **필독 — 시작하기 전에**
+>
+> 이 플랫폼을 **새 프로젝트에 이식**하거나 **파이프라인을 처음 사용**한다면 아래 문서 먼저 숙지:
+>
+> ### 📖 **[docs/PIPELINE-GUIDE.md](docs/PIPELINE-GUIDE.md)** — 파이프라인 실전 운영 가이드
+>
+> 5분 요약 · 3단계 이식 절차 · 5-Phase 플로우 · 병렬 작업 패턴 · Compaction 방어 · 실전 학습 포인트까지.
+> 이 프로젝트(ted-startup)의 모든 SDLC 루틴이 응축된 단일 엔트리 포인트.
+
+---
+
 ## 주요 기능
 
 - **5-Phase 파이프라인**: Discovery → Design → Build → Verify → Ship (각 단계 사이에 인간 승인 게이트)
@@ -67,9 +80,10 @@ ops/              # Caddy 등 운영 설정
 
 ## 핵심 문서
 
-- [docs/PIPELINE-GUIDE.md](docs/PIPELINE-GUIDE.md) — 운영 요약 및 이식 가이드
-- [docs/design/ai-agent-team-master.md](docs/design/ai-agent-team-master.md) — 마스터 설계서
-- [CLAUDE.md](CLAUDE.md) — Claude Code 작업 규칙
+- 🚨 **[docs/PIPELINE-GUIDE.md](docs/PIPELINE-GUIDE.md)** — **신규 프로젝트 진행 시 가장 먼저 읽을 문서**. 5-Phase 플로우·이식 절차·실전 교훈 응축
+- [docs/design/ai-agent-team-master.md](docs/design/ai-agent-team-master.md) — 마스터 설계서 (4112줄, 깊은 이해용)
+- [CLAUDE.md](CLAUDE.md) — Claude Code 작업 규칙 (매 턴 자동 로드)
+- [HANDOFF.md](HANDOFF.md) — 직전 세션 상태·다음 액션
 - [CHANGELOG.md](CHANGELOG.md) — 변경 이력
 
 ## 컨벤션
