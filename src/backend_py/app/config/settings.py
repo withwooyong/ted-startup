@@ -135,6 +135,14 @@ class Settings(BaseSettings):
             "E2E/CI 에서 KIS sandbox rate limit(1분 1회) 회피용. 운영은 반드시 False."
         ),
     )
+    kis_credential_master_key: str = Field(
+        default="",
+        description=(
+            "KIS 실계정 자격증명(app_key/app_secret/account_no) 대칭 암호화 마스터키. "
+            "Fernet `generate_key()` 출력(32 bytes base64). 운영 환경에서는 env var 로 "
+            "반드시 주입, 비어있으면 CredentialCipher 초기화 시 MasterKeyNotConfiguredError."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -90,6 +91,39 @@ class PortfolioTransaction(Base):
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class BrokerageAccountCredential(Base):
+    """KIS 실계정 자격증명 — Fernet 대칭 암호화 후 BYTEA 저장.
+
+    설계: docs/kis-real-account-sync-plan.md § 3.2.
+    - 계좌당 1 레코드 (UNIQUE(account_id))
+    - ON DELETE CASCADE: 계좌 삭제 시 자격증명 자동 제거
+    - 복호화는 `CredentialCipher` 를 주입받은 Repository 에서만 수행
+    """
+
+    __tablename__ = "brokerage_account_credential"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("brokerage_account.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    app_key_cipher: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    app_secret_cipher: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    account_no_cipher: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
 

@@ -1,96 +1,102 @@
 # Session Handoff
 
-> Last updated: 2026-04-21 (KST)
-> Branch: `feature/kis-real-adapter-split` (master 기준 분기, 커밋 전)
-> Latest commit on master: `6ea71fe` — 엑셀 거래내역 import (KIS sync 설계 + PR 1 온보딩 1단계) (#12)
+> Last updated: 2026-04-21 (KST, 오후)
+> Branch: `feature/kis-credential-cipher` (master 기준 분기, 커밋 전)
+> Latest commit on master: `269651e` — KIS sync PR 2: `kis_rest_real` 어댑터 분기 스캐폴딩 (#13)
 
 ## Current Status
 
-KIS sync 시리즈 **PR 2 — `kis_rest_real` 어댑터 분기 스캐폴딩** 구현·리뷰·검증 완료. 외부 호출 0 제약 준수, credential 저장소(PR 3) 미연결 상태에서 분기 구조만 선제 구축. `KisEnvironment(StrEnum)`, `KisCredentials` DTO (`__repr__` 마스킹), `KisClient.__init__` 환경별 URL/TR_ID 분기, 새 예외 `KisCredentialsNotWiredError` → HTTP 501 매핑. 리뷰 HIGH 1 + 실효 MEDIUM 2 반영. 로컬 백엔드 **204/204 PASS** (197 → +7), mypy strict 0, ruff 0. 커밋 → 푸시 → PR 사용자 승인 대기.
+KIS sync 시리즈 **PR 3 — `brokerage_account_credential` + Fernet 암호화** 구현·리뷰·검증 완료. 신규 패키지 `app/security/` + `CredentialCipher` + ORM 모델 + migration 008 + Repository + DI + conftest fixture + 9건 테스트. 리뷰 CRITICAL 1 + HIGH 2 + MEDIUM 2 전부 반영. 로컬 백엔드 **213/213 PASS** (204 → +9), mypy strict 0, ruff 0. 외부 호출 여전히 0. 커밋 → 푸시 → PR 사용자 승인 대기.
 
 ## Completed This Session
 
 | # | 작업 | 파일 |
 |---|------|------|
-| 1 | `KisEnvironment(StrEnum)` + `KisCredentials` DTO (마스킹 `__repr__`) + `_REAL_BASE_URL` + `_TR_ID_BALANCE` 매핑 | `kis_client.py` |
-| 2 | `KisClient.__init__(environment, credentials)` 분기 — MOCK 하위호환 100%, REAL 은 credentials 필수 | `kis_client.py` |
-| 3 | `fetch_balance` TR_ID 환경별 분기 (`VTTC8434R` / `TTTC8434R`) | `kis_client.py` |
-| 4 | `VALID_CONNECTION_TYPES` 확장 + 마이그레이션 `007_kis_real_connection` | `portfolio.py`, migration |
-| 5 | `KisCredentialsNotWiredError` 신규 예외 + use case `kis_rest_real` 분기 | `portfolio_service.py` |
-| 6 | 라우터 `KisCredentialsNotWiredError` → HTTP 501 매핑 | `portfolio.py` router |
-| 7 | 백엔드 테스트 7건 추가 (REAL URL/TR_ID + credentials 필수 + MOCK 주입 + `__repr__` 마스킹 + use case 2건 + 동기화 assert) | `test_kis_client.py`, `test_portfolio.py` |
+| 1 | `cryptography>=43` 의존성 + `Settings.kis_credential_master_key` env var | `pyproject.toml`, `settings.py` |
+| 2 | `app/security/` 신규 패키지 + `CredentialCipher` Fernet 래퍼 | `app/security/__init__.py`, `credential_cipher.py` |
+| 3 | 예외 계층: `MasterKeyNotConfiguredError`, `UnknownKeyVersionError`, `DecryptionFailedError` (InvalidToken 감싸기) | `credential_cipher.py` |
+| 4 | ORM 모델 `BrokerageAccountCredential` (LargeBinary × 3 + key_version + FK CASCADE) | `models/portfolio.py` |
+| 5 | Alembic migration `008_brokerage_credential` (CREATE + downgrade DO$$ 가드) | `migrations/versions/` |
+| 6 | `BrokerageAccountCredentialRepository` (upsert/get_decrypted/delete, cipher 주입) | `repositories/brokerage_credential.py` |
+| 7 | DI `get_credential_cipher()` lru_cache + conftest 더미 마스터키 fixture + cache_clear | `_deps.py`, `conftest.py` |
+| 8 | 테스트 9건 (cipher 유닛 5 + repo 통합 4) | `tests/test_brokerage_credential.py` |
 
 ## In Progress / Pending
 
 - 커밋 + 푸시 + PR 생성 사용자 승인 대기.
-- 이전 세션 handoff 작성물 (`CHANGELOG.md`/`HANDOFF.md`) 은 본 커밋에 자연스럽게 포함 — 전이 내용이 PR 2 와 일치.
-- 머지 후 PR 3 (brokerage_account_credential + Fernet 암호화) 설계 진입.
+- 머지 후 PR 4 (실계정 등록 API + Settings UI, 2단계 온보딩) 설계 진입.
 
 ## Key Decisions Made
 
-- **MOCK `base_url` 을 Settings 대신 상수 직접 사용** (리뷰 HIGH 반영): 기존에는 `Settings.kis_base_url_mock != _MOCK_BASE_URL` 인 경우 예외 발생이라 방어 의도는 옳지만 Settings override 에 취약. `self._base_url = _MOCK_BASE_URL` 로 직접 할당하면 Settings 커스터마이징으로 실 URL 을 mock 으로 위장하는 경로를 원천 차단.
-- **`KisCredentialsNotWiredError` → HTTP 501 Not Implemented** (리뷰 MEDIUM #2 반영): 503 (Service Unavailable) 은 일시 과부하·점검을 의미하고 `Retry-After` 를 암시. 본 케이스는 "기능 자체가 아직 구현 안 됨" 이라 501 이 의미론상 정확.
-- **`VALID_CONNECTION_TYPES` ↔ DB CHECK 동기화 assert** (리뷰 MEDIUM #3 반영): Python 튜플과 migration SQL 리터럴 불일치 시 런타임 CheckViolation 만 드러남 → 간단한 unit assert 로 빌드 시점에 잡히게.
-- **Alembic revision ID VARCHAR(32) 제약 발견**: 최초 `007_portfolio_kis_real_connection` (33자) 로 명명했으나 `alembic_version.version_num` 이 VARCHAR(32) 라 INSERT 실패 → `StringDataRightTruncation`. `007_kis_real_connection` (23자) 로 단축. 향후 revision ID 는 32자 이하 유지.
-- **RegisterAccountUseCase 는 그대로**: `environment='real'` 은 여전히 UC 단에서 차단. PR 4 (실계정 등록 API + UI) 에서 완화 예정. 본 PR 2 테스트는 Repository 직접 INSERT 로 `kis_rest_real` 계좌 생성 — 의도적 선택.
-- **MOCK in-memory transport 자동 주입은 MOCK 에만 한정**: `if transport is None and environment is KisEnvironment.MOCK and s.kis_use_in_memory_mock`. REAL 환경에서 실수로 in-memory 가 붙어 실 URL 로 호출 누락되는 혼선 차단.
+- **`app/security/` 신규 패키지로 분리**: 최초 `app/application/service/credential_cipher.py` 에 두니 `service/__init__.py` 가 `BacktestEngineService` → repositories 체인을 유발해 circular import 발생. `app/security/` 에 도메인 중립 보안 프리미티브를 두고 `__init__.py` 는 선제 import 0 으로 유지해 순환 방지.
+- **`DecryptionFailedError` 로 `InvalidToken` 감싸기** (리뷰 HIGH 반영): 외부 `cryptography.InvalidToken` 을 그대로 전파하면 (a) import 세부사항 누출 (b) 스택 트레이스에 바이트/plaintext 노출 가능. 예외 계층을 닫고 메시지에 key_version 만 포함.
+- **`CursorResult` 타입 캐스트** (리뷰 CRITICAL 반영): `AsyncSession.execute(delete(...))` 런타임은 `CursorResult` 지만 mypy 는 `Result[Any]` 로 좁혀 `.rowcount` 접근이 type-error. `# type: ignore[assignment]` + 명시 캐스트로 해결.
+- **downgrade DO$$ 가드** (리뷰 MEDIUM 반영): 운영에서 실수로 `alembic downgrade` 돌리면 실 자격증명 전체가 복구 불가 상태로 사라지는 시나리오 방어. `SELECT COUNT(*)` > 0 이면 `RAISE EXCEPTION`.
+- **`get_credential_cipher` 싱글톤 + conftest cache_clear** (리뷰 MEDIUM 반영): `lru_cache(maxsize=1)` 는 테스트 간 cipher 인스턴스가 공유되므로 `get_credential_cipher.cache_clear()` 를 `apply_migrations` 픽스처에 추가해 env var 주입 타이밍과 동기화.
+- **ORM 에 `relationship()` 추가 안 함** (의도적): `BrokerageAccount.credential` 형태 관계 프로퍼티 없이 Repository 경유만 허용. 자격증명에 lazy-load 로 부주의한 접근이 생기는 경로 차단.
 
 ## Known Issues
 
-- **리뷰 MEDIUM #1 (`__str__` 명시 미수용)**: `dataclass(frozen=True)` 의 기본 `__str__` 이 `__repr__` 에 위임하므로 현재 안전하지만 명시 보증 없음. ROI 낮아 기록만.
-- **리뷰 MEDIUM #4 (downgrade DO$$ 체크 미수용)**: migration 주석 경고는 있으나 `IF EXISTS (SELECT 1 FROM brokerage_account WHERE connection_type='kis_rest_real')` 런타임 체크 추가 보류. 실무상 downgrade 가 드물고 PostgreSQL 네이티브 에러 메시지로 충분.
+- **PR 3 범위 밖 기능들**:
+  - 등록 API (`POST /api/admin/brokerage/credentials`) — PR 4 소관
+  - Settings UI 폼 — PR 4
+  - Use case wiring (sync → credential repo 조회 → KisClient REAL 주입) — PR 5
+  - 로깅 마스킹 processor — PR 6
 - **CI 가 ruff/mypy 안 돌림**: 여전히 로컬 검증만. 차기 소규모 PR 후보.
-- **pre-existing F401 (test_services.py)**: 여전히 잔존. 위 CI PR 에 묶어 정리 가능.
-- **실 KIS 엑셀 샘플 부재**: PR 1 의 컬럼 alias 가 실 파일과 어긋나면 보정 필요.
-- **로컬 백엔드 이미지 재빌드 루틴 편입**: 여전히 `/ted-run` Step 3 전 단계 미편입.
+- **pre-existing F401** (`tests/test_services.py`): 여전히 잔존.
+- **실 KIS 엑셀 샘플 부재**: PR 1 컬럼 alias 보정 필요 (아직 blocker 아님).
 - **carry-over**: lending_balance T+1 지연, 218 stock_name 빈, TREND_REVERSAL Infinity 모니터링.
 
 ## Context for Next Session
 
 ### 사용자의 원래 목표 (달성)
 
-KIS sync 설계서 § 5 PR 2 (어댑터 분기) 완결. 본 PR 머지 후 PR 3 (credential 저장소) 로 진입.
+KIS sync 시리즈 § 5 PR 3 (Fernet credential 저장소) 완결. 본 PR 머지 후 PR 4 로 진입.
 
 ### 사용자 선호·제약 (재확인)
 
 - **커밋 메시지 한글 필수** — 준수
 - **push 는 명시 요청 시에만** — 현재 커밋 전, 푸시 대기
-- **설계 승인 루프**: PR 2 상세 설계 제안 → "예" 확인 후 착수. 5개 열린 질문 0건 (설계 문서 최초 작성 시 이미 결정).
-- **리뷰 overcall 판정**: MEDIUM #1·#4 는 ROI 근거로 SKIP. HIGH 는 반드시 반영.
-- **실측 마감**: ruff + mypy + pytest 전부 통과 후 머지.
+- **설계 승인 루프**: PR 3 상세 설계 제안 → "예" 확인 후 착수
+- **리뷰 수용 원칙**: CRITICAL/HIGH 즉시 반영, MEDIUM 은 ROI 판단 후 선택
+- **실측 마감**: ruff + mypy + pytest 전부 통과 후 머지
 
 ### 차기 세션 후보 (우선순위 순)
 
-1. **PR 3: `brokerage_account_credential` + Fernet 암호화** (`docs/kis-real-account-sync-plan.md` § 5 PR 3) — 신규 테이블, Fernet wrapper, CI 더미 마스터키 fixture, 암호화 왕복 테스트. 3~4h.
-2. **CI 에 ruff + mypy strict 추가** — 3~5분 PR. pre-existing F401 정돈 동반 가능.
-3. **PR 4: 실계정 등록 API + Settings UI** (2단계 온보딩) — PR 3 머지 후. 3~4h.
-4. **Python M2 중복 판단 N+1 최적화** (엑셀 import) — 1 commit 소형.
-5. **MEDIUM #4 `setattr` → 명시 setter** (`BacktestResult`) — 30min~1h.
-6. **월요일 07:00 KST 스케줄러 실측** — 관찰만.
+1. **PR 4: 실계정 등록 API + Settings UI** (`docs/kis-real-account-sync-plan.md` § 5 PR 4) — credential CRUD 엔드포인트, Settings 페이지 "실계좌 추가" 섹션, masked view (`••••1234`). 외부 호출 여전히 0. 3~4h.
+2. **CI 에 ruff + mypy strict 추가** — 3~5분 PR. pre-existing F401 정돈 포함 가능.
+3. **PR 5: 실 sync + OAuth 연결** (3단계 온보딩) — credential repo → KisClient REAL 자동 주입. `KisCredentialsNotWiredError` 장벽 제거. 실 KIS sandbox 호출 smoke 테스트 (`@pytest.mark.requires_kis_real_account`).
+4. **PR 6: 로깅 마스킹** — structlog processor 로 `app_key`/`app_secret`/`access_token` 값 자동 치환.
+5. **Python M2 중복 판단 N+1 최적화** (엑셀 import) — 1 commit 소형.
 
 ### 가치있는 발견
 
-1. **리뷰 HIGH 중 "Settings 커스터마이징 유연성 vs 보안 고정"**: 초기 MOCK base_url 체크는 Settings 가 다른 값이면 예외를 던져 "커스터마이징을 막고 실 URL 위장 차단" 의도였지만, 리뷰어는 "커스터마이징 가능한 Settings 를 MOCK 분기에서 검사하는 것 자체가 설계 오점 — 상수 직접 할당이 더 안전" 지적. 수용 시 더 단순 + 더 안전. 방어가 2중인 줄 알았는데 사실은 1중 + 노이즈였음.
-2. **Alembic revision ID VARCHAR(32) 제약**: 처음 겪는 함정. 모든 revision 이름을 32자 이하로 유지해야 한다는 불변을 팀 규칙화 가치 있음. `rev-id` 명명 컨벤션으로 `NNN_subject_with_underscores` (접두·접미 제외 ~25자 여유) 권장.
-3. **501 vs 503 HTTP 의미론**: "아직 구현 안 된 기능" 을 일시 장애 503 으로 두면 클라이언트가 자동 재시도 루프에 빠질 수 있음. 501 은 "재시도 무의미" 를 시그널 — 의미론 정확성이 운영 비용을 좌우.
-4. **StrEnum (Python 3.11+) vs `class X(str, Enum)`**: 같은 동작을 하지만 ruff UP042 가 StrEnum 을 권장. Python 3.12 기준으로는 StrEnum 이 canonical. 향후 enum 은 StrEnum 으로 통일.
-5. **`__repr__` 마스킹만으로 완전 방어 아님**: `logging` 의 `%s` 포맷은 `__str__` 을 호출. `dataclass(frozen=True)` 가 `__str__` 을 `__repr__` 에 위임하는 건 맞지만 의존적 행동이라 테스트로 고정하는 것이 안전.
+1. **순환 import 진단 패턴**: `service/__init__.py` 가 하위 모듈을 eager import 하면 해당 패키지 내 어떤 submodule 을 import 해도 `__init__.py` 가 실행됨. 도메인 중립 유틸 (cipher, logging processor 등) 을 `service/` 에 두지 말고 별도 패키지로 분리하는 규칙 확립. `app/security/` 같은 레이어는 의도적으로 `__init__.py` 를 순수하게 유지.
+2. **`InvalidToken` 래핑의 2중 가치**: (a) import 세부사항을 호출자로부터 숨김 (b) 스택 트레이스 내 bytes/plaintext 노출 차단. 예외는 언제나 라이브러리 경계에서 감싸야 함.
+3. **SQLAlchemy `execute().rowcount` mypy 함정**: `Result` vs `CursorResult` 추론 차이. DELETE/UPDATE 결과에서 rowcount 접근 시 명시 캐스트 + `# type: ignore[assignment]` 필요. 팀 규칙화 가치.
+4. **`lru_cache` DI + 테스트 격리**: `lru_cache(maxsize=1)` 는 프로세스 수명 공유라 테스트에서 env var 주입 타이밍과 cipher 인스턴스 생성 타이밍이 어긋날 수 있음. `cache_clear()` 를 fixture 에 명시하는 게 안전.
+5. **migration downgrade 가드**: `DO $$ PL/pgSQL IF EXISTS ...` 패턴이 운영 실수 방어선. 데이터가 있는 테이블 DROP 을 "데이터 우선 확인" 으로 자연 차단 — `-1` 실수 대비.
 
 ## Files Modified This Session
 
 ```
-7 files changed, ~350 insertions, ~15 deletions (전 커밋 기준)
+10 file changes + 1 신규 패키지 디렉토리
 
- src/backend_py/app/adapter/out/external/kis_client.py                 | (환경 분기·DTO·마스킹 __repr__)
- src/backend_py/app/adapter/out/external/__init__.py                   | (+KisCredentials, KisEnvironment)
- src/backend_py/app/adapter/out/persistence/models/portfolio.py        | (VALID_CONNECTION_TYPES +1)
- src/backend_py/migrations/versions/007_kis_real_connection.py         | (신규 — 23자 revision ID)
- src/backend_py/app/application/service/portfolio_service.py           | (+KisCredentialsNotWiredError, use case 분기)
- src/backend_py/app/adapter/web/routers/portfolio.py                   | (+501 매핑)
- src/backend_py/tests/test_kis_client.py                               | (+5 테스트)
- src/backend_py/tests/test_portfolio.py                                | (+2 테스트)
- CHANGELOG.md                                                          | (+25)
- HANDOFF.md                                                            | (본 산출물)
+ src/backend_py/pyproject.toml                                           | (+cryptography)
+ src/backend_py/uv.lock                                                  | (lock 갱신)
+ src/backend_py/app/config/settings.py                                   | (+kis_credential_master_key)
+ src/backend_py/app/security/__init__.py                                 | (신규)
+ src/backend_py/app/security/credential_cipher.py                        | (신규 ~85 lines)
+ src/backend_py/migrations/versions/008_brokerage_credential.py          | (신규 ~55 lines)
+ src/backend_py/app/adapter/out/persistence/models/portfolio.py          | (+BrokerageAccountCredential ORM)
+ src/backend_py/app/adapter/out/persistence/models/__init__.py           | (+re-export)
+ src/backend_py/app/adapter/out/persistence/repositories/brokerage_credential.py  | (신규 ~90 lines)
+ src/backend_py/app/adapter/out/persistence/repositories/__init__.py     | (+re-export)
+ src/backend_py/app/adapter/web/_deps.py                                 | (+get_credential_cipher)
+ src/backend_py/tests/conftest.py                                        | (+마스터키 fixture + cache_clear)
+ src/backend_py/tests/test_brokerage_credential.py                       | (신규 ~160 lines, 9 테스트)
+ CHANGELOG.md                                                            | (+28)
+ HANDOFF.md                                                              | (본 산출물)
 ```
 
-본 PR 머지 후 PR 3 (Fernet credential 저장소) 진입 권장 — 맥락 따끈, 3~4h 규모, 외부 호출 여전히 0.
+본 PR 머지 후 PR 4 (실계정 등록 API + UI) 진입 권장 — 맥락 따끈, 3~4h 규모, 외부 호출 여전히 0.

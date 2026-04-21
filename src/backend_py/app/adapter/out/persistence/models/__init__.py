@@ -18,6 +18,7 @@ from app.adapter.out.persistence.models.lending_balance import LendingBalance
 from app.adapter.out.persistence.models.notification_preference import NotificationPreference
 from app.adapter.out.persistence.models.portfolio import (
     BrokerageAccount,
+    BrokerageAccountCredential,
     PortfolioHolding,
     PortfolioSnapshot,
     PortfolioTransaction,
@@ -32,6 +33,7 @@ __all__ = [
     "BacktestResult",
     "BatchJobStatus",
     "BrokerageAccount",
+    "BrokerageAccountCredential",
     "DartCorpMapping",
     "LendingBalance",
     "MarketType",
