@@ -25,3 +25,6 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local overrides (커밋된 settings.json 의 개인 커스터마이징용)
+.claude/settings.local.json
