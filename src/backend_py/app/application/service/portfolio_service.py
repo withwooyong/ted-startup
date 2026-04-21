@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -18,7 +19,12 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.external import KisClient, KisClientError, KisCredentials
+from app.adapter.out.external import (
+    KisClient,
+    KisClientError,
+    KisCredentials,
+    KisHoldingRow,
+)
 from app.adapter.out.persistence.models import (
     BrokerageAccount,
     PortfolioHolding,
@@ -45,7 +51,7 @@ from app.adapter.out.persistence.repositories import (
     StockRepository,
 )
 from app.adapter.out.persistence.repositories.brokerage_credential import (
-    MaskedCredentialView,  # noqa: F401 — re-export for router imports
+    MaskedCredentialView as MaskedCredentialView,  # explicit re-export
 )
 from app.security.credential_cipher import CredentialCipher
 
@@ -87,21 +93,21 @@ class SyncError(PortfolioError):
     """외부 API 동기화 중 오류(업스트림 장애 포함)."""
 
 
-class KisCredentialsNotWiredError(PortfolioError):
-    """실 KIS 자격증명 저장소(PR 3) 가 아직 연결되지 않음 — 임시 장벽.
-
-    PR 2 는 `kis_rest_real` 분기 스캐폴딩만 — 이 PR 에서 실 호출이 발생하지 않도록
-    명시적 예외를 던진다. PR 3 에서 `brokerage_account_credential` 조회 경로가
-    연결되면 이 예외는 제거되고 정상 실 sync 로 진입.
-    """
-
-
 class CredentialAlreadyExistsError(PortfolioError):
     """해당 계좌에 이미 credential 이 등록돼 있음. POST → 409 로 매핑."""
 
 
 class CredentialNotFoundError(PortfolioError):
-    """해당 계좌에 credential 이 없음. PUT·GET·DELETE → 404 로 매핑."""
+    """해당 계좌에 credential 이 없음. PUT·GET·DELETE·sync·test-connection → 404 로 매핑."""
+
+
+# ---------- Type aliases ----------
+
+
+# 실 KIS 호출용 KisClient 팩토리 — credential 을 받아 REAL 환경 인스턴스를 생성.
+# 각 요청마다 새 클라이언트를 만들어야 한다 (계좌마다 credential 이 다르므로).
+# 테스트는 dependency_override 로 MockTransport 주입한 factory 로 치환.
+KisRealClientFactory = Callable[[KisCredentials], KisClient]
 
 
 # ---------- DTOs ----------
@@ -155,6 +161,15 @@ class SyncResult:
 
 
 @dataclass(slots=True)
+class TestConnectionResult:
+    """실 KIS 연결 테스트 결과 — OAuth 토큰 발급 성공 여부."""
+
+    account_id: int
+    environment: str
+    ok: bool
+
+
+@dataclass(slots=True)
 class AlignedSignal:
     signal_date: date
     signal_type: str
@@ -183,6 +198,32 @@ class SignalAlignmentReport:
     total_holdings: int
     aligned_holdings: int
     items: list[AlignedHolding]
+
+
+# ---------- Shared helpers ----------
+
+
+async def _ensure_kis_real_account(
+    account_repo: BrokerageAccountRepository, account_id: int
+) -> BrokerageAccount:
+    """credential 등록·조회·연결테스트·실 sync 공통 전처리.
+
+    계좌 존재 + `connection_type='kis_rest_real'` + `environment='real'` 보장.
+    각 조건마다 명확한 도메인 예외로 구분해 router 에서 HTTP 의미론을 맞출 수 있게.
+    """
+    account = await account_repo.get(account_id)
+    if account is None:
+        raise AccountNotFoundError(f"account_id={account_id} 없음")
+    if account.connection_type != "kis_rest_real":
+        raise UnsupportedConnectionError(
+            f"실계정 전용 기능 — connection_type='kis_rest_real' 필요 "
+            f"(현재 {account.connection_type})"
+        )
+    if account.environment != "real":
+        raise InvalidRealEnvironmentError(
+            "kis_rest_real 계좌는 environment='real' 필수"
+        )
+    return account
 
 
 # ---------- UseCases ----------
@@ -553,20 +594,30 @@ class SignalAlignmentUseCase:
 
 
 class SyncPortfolioFromKisUseCase:
-    """KIS 모의 잔고 → portfolio_holding 직접 동기화.
+    """KIS 잔고 → portfolio_holding 직접 동기화. mock + real 2 환경 지원.
 
-    - connection_type='kis_rest_mock' 계좌만 허용
-    - KIS 잔고 응답은 종목별 (수량, 평단가) 스냅샷 → 거래 이력 재구성 불가
-    - 따라서 holding 을 직접 upsert: 수량/평단가를 KIS 값으로 덮어쓰기
-    - 신규 종목은 stock 마스터에 `manual` market_type 으로 등록 (실제 시장 구분은
-      P13 DART 또는 후속 보강)
+    - connection_type='kis_rest_mock': 주입된 프로세스 공유 `kis_client` 사용 (MOCK).
+    - connection_type='kis_rest_real': credential_repo 에서 Fernet 복호화 →
+      real_client_factory 로 요청 스코프 KisClient(REAL) 생성 → async with 로 fetch_balance.
+    - KIS 잔고 응답은 종목별 (수량, 평단가) 스냅샷 → 거래 이력 재구성 불가.
+      따라서 holding 을 직접 upsert: 수량/평단가를 KIS 값으로 덮어쓰기.
+    - 신규 종목은 stock 마스터에 KOSPI 기본값으로 등록 (실제 시장 구분은 DART 후속 보강).
     """
 
     DEFAULT_MARKET_TYPE = "KOSPI"  # KIS 는 시장구분을 반환하지 않음 — 기본값
 
-    def __init__(self, session: AsyncSession, *, kis_client: KisClient) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        kis_client: KisClient | None = None,
+        credential_repo: BrokerageAccountCredentialRepository | None = None,
+        real_client_factory: KisRealClientFactory | None = None,
+    ) -> None:
         self._session = session
         self._kis = kis_client
+        self._credential_repo = credential_repo
+        self._real_client_factory = real_client_factory
         self._account_repo = BrokerageAccountRepository(session)
         self._holding_repo = PortfolioHoldingRepository(session)
         self._stock_repo = StockRepository(session)
@@ -580,28 +631,14 @@ class SyncPortfolioFromKisUseCase:
                 f"connection_type={account.connection_type} 는 동기화 비지원"
             )
 
+        # connection_type × environment 조합 검증을 분기 진입 전에 수행. 공통 규칙은
+        # `_ensure_kis_real_account` 와 `_fetch_balance_mock` 에 집중돼 있고, execute
+        # 에서는 호출만 위임 — 검증 책임이 여러 곳에 퍼지는 것을 방지.
         if account.connection_type == "kis_rest_real":
-            # 실 계좌는 environment='real' 필수. 매칭이 틀리면 운영 실수 방지 차원에서 차단.
-            if account.environment != "real":
-                raise InvalidRealEnvironmentError(
-                    "kis_rest_real 계좌는 environment='real' 필수"
-                )
-            # PR 3 이후 Fernet 저장소에서 credential 조회 → KisClient(REAL, credentials) 생성.
-            # 본 PR 2 는 분기 스캐폴딩만 — 실 호출 경로는 명시적 예외로 봉쇄.
-            raise KisCredentialsNotWiredError(
-                "실 KIS credential 저장소(PR 3) 가 아직 연결되지 않음"
-            )
-
-        # 이하 기존 kis_rest_mock 경로 — 100% 회귀 없음.
-        if account.environment != "mock":
-            raise InvalidRealEnvironmentError(
-                "kis_rest_mock 계좌는 environment='mock' 필수"
-            )
-
-        try:
-            rows = await self._kis.fetch_balance()
-        except KisClientError as exc:
-            raise SyncError(f"KIS 잔고 조회 실패: {exc}") from exc
+            await _ensure_kis_real_account(self._account_repo, account_id)
+            rows = await self._fetch_balance_real(account_id)
+        else:  # kis_rest_mock
+            rows = await self._fetch_balance_mock(account.environment)
 
         today = asof or date.today()
         created = 0
@@ -656,6 +693,88 @@ class SyncPortfolioFromKisUseCase:
             updated_count=updated,
             unchanged_count=unchanged,
             stock_created_count=stock_created,
+        )
+
+    async def _fetch_balance_real(self, account_id: int) -> list[KisHoldingRow]:
+        """kis_rest_real 분기 — DB credential 복호화 후 요청 스코프 REAL 클라이언트로 호출.
+
+        계좌 environment='real' 검증은 execute() 진입 시 `_ensure_kis_real_account` 가
+        이미 수행 — 여기선 credential 조회·외부 호출에만 집중.
+        """
+        if self._credential_repo is None or self._real_client_factory is None:
+            # 호출자가 REAL 경로용 DI 를 주입하지 않았음. 라우터/테스트 배선 오류.
+            raise RuntimeError(
+                "kis_rest_real 동기화는 credential_repo + real_client_factory 주입 필수"
+            )
+        credentials = await self._credential_repo.get_decrypted(account_id)
+        if credentials is None:
+            raise CredentialNotFoundError(
+                f"account_id={account_id} credential 미등록 — Settings 에서 등록 후 재시도"
+            )
+        try:
+            async with self._real_client_factory(credentials) as client:
+                return await client.fetch_balance()
+        except KisClientError as exc:
+            raise SyncError(f"KIS 실계좌 잔고 조회 실패: {exc}") from exc
+
+    async def _fetch_balance_mock(self, environment: str) -> list[KisHoldingRow]:
+        """kis_rest_mock 분기 — 주입된 프로세스 공유 MOCK 클라이언트 사용."""
+        if environment != "mock":
+            raise InvalidRealEnvironmentError(
+                "kis_rest_mock 계좌는 environment='mock' 필수"
+            )
+        if self._kis is None:
+            raise RuntimeError("kis_rest_mock 동기화는 kis_client 주입 필수")
+        try:
+            return await self._kis.fetch_balance()
+        except KisClientError as exc:
+            raise SyncError(f"KIS 잔고 조회 실패: {exc}") from exc
+
+
+# ---------- PR 5: 연결 테스트 (3단계 온보딩 1단계) ----------
+
+
+class TestKisConnectionUseCase:
+    """실 KIS 연결 테스트 — OAuth 토큰 발급만 시도하는 dry-run.
+
+    자격증명 등록 직후 "정말 연결되는가" 를 사용자가 잔고 변경 없이 확인할 수 있게 함.
+    - 대상 계좌: `kis_rest_real` + `environment='real'` + credential 등록됨
+    - 호출: `/oauth2/tokenP` 1회. 잔고 API 는 호출하지 않음
+    - 실패: `SyncError` (KIS 토큰 발급 실패) 또는 `CredentialNotFoundError`
+
+    pytest 가 "Test*" 접두로 시작하는 클래스를 자동 수집 대상으로 판단해 경고를 내므로
+    `__test__ = False` 로 명시 — 이 클래스는 도메인 UseCase 지 pytest 테스트가 아님.
+    """
+
+    __test__ = False  # pytest collection 제외
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        cipher: CredentialCipher,
+        real_client_factory: KisRealClientFactory,
+    ) -> None:
+        self._session = session
+        self._account_repo = BrokerageAccountRepository(session)
+        self._cred_repo = BrokerageAccountCredentialRepository(session, cipher)
+        self._factory = real_client_factory
+
+    async def execute(self, *, account_id: int) -> TestConnectionResult:
+        await _ensure_kis_real_account(self._account_repo, account_id)
+        credentials = await self._cred_repo.get_decrypted(account_id)
+        if credentials is None:
+            raise CredentialNotFoundError(
+                f"account_id={account_id} credential 미등록 — Settings 에서 등록 필요"
+            )
+        try:
+            async with self._factory(credentials) as client:
+                await client.test_connection()
+        except KisClientError as exc:
+            # 토큰 발급 실패 = KIS 업스트림 오류. 라우터에서 502 로 변환.
+            raise SyncError(f"KIS 토큰 발급 실패: {exc}") from exc
+        return TestConnectionResult(
+            account_id=account_id, environment="real", ok=True
         )
 
 
@@ -741,17 +860,9 @@ class BrokerageCredentialUseCase:
             )
 
     async def _ensure_real_account(self, account_id: int) -> BrokerageAccount:
-        """대상 계좌 존재 + `kis_rest_real` + `environment='real'` 보장."""
-        account = await self._account_repo.get(account_id)
-        if account is None:
-            raise AccountNotFoundError(f"account_id={account_id} 없음")
-        if account.connection_type != "kis_rest_real":
-            raise UnsupportedConnectionError(
-                f"credential 은 connection_type='kis_rest_real' 만 지원 "
-                f"(현재 {account.connection_type})"
-            )
-        if account.environment != "real":
-            raise InvalidRealEnvironmentError(
-                "kis_rest_real 계좌는 environment='real' 필수"
-            )
-        return account
+        """대상 계좌 존재 + `kis_rest_real` + `environment='real'` 보장.
+
+        공통 헬퍼 `_ensure_kis_real_account` 에 위임해 `TestKisConnectionUseCase`·
+        `SyncPortfolioFromKisUseCase` 와 검증 규칙을 1곳에서 관리.
+        """
+        return await _ensure_kis_real_account(self._account_repo, account_id)

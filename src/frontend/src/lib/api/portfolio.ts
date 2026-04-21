@@ -12,6 +12,7 @@ import type {
   SignalAlignmentReport,
   Snapshot,
   SyncResult,
+  TestConnectionResponse,
   Transaction,
   TransactionCreateRequest,
 } from '@/types/portfolio';
@@ -129,6 +130,15 @@ export async function replaceCredential(
   return call<BrokerageCredentialResponse>(
     `/portfolio/accounts/${accountId}/credentials`,
     { method: 'PUT', body: JSON.stringify(body) },
+  );
+}
+
+export async function testKisConnection(
+  accountId: number,
+): Promise<TestConnectionResponse> {
+  return call<TestConnectionResponse>(
+    `/portfolio/accounts/${accountId}/test-connection`,
+    { method: 'POST' },
   );
 }
 

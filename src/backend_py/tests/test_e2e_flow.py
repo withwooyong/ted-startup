@@ -6,9 +6,9 @@ Phase 7 목표인 "collect 결과가 실제로 signals 엔드포인트에 노출
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date
 from decimal import Decimal
-from typing import AsyncIterator
 
 import httpx
 import pytest
@@ -22,7 +22,8 @@ from app.adapter.out.external._records import (
     ShortSellingRow,
     StockPriceRow,
 )
-from app.adapter.web._deps import get_krx_client, get_session as prod_get_session
+from app.adapter.web._deps import get_krx_client
+from app.adapter.web._deps import get_session as prod_get_session
 from app.config.settings import get_settings
 from app.main import create_app
 

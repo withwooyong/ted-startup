@@ -7,9 +7,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import date, timedelta
-from decimal import Decimal
-from typing import AsyncIterator
 
 import httpx
 import pytest
@@ -19,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.ai import OpenAIProvider, OpenAIProviderError
 from app.adapter.out.external import DartClient
-from app.adapter.out.persistence.models import Signal, SignalType, Stock, StockPrice
+from app.adapter.out.persistence.models import Signal, SignalType, Stock
 from app.adapter.out.persistence.repositories import (
     DartCorpMappingRepository,
     SignalRepository,
@@ -52,7 +51,6 @@ from app.application.service.analysis_report_service import (
 )
 from app.config.settings import Settings, get_settings
 from app.main import create_app
-
 
 # -----------------------------------------------------------------------------
 # Helpers / Fakes

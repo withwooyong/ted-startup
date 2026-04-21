@@ -7,7 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-21] KIS sync PR 4: 실계정 등록 API + Settings UI (커밋 대기)
+## [2026-04-21] KIS sync PR 5: 연결 테스트 + 실 sync wire (커밋 대기)
+
+1-PR 세션: KIS sync 시리즈 5/6. 본 PR 머지부터 **운영 코드에서 실 KIS 외부 호출이 가능** — CI 는 `@pytest.mark.requires_kis_real_account` 마커 + pyproject `addopts` 로 smoke 1건을 skip, 나머지 real 경로 테스트 11건은 `httpx.MockTransport` 로 실 URL 차단. 백엔드 테스트 **227 → 239** (+12, smoke 1 deselected). 리뷰 HIGH 6건 중 4건 수용, 2건 구조적(Hexagonal 위반·Optional 파라미터 런타임 퇴화) defer.
+
+### Added
+
+- **KIS sync PR 5 — 연결 테스트 + 실 sync wire**: 설계 문서 § 3.4 (3단계 온보딩) + § 5 PR 5.
+  - **`KisClient.test_connection()`** (`kis_client.py`): OAuth 토큰 발급만 시도하는 dry-run. 잔고 조회 API 호출 안 함 → 계좌 상태 변경 0. 부수 효과: 토큰 캐시에 저장돼 이어지는 `fetch_balance()` 는 재발급 skip. 재시도 없음 ("빠른 1회 검증" 의미).
+  - **`TestKisConnectionUseCase`** (`portfolio_service.py`): `__test__ = False` (pytest auto-collection 제외). credential decrypt → `async with factory(credentials) as client: await client.test_connection()`. 토큰 실패는 `SyncError` 로 감싸 router 가 502 로 변환.
+  - **`SyncPortfolioFromKisUseCase` wire**: `credential_repo` + `real_client_factory` 주입받아 `kis_rest_real` 분기 실구현. `_fetch_balance_real` / `_fetch_balance_mock` 서브 메서드로 분리. `KisCredentialsNotWiredError` 예외 클래스 삭제.
+  - **`_ensure_kis_real_account` 공통 헬퍼**: 계좌 존재 + `connection_type='kis_rest_real'` + `environment='real'` 검증을 한 곳에 집중. `BrokerageCredentialUseCase` · `TestKisConnectionUseCase` · `SyncPortfolioFromKisUseCase` 모두 이 헬퍼 위임.
+  - **`KisRealClientFactory`** 타입 별칭 + **`get_kis_real_client_factory()`** DI (`_deps.py`): 요청 스코프 factory. 각 요청이 credential 별 고유 `KisClient(REAL)` 를 생성, `async with` 로 httpx 커넥션 풀 정리. 테스트는 `dependency_overrides` 로 MockTransport 주입한 factory 로 치환.
+  - **HTTP 엔드포인트** `POST /api/portfolio/accounts/{id}/test-connection` → `{account_id, environment, ok}` (200) / 404 (계좌·credential 미등록) / 400 (비 `kis_rest_real`) / 403 (env 불일치) / 502 (KIS 토큰 발급 실패) / 500 (cipher 실패). 기존 `/sync` 는 real 분기 정상 동작 + credential 미등록 시 404.
+  - **`_credential_error_to_http` 공통 매퍼**: sync + test-connection + credential CRUD 6개 엔드포인트의 예외 핸들러를 단일 함수로 통합 (`SyncError` → 502 포함). 각 엔드포인트의 try/except 블록이 2줄로 간소화.
+  - **pytest marker `requires_kis_real_account`** (`pyproject.toml`): `addopts` 에 `-m "not requires_kis_real_account"` 로 기본 skip, 로컬 개발자는 `pytest -m requires_kis_real_account` 로 오버라이드해 실 KIS 검증. `KIS_REAL_APP_KEY`/`SECRET`/`ACCOUNT_NO` env 가 비어있으면 smoke 내부에서 `pytest.skip()`.
+  - **FE `RealAccountSection`**: 각 credential 등록 계좌 행에 **"연결 테스트"** 버튼 추가 (민트/그린 `#65D6A1`). 502 응답은 중립 메시지 ("KIS 업스트림 오류. 잠시 후 재시도하거나 자격증명을 확인해주세요").
+  - **FE Portfolio 페이지**: sync 버튼이 `kis_rest_real` 계좌에서도 활성화 (기존은 `kis_rest_mock` 만). 버튼 라벨이 connection_type 에 따라 "KIS 실계좌 동기화" / "KIS 모의 동기화" 분기. 404 응답에 `kis_rest_real` 조합이면 "자격증명 미등록 — 설정에서 등록" 맥락 배너 표시.
+  - **FE API 클라이언트**: `testKisConnection(accountId)` 추가. `TestConnectionResponse` 타입은 `{ok: true, environment: 'real'}` 리터럴로 좁혀 성공 경로를 타입 계약으로 강제.
+  - **테스트 12건 추가** (백엔드 **227 → 239**, smoke 1 deselected):
+    - use case 4건 (토큰 성공·credential 미등록·비 real 계좌 거부·토큰 401 → SyncError)
+    - real sync 2건 (MockTransport 로 fetch_balance · upstream 500)
+    - HTTP 엔드포인트 5건 (test-connection 성공·404·502·400 + sync real 성공·404)
+    - smoke 1건 (`@pytest.mark.requires_kis_real_account`, env 없으면 skip, CI deselected)
+
+### Process Notes
+
+- **리뷰 HIGH 4건 수용**: `_raise_for_credential_error` → `_credential_error_to_http` (raise 아닌 return 의미 반영) + `SyncError` 매퍼 포함, `SyncPortfolioFromKisUseCase.execute` 에서 `_ensure_kis_real_account` 통합 (검증 책임 집중), `_credential_response(view: object)` → `MaskedCredentialView` 로 타입 narrow, `TestConnectionResponse.ok: boolean` → `true` 리터럴 + `environment: 'real'` 리터럴 (dead code 제거).
+- **리뷰 MEDIUM/LOW 수용**: `test_connection()` docstring 보강 (부수 효과 + 재시도 없음 명시), 포트폴리오 sync 404 분기 (credential 미등록 맥락 메시지), 502 메시지 중립화, `delete_credential` 불필요 `return None` 제거, pyproject addopts 주석 보강.
+- **Defer (사유 `HANDOFF.md` 기록)**: Hexagonal 레이어 위반 (`MaskedCredentialView` re-export — 구조 리팩터 별도 PR), `SyncPortfolioFromKisUseCase.__init__` Optional 파라미터 RuntimeError 퇴화 (mock/real UseCase 분리 필요 — 도메인 재설계), `KisAuthError` 별도 HTTP 매핑 (4xx vs 5xx — KIS 응답 status 검증 테스트 필요), `asyncio_mode=auto` + `@pytest.mark.asyncio` 중복 (프로젝트 전반 마이그레이션), `actionPending` 다른 계좌 disabled 이유 시각화 · `window.prompt` · `title` vs `sr-only` (UX 폴리싱 단계).
+
+---
+
+## [2026-04-21] KIS sync PR 4: 실계정 등록 API + Settings UI (`d470a73`, PR #15)
 
 1-PR 세션: KIS sync 시리즈 4/6. 외부 호출 0 유지 — credential 등록·마스킹·삭제 CRUD 만, 실 KIS 호출은 PR 5. 백엔드 테스트 **213 → 227** (+14), Next.js build PASS, mypy strict 0 (내 파일), ruff 0. 리뷰 HIGH 6건 전부 반영.
 

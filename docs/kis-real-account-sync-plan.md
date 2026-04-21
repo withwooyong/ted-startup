@@ -1,10 +1,10 @@
 # KIS 실계정 sync 설계안
 
 - **작성일**: 2026-04-20
-- **최종 수정**: 2026-04-21 (PR 1·2·3·4 구현 완료 — PR 4 커밋 대기)
-- **상태**: PR 1~3 머지 완료 (3db778f). PR 4 (실계정 등록 API + UI) 구현·검증 완료, 커밋/PR 대기
+- **최종 수정**: 2026-04-21 (PR 1~5 구현 완료 — PR 5 커밋 대기)
+- **상태**: PR 1~4 머지 완료 (d470a73). PR 5 (연결 테스트 + 실 sync wire) 구현·검증 완료, 커밋/PR 대기
 - **범위**: 한국투자증권(KIS) 실계좌 REST API 연동으로 `portfolio_holding` 자동 동기화 + 엑셀 거래내역 import
-- **전제**: 현재 `kis_rest_mock` + `kis_rest_real` 분기 (PR 2), credential 저장소 (PR 3), 등록 API + UI (PR 4) 완료. 실 호출은 PR 5 까지 `KisCredentialsNotWiredError` 로 차단.
+- **전제**: PR 5 머지부터 운영 코드에서 실 KIS 외부 호출 가능. CI 는 smoke 마커 skip + `httpx.MockTransport` 로 실 URL 차단 유지.
 
 ---
 
@@ -173,8 +173,8 @@ class SyncPortfolioFromKisUseCase:
 | 1 | 엑셀 거래내역 import (1단계 온보딩) | `openpyxl` 파서, 컬럼 매핑 규칙, `portfolio_transaction` 에 `source='excel_import'` 로 적재. 증권사별 엑셀 포맷 차이는 1~2종만 (KIS 국내주식 체결내역 우선). API·UI 포함 | — | ✅ #12 (`6ea71fe`) |
 | 2 | `kis_rest_real` 어댑터 분기 | KisClient `environment` 파라미터, `kis_rest_real` connection_type enum, use case 분기. In-memory mock 통합 테스트로 real URL/TR_ID 검증 (외부 호출 0) | — | ✅ #13 (`269651e`) |
 | 3 | `brokerage_account_credential` 스키마 + Fernet 암호화 | Alembic 마이그레이션, Credential repository, Fernet wrapper, CI fixture (더미 마스터키 주입), 암호화 왕복 테스트 | PR 2 | ✅ #14 (`3db778f`) |
-| 4 | 실계정 등록 API + Settings UI (2단계 온보딩) | POST/PUT/GET/DELETE credential 엔드포인트, Settings 페이지 "실계좌 연동" 섹션, 비례 길이 마스킹 (`••…1234`), 외부 호출 여전히 0 | PR 3 | ✅ 구현 완료 (커밋 대기) |
-| 5 | "연결 테스트" + 실 sync (3단계 온보딩) | 토큰 발급 테스트 엔드포인트, Use case 분기 실 호출. 로컬 `@pytest.mark.requires_kis_real_account` smoke | PR 4 | ⬜ 대기 |
+| 4 | 실계정 등록 API + Settings UI (2단계 온보딩) | POST/PUT/GET/DELETE credential 엔드포인트, Settings 페이지 "실계좌 연동" 섹션, 비례 길이 마스킹 (`••…1234`), 외부 호출 여전히 0 | PR 3 | ✅ 머지 (`d470a73`, #15) |
+| 5 | "연결 테스트" + 실 sync (3단계 온보딩) | `POST /test-connection` (토큰만 dry-run), `SyncPortfolioFromKisUseCase` 에 credential_repo + real_client_factory 주입, `@pytest.mark.requires_kis_real_account` smoke 마커 | PR 4 | ✅ 구현 완료 (커밋 대기) |
 | 6 | 로깅 마스킹 + 문자열 scrub | structlog processor 추가, 기존 로그 호출 점검, token revoke 한계 README 명시 (결정 #4 반영) | PR 5 | ⬜ 대기 |
 
 **예상 작업 시간 (1인 기준):**
@@ -218,9 +218,9 @@ class SyncPortfolioFromKisUseCase:
 2. ~~PR 1 (엑셀 import)~~ ✅ **완료 (2026-04-20, #12)**
 3. ~~PR 2 (`kis_rest_real` 어댑터 분기)~~ ✅ **완료 (2026-04-21, #13)**
 4. ~~PR 3 (`brokerage_account_credential` + Fernet)~~ ✅ **완료 (2026-04-21, #14)**
-5. ~~PR 4 (실계정 등록 API + Settings UI)~~ ✅ **구현 완료 (2026-04-21, 커밋 대기)** — `POST/PUT/GET/DELETE /api/portfolio/accounts/{id}/credentials`, Settings 페이지 "실계좌 연동" 섹션, 비례 길이 마스킹 뷰, `CredentialCipherError` 500 변환, 외부 호출 여전히 0. 백엔드 테스트 213 → 227 (+14).
-6. **PR 5 (연결 테스트 + 실 sync, 3단계 온보딩) 착수 대기** — 토큰 발급 테스트 엔드포인트, `SyncPortfolioFromKisUseCase` 에 credential repo wire, `@pytest.mark.requires_kis_real_account` smoke.
-7. 이후 PR 6 (로깅 마스킹).
+5. ~~PR 4 (실계정 등록 API + Settings UI)~~ ✅ **머지 (2026-04-21, `d470a73`, #15)**
+6. ~~PR 5 (연결 테스트 + 실 sync)~~ ✅ **구현 완료 (2026-04-21, 커밋 대기)** — `POST /api/portfolio/accounts/{id}/test-connection` (OAuth 토큰만 dry-run), `SyncPortfolioFromKisUseCase.execute` 에 credential_repo + real_client_factory 주입 → REAL 분기에서 Fernet 복호화 + 요청 스코프 KisClient(REAL). `KisCredentialsNotWiredError` 제거. FE Settings "연결 테스트" 버튼 + Portfolio 실계좌 sync 활성화. `@pytest.mark.requires_kis_real_account` smoke 마커 + pyproject `addopts` CI skip. 백엔드 테스트 227 → 239 (+12, smoke 1 deselected).
+7. **PR 6 (로깅 마스킹) 착수 대기** — structlog processor 로 `app_key`/`app_secret`/`access_token` 자동 치환 + README 의 KIS 토큰 revoke 한계 명시.
 
 ## 9. 운영 메모 (PR 3 머지 후 추가)
 

@@ -8,8 +8,8 @@
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date
-from typing import AsyncIterator
 
 import httpx
 import pytest
@@ -17,7 +17,6 @@ import pytest_asyncio
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.web._deps import get_session as prod_get_session
 from app.adapter.out.persistence.models import (
     BacktestResult,
     Signal,
@@ -29,6 +28,7 @@ from app.adapter.out.persistence.repositories import (
     SignalRepository,
     StockRepository,
 )
+from app.adapter.web._deps import get_session as prod_get_session
 from app.config.settings import get_settings
 from app.main import create_app
 

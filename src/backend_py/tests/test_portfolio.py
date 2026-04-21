@@ -33,9 +33,9 @@ from app.application.service.portfolio_service import (
     AccountAliasConflictError,
     ComputePerformanceUseCase,
     ComputeSnapshotUseCase,
+    CredentialNotFoundError,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
-    KisCredentialsNotWiredError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
     SignalAlignmentUseCase,
@@ -543,29 +543,43 @@ async def test_sync_rejects_manual_connection_type(session: AsyncSession) -> Non
 
 
 @pytest.mark.asyncio
-async def test_sync_kis_rest_real_raises_credentials_not_wired(
+async def test_sync_kis_rest_real_without_credentials_raises_not_found(
     session: AsyncSession,
 ) -> None:
-    """PR 2: `kis_rest_real` + environment='real' 계좌 → `KisCredentialsNotWiredError`.
+    """PR 5: `kis_rest_real` + credential 미등록 → `CredentialNotFoundError`.
 
-    credential 저장소는 PR 3 에서 추가되므로 본 PR 에서는 명시적 차단.
-    `BrokerageAccount` 를 Repository 로 직접 삽입 — RegisterAccountUseCase 는
-    아직 environment='real' 을 허용하지 않음 (PR 4 소관).
+    PR 2~4 단계에서는 `KisCredentialsNotWiredError` (개발 장벽) 를 raise 했으나,
+    PR 5 에서 credential 저장소를 wire 하면 "자격증명 미등록" 의미로 전환.
+    라우터는 이를 404 로 매핑.
     """
+    from cryptography.fernet import Fernet
+
+    from app.adapter.out.persistence.repositories import (
+        BrokerageAccountCredentialRepository,
+    )
+    from app.security.credential_cipher import CredentialCipher
+
     account = await BrokerageAccountRepository(session).add(
         BrokerageAccount(
-            account_alias="kis-real",
+            account_alias="kis-real-no-cred",
             broker_code="kis",
             connection_type="kis_rest_real",
             environment="real",
         )
     )
-    kis = _build_mock_kis_client([])
-    async with kis as client:
-        with pytest.raises(KisCredentialsNotWiredError, match="PR 3"):
-            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
-                account_id=account.id
-            )
+    cipher = CredentialCipher(Fernet.generate_key().decode())
+    credential_repo = BrokerageAccountCredentialRepository(session, cipher)
+
+    def _factory(_creds):
+        # 미등록이면 factory 까지 도달해선 안 됨 — 도달 시 테스트 실패로 전환.
+        raise AssertionError("credential 미등록 상태에서 factory 가 호출됐음")
+
+    with pytest.raises(CredentialNotFoundError, match="credential 미등록"):
+        await SyncPortfolioFromKisUseCase(
+            session,
+            credential_repo=credential_repo,
+            real_client_factory=_factory,
+        ).execute(account_id=account.id)
 
 
 @pytest.mark.asyncio

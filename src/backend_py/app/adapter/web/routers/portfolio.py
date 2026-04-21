@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import date
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.external import KisClient, KisCredentials
 from app.adapter.out.persistence.repositories import (
+    BrokerageAccountCredentialRepository,
     BrokerageAccountRepository,
     PortfolioHoldingRepository,
     PortfolioSnapshotRepository,
@@ -20,6 +22,7 @@ from app.adapter.out.persistence.repositories import (
 from app.adapter.web._deps import (
     get_credential_cipher,
     get_kis_client,
+    get_kis_real_client_factory,
     get_session,
     require_admin_key,
 )
@@ -35,6 +38,7 @@ from app.adapter.web._schemas import (
     SignalAlignmentResponse,
     SnapshotResponse,
     SyncResponse,
+    TestConnectionResponse,
     TransactionCreateRequest,
     TransactionResponse,
 )
@@ -55,7 +59,7 @@ from app.application.service.portfolio_service import (
     CredentialNotFoundError,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
-    KisCredentialsNotWiredError,
+    MaskedCredentialView,
     PortfolioError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
@@ -63,6 +67,7 @@ from app.application.service.portfolio_service import (
     StockNotFoundError,
     SyncError,
     SyncPortfolioFromKisUseCase,
+    TestKisConnectionUseCase,
     TransactionRecord,
     UnsupportedConnectionError,
 )
@@ -258,29 +263,30 @@ async def sync_from_kis(
     account_id: int,
     session: AsyncSession = Depends(get_session),
     kis: KisClient = Depends(get_kis_client),
+    cipher: CredentialCipher = Depends(get_credential_cipher),
+    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(
+        get_kis_real_client_factory
+    ),
 ) -> SyncResponse:
+    """KIS 잔고 동기화 — mock·real 2환경 동일 엔드포인트.
+
+    계좌 `connection_type` 으로 분기:
+      - kis_rest_mock → 주입된 프로세스 공유 MOCK 클라이언트
+      - kis_rest_real → credential 복호화 후 요청 스코프 REAL 클라이언트 (PR 5 wire)
+    credential 미등록 시 404, KIS 토큰 발급/잔고조회 실패 시 502.
+    """
+    credential_repo = BrokerageAccountCredentialRepository(session, cipher)
     try:
-        result = await SyncPortfolioFromKisUseCase(session, kis_client=kis).execute(
-            account_id=account_id
-        )
-    except AccountNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except UnsupportedConnectionError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except InvalidRealEnvironmentError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
-    except KisCredentialsNotWiredError as exc:
-        # 501 Not Implemented — 엔드포인트·라우팅은 정의됐으나 실 credential 저장소(PR 3)
-        # 가 아직 배선되지 않아 기능 자체가 구현 미완. 503(Service Unavailable) 은
-        # 일시 장애·점검을 의미해 클라이언트가 Retry-After 기반 자동 재시도하도록 유도하므로
-        # 의미론 불일치.
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
-        ) from exc
-    except SyncError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        result = await SyncPortfolioFromKisUseCase(
+            session,
+            kis_client=kis,
+            credential_repo=credential_repo,
+            real_client_factory=real_client_factory,
+        ).execute(account_id=account_id)
     except PortfolioError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise _credential_error_to_http(exc) from exc
+    except CredentialCipherError as exc:
+        raise _cipher_failure_as_http(account_id, exc) from exc
     return SyncResponse.model_validate(asdict(result))
 
 
@@ -396,16 +402,53 @@ async def import_transactions_from_excel(
     )
 
 
+# ---------- KIS 연결 테스트 (PR 5 — 3단계 온보딩 1단계) ----------
+
+
+@router.post(
+    "/accounts/{account_id}/test-connection",
+    response_model=TestConnectionResponse,
+)
+async def test_kis_connection(
+    account_id: int,
+    session: AsyncSession = Depends(get_session),
+    cipher: CredentialCipher = Depends(get_credential_cipher),
+    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(
+        get_kis_real_client_factory
+    ),
+) -> TestConnectionResponse:
+    """실 KIS 자격증명으로 OAuth 토큰 발급만 시도하는 dry-run.
+
+    잔고 조회 API 는 호출하지 않아 계좌 상태에 영향 0. 자격증명 등록 직후 "정말
+    연결되는가" 검증용. 성공 시 200 `ok=true`, credential 미등록 404, KIS 업스트림
+    실패 502, 계좌 설정 오류(비 `kis_rest_real`·non-real) 400/403.
+    """
+    uc = TestKisConnectionUseCase(
+        session, cipher=cipher, real_client_factory=real_client_factory
+    )
+    try:
+        result = await uc.execute(account_id=account_id)
+    except PortfolioError as exc:
+        raise _credential_error_to_http(exc) from exc
+    except CredentialCipherError as exc:
+        raise _cipher_failure_as_http(account_id, exc) from exc
+    return TestConnectionResponse.model_validate(asdict(result))
+
+
 # ---------- Brokerage Credentials (P15 / KIS sync PR 4 — 2단계 온보딩) ----------
 
 
-def _credential_response(view: object) -> BrokerageCredentialResponse:
+def _credential_response(view: MaskedCredentialView) -> BrokerageCredentialResponse:
     """UseCase DTO → API 응답 매핑. `_Base(from_attributes=True)` 가 dataclass 읽기 지원."""
     return BrokerageCredentialResponse.model_validate(view)
 
 
-def _raise_for_credential_error(exc: PortfolioError) -> HTTPException:
-    """credential 도메인 예외 → HTTP 매핑 공통 처리."""
+def _credential_error_to_http(exc: PortfolioError) -> HTTPException:
+    """credential·sync·연결테스트 도메인 예외 → HTTP 매핑 공통 처리.
+
+    호출자는 반드시 반환된 `HTTPException` 을 `raise` 해야 한다. 함수 자체는 raise 하지
+    않으며, mypy `no-implicit-optional` 로 반환값 누락은 컴파일 타임에 탐지된다.
+    """
     if isinstance(exc, AccountNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, UnsupportedConnectionError):
@@ -416,6 +459,9 @@ def _raise_for_credential_error(exc: PortfolioError) -> HTTPException:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, CredentialNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, SyncError):
+        # KIS 업스트림(토큰 발급/잔고 조회) 실패 — 업스트림 게이트웨이 오류.
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
@@ -461,7 +507,7 @@ async def create_credential(
             ),
         )
     except PortfolioError as exc:
-        raise _raise_for_credential_error(exc) from exc
+        raise _credential_error_to_http(exc) from exc
     except CredentialCipherError as exc:
         raise _cipher_failure_as_http(account_id, exc) from exc
     return _credential_response(view)
@@ -489,7 +535,7 @@ async def replace_credential(
             ),
         )
     except PortfolioError as exc:
-        raise _raise_for_credential_error(exc) from exc
+        raise _credential_error_to_http(exc) from exc
     except CredentialCipherError as exc:
         raise _cipher_failure_as_http(account_id, exc) from exc
     return _credential_response(view)
@@ -509,7 +555,7 @@ async def get_credential(
     try:
         view = await uc.get_masked(account_id)
     except PortfolioError as exc:
-        raise _raise_for_credential_error(exc) from exc
+        raise _credential_error_to_http(exc) from exc
     except CredentialCipherError as exc:
         raise _cipher_failure_as_http(account_id, exc) from exc
     return _credential_response(view)
@@ -529,5 +575,4 @@ async def delete_credential(
     try:
         await uc.delete(account_id)
     except PortfolioError as exc:
-        raise _raise_for_credential_error(exc) from exc
-    return None
+        raise _credential_error_to_http(exc) from exc

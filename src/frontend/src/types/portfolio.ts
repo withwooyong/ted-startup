@@ -40,6 +40,14 @@ export interface BrokerageCredentialResponse {
   updated_at: string;
 }
 
+export interface TestConnectionResponse {
+  account_id: number;
+  // BE 는 kis_rest_real 계좌만 이 엔드포인트에서 응답 — 리터럴로 좁힘
+  environment: 'real';
+  // 성공 응답에서만 `true`. 실패는 HTTP 예외로 전파되므로 false 는 발생 불가 (BE 계약).
+  ok: true;
+}
+
 export interface Holding {
   account_id: number;
   stock_id: number;

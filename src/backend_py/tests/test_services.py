@@ -8,16 +8,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.persistence.models import (
-    LendingBalance,
     Signal,
     SignalType,
     Stock,
-    StockPrice,
 )
 from app.adapter.out.persistence.repositories import (
     BacktestResultRepository,
     LendingBalanceRepository,
-    ShortSellingRepository,
     SignalRepository,
     StockPriceRepository,
     StockRepository,

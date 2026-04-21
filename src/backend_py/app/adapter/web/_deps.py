@@ -2,14 +2,21 @@
 from __future__ import annotations
 
 import hmac
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from functools import lru_cache
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.ai import OpenAIProvider
-from app.adapter.out.external import DartClient, KisClient, KrxClient, TelegramClient
+from app.adapter.out.external import (
+    DartClient,
+    KisClient,
+    KisCredentials,
+    KisEnvironment,
+    KrxClient,
+    TelegramClient,
+)
 from app.adapter.out.persistence.session import get_sessionmaker
 from app.application.port.out.llm_provider import LLMProvider
 from app.config.settings import Settings, get_settings
@@ -63,6 +70,23 @@ async def get_kis_client() -> AsyncIterator[KisClient]:
         yield client
     finally:
         await client.close()
+
+
+def get_kis_real_client_factory() -> Callable[[KisCredentials], KisClient]:
+    """실 KIS 호출용 KisClient 팩토리 — credential 주입으로 REAL 환경 인스턴스 생성.
+
+    각 요청마다 새 클라이언트 — 계좌마다 credential 이 다르므로 토큰 캐시를 공유하지
+    않는다. 반환된 factory 는 use case 내부에서 `async with factory(creds) as client:`
+    로 사용해 httpx 커넥션 풀을 요청 종료 시 정리.
+
+    테스트는 `app.dependency_overrides[get_kis_real_client_factory]` 로 MockTransport
+    주입한 factory 로 치환 (CI 외부 호출 0).
+    """
+
+    def factory(credentials: KisCredentials) -> KisClient:
+        return KisClient(environment=KisEnvironment.REAL, credentials=credentials)
+
+    return factory
 
 
 @lru_cache(maxsize=1)
