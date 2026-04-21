@@ -2,6 +2,7 @@
 
 설계: docs/kis-real-account-sync-plan.md § 3.2 / PR 3 · PR 4.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -219,9 +220,7 @@ async def test_repo_masked_view_none_when_absent(session: AsyncSession) -> None:
 
 
 @pytest_asyncio.fixture
-async def credential_app(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[FastAPI]:
+async def credential_app(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
     get_settings.cache_clear()
     app = create_app()
@@ -277,9 +276,7 @@ def _sample_body() -> dict[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_credential_endpoints_require_admin_key(
-    credential_app: FastAPI, session: AsyncSession
-) -> None:
+async def test_credential_endpoints_require_admin_key(credential_app: FastAPI, session: AsyncSession) -> None:
     account = await _seed_real_account(session, alias="cred-auth")
     transport = httpx.ASGITransport(app=credential_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
@@ -291,9 +288,7 @@ async def test_credential_endpoints_require_admin_key(
 
 
 @pytest.mark.asyncio
-async def test_post_credential_returns_masked_201(
-    session: AsyncSession, credential_client: httpx.AsyncClient
-) -> None:
+async def test_post_credential_returns_masked_201(session: AsyncSession, credential_client: httpx.AsyncClient) -> None:
     account = await _seed_real_account(session, alias="cred-http-post")
     resp = await credential_client.post(
         f"/api/portfolio/accounts/{account.id}/credentials",
@@ -330,9 +325,7 @@ async def test_post_credential_conflict_when_exists(
 
 
 @pytest.mark.asyncio
-async def test_put_credential_replaces_existing(
-    session: AsyncSession, credential_client: httpx.AsyncClient
-) -> None:
+async def test_put_credential_replaces_existing(session: AsyncSession, credential_client: httpx.AsyncClient) -> None:
     account = await _seed_real_account(session, alias="cred-http-put")
     await credential_client.post(
         f"/api/portfolio/accounts/{account.id}/credentials",
@@ -343,9 +336,7 @@ async def test_put_credential_replaces_existing(
         "app_secret": "NEW-SECRET-0000000000",
         "account_no": "87654321-99",
     }
-    resp = await credential_client.put(
-        f"/api/portfolio/accounts/{account.id}/credentials", json=new_body
-    )
+    resp = await credential_client.put(f"/api/portfolio/accounts/{account.id}/credentials", json=new_body)
     assert resp.status_code == 200
     body = resp.json()
     assert body["app_key_masked"].endswith("ABCD")
@@ -353,13 +344,9 @@ async def test_put_credential_replaces_existing(
 
 
 @pytest.mark.asyncio
-async def test_put_credential_404_when_missing(
-    session: AsyncSession, credential_client: httpx.AsyncClient
-) -> None:
+async def test_put_credential_404_when_missing(session: AsyncSession, credential_client: httpx.AsyncClient) -> None:
     account = await _seed_real_account(session, alias="cred-http-put-404")
-    resp = await credential_client.put(
-        f"/api/portfolio/accounts/{account.id}/credentials", json=_sample_body()
-    )
+    resp = await credential_client.put(f"/api/portfolio/accounts/{account.id}/credentials", json=_sample_body())
     assert resp.status_code == 404
 
 
@@ -372,20 +359,14 @@ async def test_get_credential_returns_masked_and_delete_removes(
         f"/api/portfolio/accounts/{account.id}/credentials",
         json=_sample_body(),
     )
-    get_resp = await credential_client.get(
-        f"/api/portfolio/accounts/{account.id}/credentials"
-    )
+    get_resp = await credential_client.get(f"/api/portfolio/accounts/{account.id}/credentials")
     assert get_resp.status_code == 200
     assert get_resp.json()["app_key_masked"].endswith("1234")
 
-    del_resp = await credential_client.delete(
-        f"/api/portfolio/accounts/{account.id}/credentials"
-    )
+    del_resp = await credential_client.delete(f"/api/portfolio/accounts/{account.id}/credentials")
     assert del_resp.status_code == 204
 
-    missing_resp = await credential_client.get(
-        f"/api/portfolio/accounts/{account.id}/credentials"
-    )
+    missing_resp = await credential_client.get(f"/api/portfolio/accounts/{account.id}/credentials")
     assert missing_resp.status_code == 404
 
 
@@ -490,7 +471,5 @@ async def test_credential_validates_account_no_format(
     """
     account = await _seed_real_account(session, alias="cred-invalid-acc-no")
     bad = _sample_body() | {"account_no": "1234"}
-    resp = await credential_client.post(
-        f"/api/portfolio/accounts/{account.id}/credentials", json=bad
-    )
+    resp = await credential_client.post(f"/api/portfolio/accounts/{account.id}/credentials", json=bad)
     assert resp.status_code == 400

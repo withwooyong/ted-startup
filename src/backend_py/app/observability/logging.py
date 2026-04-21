@@ -11,6 +11,7 @@ PR 6 (KIS sync 시리즈 최종): 실 KIS 외부 호출이 PR 5 에서 열리면
 stdlib `logging` 과의 통합은 structlog 의 `ProcessorFormatter` 브릿지로 수행 —
 기존 `logging.getLogger(__name__)` 호출도 자동으로 마스킹 혜택을 받는다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,46 +24,69 @@ from structlog.types import EventDict, WrappedLogger
 
 # 완전 일치 키 — 짧고 명확한 식별자 + 프로젝트 특이 env 필드.
 # `account_no` 같은 중립 필드는 오염 안 됨.
-SENSITIVE_KEYS: frozenset[str] = frozenset({
-    # KIS 자격증명 — 표준
-    "app_key", "appkey",
-    "app_secret", "appsecret",
-    "kis_credential_master_key",
-    # KIS mock credentials — 테스트 환경 값도 로그 노출 방지
-    "kis_app_key_mock", "kis_app_secret_mock", "kis_account_no_mock",
-    # OAuth2 / JWT 일반
-    "access_token", "accesstoken",
-    "refresh_token", "refreshtoken",
-    "id_token",
-    "token",
-    "client_secret", "clientsecret",
-    # HTTP 헤더
-    "authorization",
-    "x-api-key", "x_api_key",
-    "admin_api_key", "admin-api-key",
-    "api_key", "api-key",
-    # 프로젝트 특이 env 필드 (settings.py 실제 필드명)
-    "openai_api_key", "dart_api_key", "telegram_bot_token",
-    "krx_id", "krx_pw",
-    # 범용
-    "password",
-    "secret",
-})
+SENSITIVE_KEYS: frozenset[str] = frozenset(
+    {
+        # KIS 자격증명 — 표준
+        "app_key",
+        "appkey",
+        "app_secret",
+        "appsecret",
+        "kis_credential_master_key",
+        # KIS mock credentials — 테스트 환경 값도 로그 노출 방지
+        "kis_app_key_mock",
+        "kis_app_secret_mock",
+        "kis_account_no_mock",
+        # OAuth2 / JWT 일반
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+        "id_token",
+        "token",
+        "client_secret",
+        "clientsecret",
+        # HTTP 헤더
+        "authorization",
+        "x-api-key",
+        "x_api_key",
+        "admin_api_key",
+        "admin-api-key",
+        "api_key",
+        "api-key",
+        # 프로젝트 특이 env 필드 (settings.py 실제 필드명)
+        "openai_api_key",
+        "dart_api_key",
+        "telegram_bot_token",
+        "krx_id",
+        "krx_pw",
+        # 범용
+        "password",
+        "secret",
+    }
+)
 
 # 접미 일치 키 — `openai_api_key`, `dart_api_key`, `telegram_bot_token`, `krx_pw`,
 # `kis_app_key_mock` 같은 프로젝트 고유 복합 필드 자동 커버. 신규 env 필드 추가 시
 # `SENSITIVE_KEYS` 를 수동 동기화할 필요 없음.
 SENSITIVE_KEY_SUFFIXES: tuple[str, ...] = (
-    "_api_key", "-api-key",
-    "_app_key", "-app-key",
-    "_app_secret", "-app-secret",
-    "_access_token", "-access-token",
-    "_refresh_token", "-refresh-token",
-    "_bot_token", "-bot-token",
-    "_client_secret", "-client-secret",
+    "_api_key",
+    "-api-key",
+    "_app_key",
+    "-app-key",
+    "_app_secret",
+    "-app-secret",
+    "_access_token",
+    "-access-token",
+    "_refresh_token",
+    "-refresh-token",
+    "_bot_token",
+    "-bot-token",
+    "_client_secret",
+    "-client-secret",
     "_password",
     "_secret",
-    "_master_key", "-master-key",
+    "_master_key",
+    "-master-key",
     "_credential",
     "_pw",  # `krx_pw` 같은 축약 필드
 )
@@ -83,9 +107,7 @@ def _is_sensitive_key(key: str) -> bool:
 #   - 버전(`v1.2.3`), IP, 파일 경로 등은 애초에 `eyJ` 없음
 # KIS·OpenAI·Anthropic 등 주요 OAuth2 공급자가 이 표준을 따른다. opaque token 은
 # 키 기반 매칭(`access_token` 등) 으로 커버.
-_JWT_PATTERN = re.compile(
-    r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
-)
+_JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
 # 40자 이상 hex — SHA-1/SHA-256 digest, 일부 토큰 형식. 짧은 stock_code(6자) 는 매칭 안 됨.
 # Known trade-off: git commit SHA(40자) / content hash 같은 의도적 식별자도 치환됨.
 # KIS 도메인에서 문제 없으며, 운영 디버깅 시 구분 필요해지면 56자 이상(SHA-224+) 상향 고려.
@@ -128,9 +150,7 @@ def _scan(node: Any) -> Any:
     return node
 
 
-def mask_sensitive(
-    _logger: WrappedLogger, _method_name: str, event_dict: EventDict
-) -> EventDict:
+def mask_sensitive(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
     """structlog processor — 이벤트 딕트 전체를 재귀 스캔해 민감값 치환.
 
     chain 내 위치: timestamp/level 추가 뒤, 최종 render 직전에 배치해
@@ -187,9 +207,7 @@ def setup_logging(*, log_level: str = "INFO", json_output: bool = True) -> None:
 
     # stdlib logging 브릿지 — `foreign_pre_chain` 으로 `logger.info(...)` 호출도 같은 processor 를 태움.
     renderer: structlog.types.Processor = (
-        structlog.processors.JSONRenderer()
-        if json_output
-        else structlog.dev.ConsoleRenderer(colors=False)
+        structlog.processors.JSONRenderer() if json_output else structlog.dev.ConsoleRenderer(colors=False)
     )
     formatter = structlog.stdlib.ProcessorFormatter(
         foreign_pre_chain=shared_processors,

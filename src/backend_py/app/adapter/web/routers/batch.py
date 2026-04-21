@@ -1,4 +1,5 @@
 """/api/batch/collect — 관리자 권한 수동 수집."""
+
 from __future__ import annotations
 
 from datetime import date

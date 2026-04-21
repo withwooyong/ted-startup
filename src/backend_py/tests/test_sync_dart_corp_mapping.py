@@ -1,4 +1,5 @@
 """DART corpCode 벌크 sync — 필터 로직 + ZIP/XML 파싱 단위 테스트."""
+
 from __future__ import annotations
 
 import io
@@ -29,15 +30,15 @@ from scripts.sync_dart_corp_mapping import (
 @pytest.mark.parametrize(
     "stock_code,expected",
     [
-        ("005930", True),    # 삼성전자 보통주
-        ("000660", True),    # SK하이닉스
-        ("035420", True),    # NAVER
-        ("005935", False),   # 삼성전자우 — 끝자리 5 우선주
-        ("005937", False),   # 삼성전자 2우B — 끝자리 7
-        ("005939", False),   # 끝자리 9
+        ("005930", True),  # 삼성전자 보통주
+        ("000660", True),  # SK하이닉스
+        ("035420", True),  # NAVER
+        ("005935", False),  # 삼성전자우 — 끝자리 5 우선주
+        ("005937", False),  # 삼성전자 2우B — 끝자리 7
+        ("005939", False),  # 끝자리 9
         ("", False),
-        ("00593", False),    # 자리수 부족
-        ("A05930", False),   # 문자 포함 (KOSPI200 ETF 심볼 가짜 케이스)
+        ("00593", False),  # 자리수 부족
+        ("A05930", False),  # 문자 포함 (KOSPI200 ETF 심볼 가짜 케이스)
         ("0059300", False),  # 7자리
     ],
 )
@@ -91,8 +92,8 @@ def test_is_excluded_by_name(corp_name: str, excluded: bool) -> None:
 @pytest.mark.parametrize(
     "stock_code,excluded",
     [
-        ("088980", True),   # 맥쿼리한국인프라투융자회사 (DART 단축명 "맥쿼리인프라")
-        ("423310", True),   # KB발해인프라투융자회사
+        ("088980", True),  # 맥쿼리한국인프라투융자회사 (DART 단축명 "맥쿼리인프라")
+        ("423310", True),  # KB발해인프라투융자회사
         ("005930", False),  # 삼성전자
         ("000660", False),  # SK하이닉스
         ("", False),
@@ -154,7 +155,8 @@ def test_fetch_krx_listed_codes_returns_union_of_kospi_kosdaq(
 
 
 def test_fetch_krx_listed_codes_returns_empty_on_exception(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """pykrx 가 KRX 익명 차단 등으로 실패하면 빈 집합 + 경고 메시지."""
     from pykrx import stock as pykrx_stock

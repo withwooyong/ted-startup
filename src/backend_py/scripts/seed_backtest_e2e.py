@@ -18,6 +18,7 @@
 사용:
   docker compose exec backend python -m scripts.seed_backtest_e2e
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,23 +40,27 @@ async def run() -> int:
     period_end: date | None = None
 
     async with sm() as session, session.begin():
-        samsung = (await session.execute(
-            select(Stock).where(Stock.stock_code == "005930")
-        )).scalar_one_or_none()
+        samsung = (await session.execute(select(Stock).where(Stock.stock_code == "005930"))).scalar_one_or_none()
         if samsung is None:
             print(
-                "[seed-backtest] 경고: 005930 stock 미존재 → 시그널 시드 skip. "
-                "seed_ui_demo 선행 필요.",
-                file=sys.stderr, flush=True,
+                "[seed-backtest] 경고: 005930 stock 미존재 → 시그널 시드 skip. seed_ui_demo 선행 필요.",
+                file=sys.stderr,
+                flush=True,
             )
             return 0
 
         # 최신/최저 trading_date 구간 확인 — seed_ui_demo 가 90 영업일 생성했다고 가정.
-        dates = (await session.execute(
-            select(StockPrice.trading_date)
-            .where(StockPrice.stock_id == samsung.id)
-            .order_by(StockPrice.trading_date)
-        )).scalars().all()
+        dates = (
+            (
+                await session.execute(
+                    select(StockPrice.trading_date)
+                    .where(StockPrice.stock_id == samsung.id)
+                    .order_by(StockPrice.trading_date)
+                )
+            )
+            .scalars()
+            .all()
+        )
         if len(dates) < 40:
             print(
                 f"[seed-backtest] 경고: 005930 stock_price {len(dates)}건 < 40 → "
@@ -74,22 +79,27 @@ async def run() -> int:
             SignalType.TREND_REVERSAL,
             SignalType.SHORT_SQUEEZE,
         ):
-            existing = (await session.execute(
-                select(Signal).where(
-                    Signal.stock_id == samsung.id,
-                    Signal.signal_date == signal_date,
-                    Signal.signal_type == sig_type.value,
+            existing = (
+                await session.execute(
+                    select(Signal).where(
+                        Signal.stock_id == samsung.id,
+                        Signal.signal_date == signal_date,
+                        Signal.signal_type == sig_type.value,
+                    )
                 )
-            )).scalar_one_or_none()
+            ).scalar_one_or_none()
             if existing is not None:
                 continue
-            session.add(Signal(
-                stock_id=samsung.id,
-                signal_date=signal_date,
-                signal_type=sig_type.value,
-                score=80, grade="A",
-                detail={"seed": "e2e"},
-            ))
+            session.add(
+                Signal(
+                    stock_id=samsung.id,
+                    signal_date=signal_date,
+                    signal_type=sig_type.value,
+                    score=80,
+                    grade="A",
+                    detail={"seed": "e2e"},
+                )
+            )
             seeded += 1
 
     print(
@@ -106,7 +116,8 @@ async def run() -> int:
     if not result.succeeded:
         print(
             f"[seed-backtest] 백테스트 실패: {result.error}",
-            file=sys.stderr, flush=True,
+            file=sys.stderr,
+            flush=True,
         )
         return 1
 

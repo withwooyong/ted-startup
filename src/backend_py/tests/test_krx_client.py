@@ -1,4 +1,5 @@
 """KrxClient 단위 테스트 — pykrx 함수 monkeypatch 로 실망 없이 빠르게."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -70,7 +71,8 @@ async def test_fetch_stock_prices_joins_ohlcv_and_market_cap(monkeypatch: pytest
     monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: _fake_ohlcv())
     monkeypatch.setattr(pykrx_stock, "get_market_cap_by_ticker", lambda *a, **k: _fake_cap())
     monkeypatch.setattr(
-        pykrx_stock, "get_market_ticker_list",
+        pykrx_stock,
+        "get_market_ticker_list",
         lambda *a, **k: _fake_ticker_list(k.get("market", "KOSPI")),
     )
 
@@ -108,7 +110,8 @@ async def test_fetch_stock_prices_maps_kosdaq_via_ticker_list(
     )
     monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: ohlcv)
     monkeypatch.setattr(
-        pykrx_stock, "get_market_ticker_list",
+        pykrx_stock,
+        "get_market_ticker_list",
         lambda *a, **k: _fake_ticker_list(k.get("market", "KOSPI")),
     )
 
@@ -143,7 +146,8 @@ async def test_fetch_stock_prices_uses_ohlcv_inline_market_cap(
     monkeypatch.setattr(pykrx_stock, "get_market_ohlcv_by_ticker", lambda *a, **k: ohlcv)
     monkeypatch.setattr(pykrx_stock, "get_market_cap_by_ticker", _cap)
     monkeypatch.setattr(
-        pykrx_stock, "get_market_ticker_list",
+        pykrx_stock,
+        "get_market_ticker_list",
         lambda *a, **k: _fake_ticker_list(k.get("market", "KOSPI")),
     )
 

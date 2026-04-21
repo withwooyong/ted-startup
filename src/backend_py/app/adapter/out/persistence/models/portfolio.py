@@ -1,4 +1,5 @@
 """P10 포트폴리오 도메인 ORM 모델."""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -41,9 +42,7 @@ class BrokerageAccount(Base):
     connection_type: Mapped[str] = mapped_column(String(20), nullable=False)
     environment: Mapped[str] = mapped_column(String(10), nullable=False, server_default="mock")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
@@ -89,9 +88,7 @@ class PortfolioTransaction(Base):
     executed_at: Mapped[date] = mapped_column(Date, nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
     memo: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class BrokerageAccountCredential(Base):
@@ -116,9 +113,7 @@ class BrokerageAccountCredential(Base):
     app_secret_cipher: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     account_no_cipher: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     key_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -129,11 +124,7 @@ class BrokerageAccountCredential(Base):
 
 class PortfolioSnapshot(Base):
     __tablename__ = "portfolio_snapshot"
-    __table_args__ = (
-        UniqueConstraint(
-            "account_id", "snapshot_date", name="portfolio_snapshot_account_date_key"
-        ),
-    )
+    __table_args__ = (UniqueConstraint("account_id", "snapshot_date", name="portfolio_snapshot_account_date_key"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(
@@ -145,6 +136,4 @@ class PortfolioSnapshot(Base):
     unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     realized_pnl: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, server_default="0")
     holdings_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

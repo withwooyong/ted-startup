@@ -1,4 +1,5 @@
 """글로벌 예외 핸들러 — Java GlobalExceptionHandler 동등."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

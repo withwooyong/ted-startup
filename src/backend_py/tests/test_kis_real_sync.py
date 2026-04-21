@@ -8,6 +8,7 @@
 외부 호출은 모두 `httpx.MockTransport` 로 봉쇄. 실 KIS 호출이 나가는 경로는
 smoke 테스트에만 존재하며 기본 `pytest` 실행에서 제외된다.
 """
+
 from __future__ import annotations
 
 import os
@@ -142,9 +143,7 @@ async def _seed_real_account_with_credential(
 @pytest.mark.asyncio
 async def test_connection_success_returns_ok(session: AsyncSession) -> None:
     cipher = _fresh_cipher()
-    account = await _seed_real_account_with_credential(
-        session, alias="conn-ok", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="conn-ok", cipher=cipher)
     factory = _make_real_factory(_real_mock_transport())
     uc = TestKisConnectionUseCase(session, cipher=cipher, real_client_factory=factory)
     result = await uc.execute(account_id=account.id)
@@ -195,9 +194,7 @@ async def test_connection_token_failure_wrapped_as_sync_error(
 ) -> None:
     """KIS 토큰 발급 실패(401) → `SyncError`. 라우터에서 502 로 변환."""
     cipher = _fresh_cipher()
-    account = await _seed_real_account_with_credential(
-        session, alias="conn-token-fail", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="conn-token-fail", cipher=cipher)
     factory = _make_real_factory(_real_mock_transport(token_status=401))
     uc = TestKisConnectionUseCase(session, cipher=cipher, real_client_factory=factory)
     with pytest.raises(SyncError, match="KIS 토큰 발급 실패"):
@@ -214,9 +211,7 @@ async def test_real_sync_fetches_balance_and_creates_holdings(
     session: AsyncSession,
 ) -> None:
     cipher = _fresh_cipher()
-    account = await _seed_real_account_with_credential(
-        session, alias="real-sync-ok", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="real-sync-ok", cipher=cipher)
     credential_repo = BrokerageAccountCredentialRepository(session, cipher)
     transport = _real_mock_transport(
         balance_rows=[
@@ -248,9 +243,7 @@ async def test_real_sync_balance_failure_wrapped_as_sync_error(
     session: AsyncSession,
 ) -> None:
     cipher = _fresh_cipher()
-    account = await _seed_real_account_with_credential(
-        session, alias="real-sync-fail", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="real-sync-fail", cipher=cipher)
     credential_repo = BrokerageAccountCredentialRepository(session, cipher)
     transport = _real_mock_transport(balance_status=500)
     factory = _make_real_factory(transport)
@@ -327,9 +320,7 @@ async def test_endpoint_test_connection_success(
     real_client: tuple[httpx.AsyncClient, CredentialCipher, dict[str, httpx.MockTransport]],
 ) -> None:
     client, cipher, _state = real_client
-    account = await _seed_real_account_with_credential(
-        session, alias="endpoint-conn-ok", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="endpoint-conn-ok", cipher=cipher)
     resp = await client.post(f"/api/portfolio/accounts/{account.id}/test-connection")
     assert resp.status_code == 200
     body = resp.json()
@@ -361,9 +352,7 @@ async def test_endpoint_test_connection_token_failure_502(
     real_client: tuple[httpx.AsyncClient, CredentialCipher, dict[str, httpx.MockTransport]],
 ) -> None:
     client, cipher, state = real_client
-    account = await _seed_real_account_with_credential(
-        session, alias="endpoint-conn-401", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="endpoint-conn-401", cipher=cipher)
     # 토큰 401 로 교체
     state["transport"] = _real_mock_transport(token_status=401)
     resp = await client.post(f"/api/portfolio/accounts/{account.id}/test-connection")
@@ -396,9 +385,7 @@ async def test_endpoint_sync_real_account_creates_holdings(
 ) -> None:
     """PR 5: `POST /sync` 이 kis_rest_real 계좌에 대해 정상 동작."""
     client, cipher, state = real_client
-    account = await _seed_real_account_with_credential(
-        session, alias="endpoint-sync-real", cipher=cipher
-    )
+    account = await _seed_real_account_with_credential(session, alias="endpoint-sync-real", cipher=cipher)
     state["transport"] = _real_mock_transport(
         balance_rows=[
             {
@@ -459,15 +446,9 @@ async def test_smoke_real_kis_token_issuance(session: AsyncSession) -> None:
     if not (app_key and app_secret and account_no):
         pytest.skip("KIS_REAL_APP_KEY/SECRET/ACCOUNT env 가 설정되지 않았습니다.")
 
-    credentials = KisCredentials(
-        app_key=app_key, app_secret=app_secret, account_no=account_no
-    )
-    async with KisClient(
-        environment=KisEnvironment.REAL, credentials=credentials
-    ) as client:
+    credentials = KisCredentials(app_key=app_key, app_secret=app_secret, account_no=account_no)
+    async with KisClient(environment=KisEnvironment.REAL, credentials=credentials) as client:
         try:
             await client.test_connection()
         except KisClientError as exc:
             pytest.fail(f"실 KIS 토큰 발급 실패: {exc}")
-
-

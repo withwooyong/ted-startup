@@ -23,9 +23,5 @@ class LendingBalance(Base):
     balance_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     change_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     change_quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True, server_default="0")
-    consecutive_decrease_days: Mapped[int | None] = mapped_column(
-        Integer, nullable=True, server_default="0"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    consecutive_decrease_days: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

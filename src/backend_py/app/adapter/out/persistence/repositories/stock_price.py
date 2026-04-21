@@ -30,21 +30,15 @@ class StockPriceRepository:
             "market_cap": stmt.excluded.market_cap,
             "change_rate": stmt.excluded.change_rate,
         }
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["stock_id", "trading_date"], set_=update_cols
-        )
+        stmt = stmt.on_conflict_do_update(index_elements=["stock_id", "trading_date"], set_=update_cols)
         result = await self._session.execute(stmt)
         return rowcount_of(result)
 
     async def find_by_stock_and_date(self, stock_id: int, trading_date: date) -> StockPrice | None:
-        stmt = select(StockPrice).where(
-            StockPrice.stock_id == stock_id, StockPrice.trading_date == trading_date
-        )
+        stmt = select(StockPrice).where(StockPrice.stock_id == stock_id, StockPrice.trading_date == trading_date)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def list_between(
-        self, stock_id: int, start: date, end: date
-    ) -> Sequence[StockPrice]:
+    async def list_between(self, stock_id: int, start: date, end: date) -> Sequence[StockPrice]:
         stmt = (
             select(StockPrice)
             .where(
@@ -60,9 +54,7 @@ class StockPriceRepository:
         stmt = select(StockPrice).where(StockPrice.trading_date == trading_date)
         return (await self._session.execute(stmt)).scalars().all()
 
-    async def list_by_stocks_between(
-        self, stock_ids: Sequence[int], start: date, end: date
-    ) -> Sequence[StockPrice]:
+    async def list_by_stocks_between(self, stock_ids: Sequence[int], start: date, end: date) -> Sequence[StockPrice]:
         if not stock_ids:
             return []
         stmt = (

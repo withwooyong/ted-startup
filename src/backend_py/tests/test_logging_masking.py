@@ -8,6 +8,7 @@
 
 외부 호출 0. structlog·stdlib logging 내부만 사용.
 """
+
 from __future__ import annotations
 
 import io
@@ -32,6 +33,7 @@ from app.observability.logging import (
 def _reset_logging() -> None:
     """각 테스트 전 로깅 상태 리셋 — `_configured` guard + root 핸들러."""
     reset_logging_for_tests()
+
 
 # -----------------------------------------------------------------------------
 # Unit: _scrub_string
@@ -219,11 +221,7 @@ def test_stdlib_logger_extra_fields_are_dropped_by_default() -> None:
 def test_stdlib_logger_integration_scrubs_jwt_in_message() -> None:
     """stdlib logger 메시지 내부 JWT 패턴 scrub — rendered 문자열 검사."""
     jwt_ish = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZWQifQ.abcdefghijklmnop"
-    output = _capture_stdlib_log(
-        lambda: logging.getLogger("app.test").warning(
-            "토큰 응답: %s (만료 86400s)", jwt_ish
-        )
-    )
+    output = _capture_stdlib_log(lambda: logging.getLogger("app.test").warning("토큰 응답: %s (만료 86400s)", jwt_ish))
     assert jwt_ish not in output
     assert "[MASKED_JWT]" in output
 

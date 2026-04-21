@@ -14,6 +14,7 @@ SignalDetectionService.detect_all 은 existing_keys 로 중복 skip 하므로
   docker compose exec backend python -m scripts.backfill_signal_detection --since 2025-01-01
   docker compose exec backend python -m scripts.backfill_signal_detection --since 2026-04-17 --until 2026-04-17  # 1일만
 """
+
 from __future__ import annotations
 
 import argparse
@@ -50,9 +51,7 @@ async def _list_trading_dates(since: date | None, until: date | None) -> list[da
 def call_detect(api_key: str, target: date, timeout_s: float) -> tuple[int, str]:
     """단일 날짜 탐지 — (http_status, body_preview)."""
     url = f"http://localhost:8000/api/signals/detect?date={target.isoformat()}"
-    req = urllib.request.Request(
-        url, method="POST", headers={"X-API-Key": api_key}
-    )
+    req = urllib.request.Request(url, method="POST", headers={"X-API-Key": api_key})
     try:
         resp = urllib.request.urlopen(req, timeout=timeout_s)
         body = resp.read().decode("utf-8", errors="replace")
@@ -109,8 +108,7 @@ def run(*, since: date | None, until: date | None, timeout_s: float) -> int:
         else:
             fail += 1
             print(
-                f"[detect-backfill] [{i:>3}/{len(targets)}] {d} FAIL({status}) "
-                f"({elapsed:.1f}s) {body}",
+                f"[detect-backfill] [{i:>3}/{len(targets)}] {d} FAIL({status}) ({elapsed:.1f}s) {body}",
                 flush=True,
             )
 
@@ -131,15 +129,21 @@ def main() -> None:
         description="과거 영업일 signal 탐지 백필 (POST /api/signals/detect 반복)",
     )
     parser.add_argument(
-        "--since", type=str, default=None,
+        "--since",
+        type=str,
+        default=None,
         help="시작일 YYYY-MM-DD (기본: stock_price 최소 trading_date)",
     )
     parser.add_argument(
-        "--until", type=str, default=None,
+        "--until",
+        type=str,
+        default=None,
         help="종료일 YYYY-MM-DD (기본: stock_price 최대 trading_date)",
     )
     parser.add_argument(
-        "--timeout", type=float, default=180.0,
+        "--timeout",
+        type=float,
+        default=180.0,
         help="단일 호출 타임아웃 초 (기본 180s)",
     )
     args = parser.parse_args()

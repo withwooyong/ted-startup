@@ -1,4 +1,5 @@
 """UI 데모 시드 — 결정론성 및 시계열 생성 단위 테스트."""
+
 from __future__ import annotations
 
 from datetime import date

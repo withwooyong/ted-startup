@@ -11,6 +11,7 @@
     * `analyze`: 실제 호출. Tier1 dataclass 를 간결한 JSON 페이로드로 직렬화해 user 메시지로 주입.
     * `repackage`: 기본 passthrough. nano 로 카드 UI 재변환은 추후.
 """
+
 from __future__ import annotations
 
 import json
@@ -88,10 +89,7 @@ SYSTEM_PROMPT = """당신은 한국 주식 시장 애널리스트입니다. 다�
 
 # 데이터 블록 안에서 닫는 태그가 그대로 들어오면 fence 가 조기 종료될 수 있어 치환.
 def _sanitize_fenced(payload: str) -> str:
-    return (
-        payload.replace("</tier1_data>", "</tier1_data_literal>")
-        .replace("</tier2_data>", "</tier2_data_literal>")
-    )
+    return payload.replace("</tier1_data>", "</tier1_data_literal>").replace("</tier2_data>", "</tier2_data_literal>")
 
 
 class OpenAIProvider:
@@ -116,12 +114,12 @@ class OpenAIProvider:
         # 오설정된 내부 IP(169.254.169.254 등) 로 credential(Bearer) 흘러가는 사고를 막기 위함.
         self._validate_base_url(s.openai_base_url)
         timeout = httpx.Timeout(
-            connect=5.0, read=s.openai_request_timeout_seconds,
-            write=s.openai_request_timeout_seconds, pool=5.0,
+            connect=5.0,
+            read=s.openai_request_timeout_seconds,
+            write=s.openai_request_timeout_seconds,
+            pool=5.0,
         )
-        self._client = httpx.AsyncClient(
-            base_url=s.openai_base_url, timeout=timeout, transport=transport
-        )
+        self._client = httpx.AsyncClient(base_url=s.openai_base_url, timeout=timeout, transport=transport)
 
     @staticmethod
     def _validate_base_url(url: str) -> None:
@@ -245,13 +243,15 @@ class OpenAIProvider:
             if not is_safe_public_url(url):
                 logger.warning("source URL 스킴 거부: %s", url[:120])
                 continue
-            out.append(ReportSource(
-                tier=int(item.get("tier", 1)),
-                type=str(item.get("type", "dart")),
-                url=url,
-                label=str(item.get("label", "")),
-                published_at=item.get("published_at"),
-            ))
+            out.append(
+                ReportSource(
+                    tier=int(item.get("tier", 1)),
+                    type=str(item.get("type", "dart")),
+                    url=url,
+                    label=str(item.get("label", "")),
+                    published_at=item.get("published_at"),
+                )
+            )
         return out
 
     async def repackage(self, report: GeneratedReport) -> GeneratedReport:
@@ -294,5 +294,3 @@ class OpenAIProvider:
         if not isinstance(content, str) or not content.strip():
             raise OpenAIProviderError(f"content 비어있음: {body}")
         return content
-
-

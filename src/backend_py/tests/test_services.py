@@ -1,4 +1,5 @@
 """Service 계층 통합 테스트 — testcontainers 세션 위에서 실제 ORM·SQL 경로까지 포함."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -27,9 +28,7 @@ from app.application.service.backtest_service import _dec
 
 
 async def _seed_stock(session: AsyncSession, code: str = "005930", name: str = "삼성전자") -> Stock:
-    return await StockRepository(session).add(
-        Stock(stock_code=code, stock_name=name, market_type="KOSPI")
-    )
+    return await StockRepository(session).add(Stock(stock_code=code, stock_name=name, market_type="KOSPI"))
 
 
 @pytest.mark.asyncio
@@ -153,10 +152,8 @@ async def test_backtest_engine_computes_returns_and_aggregates(session: AsyncSes
     for i in range(40):
         d = base_date + timedelta(days=i)
         # 매일 +1% 정도 상승 → 5일 후 ~+5%, 20일 후 ~+20%
-        close = int(10_000 * (1.01 ** i))
-        price_rows.append(
-            {"stock_id": stock.id, "trading_date": d, "close_price": close}
-        )
+        close = int(10_000 * (1.01**i))
+        price_rows.append({"stock_id": stock.id, "trading_date": d, "close_price": close})
     await StockPriceRepository(session).upsert_many(price_rows)
 
     # 시그널 1개 seed
@@ -170,9 +167,7 @@ async def test_backtest_engine_computes_returns_and_aggregates(session: AsyncSes
     )
     await SignalRepository(session).add(signal)
 
-    result = await BacktestEngineService(session).execute(
-        period_start=base_date, period_end=base_date
-    )
+    result = await BacktestEngineService(session).execute(period_start=base_date, period_end=base_date)
     assert result.signals_processed == 1
     assert result.returns_calculated == 1
     assert result.result_rows == 1
@@ -188,9 +183,7 @@ async def test_backtest_engine_computes_returns_and_aggregates(session: AsyncSes
 
 @pytest.mark.asyncio
 async def test_backtest_no_signals_returns_empty_result(session: AsyncSession) -> None:
-    result = await BacktestEngineService(session).execute(
-        period_start=date(2020, 1, 1), period_end=date(2020, 1, 31)
-    )
+    result = await BacktestEngineService(session).execute(period_start=date(2020, 1, 1), period_end=date(2020, 1, 31))
     assert result.signals_processed == 0
     assert result.result_rows == 0
 
@@ -215,15 +208,18 @@ async def test_backtest_handles_zero_close_price_without_infinity(session: Async
     await StockPriceRepository(session).upsert_many(prices)
 
     # 시그널은 기준일(close=0) 에 발생 — 분모 0 이라 과거 로직은 Infinity 산출
-    await SignalRepository(session).add(Signal(
-        stock_id=stock.id, signal_date=base_date,
-        signal_type=SignalType.TREND_REVERSAL.value,
-        score=85, grade="A", detail={"zero": True},
-    ))
-
-    result = await BacktestEngineService(session).execute(
-        period_start=base_date, period_end=base_date
+    await SignalRepository(session).add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=base_date,
+            signal_type=SignalType.TREND_REVERSAL.value,
+            score=85,
+            grade="A",
+            detail={"zero": True},
+        )
     )
+
+    result = await BacktestEngineService(session).execute(period_start=base_date, period_end=base_date)
     # INSERT 성공 (NumericValueOutOfRangeError 미발생) 이 핵심 회귀 방어
     assert result.signals_processed == 1
     assert result.result_rows == 1
@@ -252,27 +248,36 @@ async def test_backtest_preserves_minus_hundred_when_future_close_zero(
         {"stock_id": stock.id, "trading_date": base_date, "close_price": 10_000},
     ]
     for i in range(1, 5):
-        rows.append({
-            "stock_id": stock.id, "trading_date": base_date + timedelta(days=i),
-            "close_price": 9_000 - i * 500,
-        })
+        rows.append(
+            {
+                "stock_id": stock.id,
+                "trading_date": base_date + timedelta(days=i),
+                "close_price": 9_000 - i * 500,
+            }
+        )
     # 5일째부터 20일까지 전부 0 — 전손 상태 유지
     for i in range(5, 21):
-        rows.append({
-            "stock_id": stock.id, "trading_date": base_date + timedelta(days=i),
-            "close_price": 0,
-        })
+        rows.append(
+            {
+                "stock_id": stock.id,
+                "trading_date": base_date + timedelta(days=i),
+                "close_price": 0,
+            }
+        )
     await StockPriceRepository(session).upsert_many(rows)
 
-    await SignalRepository(session).add(Signal(
-        stock_id=stock.id, signal_date=base_date,
-        signal_type=SignalType.SHORT_SQUEEZE.value,
-        score=75, grade="B", detail={"delisted": True},
-    ))
-
-    result = await BacktestEngineService(session).execute(
-        period_start=base_date, period_end=base_date
+    await SignalRepository(session).add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=base_date,
+            signal_type=SignalType.SHORT_SQUEEZE.value,
+            score=75,
+            grade="B",
+            detail={"delisted": True},
+        )
     )
+
+    result = await BacktestEngineService(session).execute(period_start=base_date, period_end=base_date)
     assert result.signals_processed == 1
     assert result.result_rows == 1
 
@@ -322,26 +327,26 @@ async def test_backtest_aggregation_stores_zero_as_decimal(session: AsyncSession
 
     # 기준일부터 40일간 가격 일정 — 어느 N-영업일 shift 에도 return=0 이 나오는 구성
     flat_rows = [
-        {"stock_id": stock.id, "trading_date": base_date + timedelta(days=i), "close_price": 10_000}
-        for i in range(40)
+        {"stock_id": stock.id, "trading_date": base_date + timedelta(days=i), "close_price": 10_000} for i in range(40)
     ]
     await StockPriceRepository(session).upsert_many(flat_rows)
 
-    await SignalRepository(session).add(Signal(
-        stock_id=stock.id, signal_date=base_date,
-        signal_type=SignalType.RAPID_DECLINE.value,
-        score=70, grade="B", detail={"flat": True},
-    ))
-
-    outcome = await BacktestEngineService(session).execute(
-        period_start=base_date, period_end=base_date
+    await SignalRepository(session).add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=base_date,
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=70,
+            grade="B",
+            detail={"flat": True},
+        )
     )
+
+    outcome = await BacktestEngineService(session).execute(period_start=base_date, period_end=base_date)
     assert outcome.signals_processed == 1
     assert outcome.result_rows == 1
 
-    bt_results = await BacktestResultRepository(session).list_by_signal_type(
-        SignalType.RAPID_DECLINE.value
-    )
+    bt_results = await BacktestResultRepository(session).list_by_signal_type(SignalType.RAPID_DECLINE.value)
     # 기간이 단일일이라 1행만 생성된 것이 정상. 여러 period 로 늘어나는 회귀가 있으면 바로 드러남.
     assert len(bt_results) == 1
     bt = bt_results[0]

@@ -1,4 +1,5 @@
 """/api/portfolio/* — 계좌·보유·거래·성과."""
+
 from __future__ import annotations
 
 import logging
@@ -223,9 +224,7 @@ async def create_snapshot(
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="계좌 없음")
     snapshot_date = asof or date.today()
-    record = await ComputeSnapshotUseCase(session).execute(
-        account_id=account_id, snapshot_date=snapshot_date
-    )
+    record = await ComputeSnapshotUseCase(session).execute(account_id=account_id, snapshot_date=snapshot_date)
     return SnapshotResponse.model_validate(asdict(record))
 
 
@@ -249,9 +248,7 @@ async def get_performance(
     if start_d > end_d:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start 는 end 보다 미래일 수 없습니다")
 
-    report = await ComputePerformanceUseCase(session).execute(
-        account_id=account_id, start=start_d, end=end_d
-    )
+    report = await ComputePerformanceUseCase(session).execute(account_id=account_id, start=start_d, end=end_d)
     return PerformanceResponse.model_validate(asdict(report))
 
 
@@ -264,9 +261,7 @@ async def sync_from_kis(
     session: AsyncSession = Depends(get_session),
     kis: KisClient = Depends(get_kis_client),
     cipher: CredentialCipher = Depends(get_credential_cipher),
-    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(
-        get_kis_real_client_factory
-    ),
+    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(get_kis_real_client_factory),
 ) -> SyncResponse:
     """KIS 잔고 동기화 — mock·real 2환경 동일 엔드포인트.
 
@@ -374,23 +369,15 @@ async def import_transactions_from_excel(
         )
 
     try:
-        result = await ExcelImportService(session).import_from_xlsx(
-            account_id=account_id, file_bytes=payload
-        )
+        result = await ExcelImportService(session).import_from_xlsx(account_id=account_id, file_bytes=payload)
     except AccountNotFoundForImportError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except UnsupportedExcelFormatError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except TooManyRowsError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
     except ExcelImportError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return ExcelImportResponse(
         account_id=account_id,
@@ -413,9 +400,7 @@ async def test_kis_connection(
     account_id: int,
     session: AsyncSession = Depends(get_session),
     cipher: CredentialCipher = Depends(get_credential_cipher),
-    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(
-        get_kis_real_client_factory
-    ),
+    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(get_kis_real_client_factory),
 ) -> TestConnectionResponse:
     """실 KIS 자격증명으로 OAuth 토큰 발급만 시도하는 dry-run.
 
@@ -423,9 +408,7 @@ async def test_kis_connection(
     연결되는가" 검증용. 성공 시 200 `ok=true`, credential 미등록 404, KIS 업스트림
     실패 502, 계좌 설정 오류(비 `kis_rest_real`·non-real) 400/403.
     """
-    uc = TestKisConnectionUseCase(
-        session, cipher=cipher, real_client_factory=real_client_factory
-    )
+    uc = TestKisConnectionUseCase(session, cipher=cipher, real_client_factory=real_client_factory)
     try:
         result = await uc.execute(account_id=account_id)
     except PortfolioError as exc:

@@ -3,6 +3,7 @@
 Phase 1: HTTP 수집(어댑터) — 트랜잭션 밖
 Phase 2: DB upsert — 호출자가 세션 트랜잭션을 관리(Hexagonal: 서비스는 경계 밖 트랜잭션)
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,18 +38,14 @@ class MarketDataCollectionService:
         prices = await self._krx.fetch_stock_prices(trading_date)
         shorts = await self._krx.fetch_short_selling(trading_date)
         lendings = await self._krx.fetch_lending_balance(trading_date)
-        logger.info(
-            "KRX 수신: prices=%d short=%d lending=%d", len(prices), len(shorts), len(lendings)
-        )
+        logger.info("KRX 수신: prices=%d short=%d lending=%d", len(prices), len(shorts), len(lendings))
 
         # 1) 종목 마스터 upsert — 이후 단계의 stock_id 매핑 확보
         stock_repo = StockRepository(self._session)
         code_to_id: dict[str, int] = {}
         stocks_upserted = 0
         for row in prices:
-            stock = await stock_repo.upsert_by_code(
-                row.stock_code, row.stock_name, row.market_type
-            )
+            stock = await stock_repo.upsert_by_code(row.stock_code, row.stock_name, row.market_type)
             code_to_id[row.stock_code] = stock.id
             stocks_upserted += 1
 
@@ -128,9 +125,7 @@ class MarketDataCollectionService:
         )
 
 
-async def _fetch_prev_lending(
-    repo: LendingBalanceRepository, trading_date: date
-) -> dict[int, LendingBalance]:
+async def _fetch_prev_lending(repo: LendingBalanceRepository, trading_date: date) -> dict[int, LendingBalance]:
     """직전 영업일의 대차잔고를 stock_id 기준 dict 로 반환.
 
     주말·공휴일 대응을 위해 최대 5일 전까지 역방향 스캔한다 (주말 포함 최대 3일).
@@ -144,9 +139,7 @@ async def _fetch_prev_lending(
     return {}
 
 
-def _compute_lending_deltas(
-    *, today_qty: int, prev: LendingBalance | None
-) -> tuple[int | None, Decimal | None, int]:
+def _compute_lending_deltas(*, today_qty: int, prev: LendingBalance | None) -> tuple[int | None, Decimal | None, int]:
     """오늘 잔고수량 vs 전일 행 → (change_quantity, change_rate, consecutive_decrease_days).
 
     - 전일이 없으면 (None, None, 0): 최초 수집일 또는 장기 결측 후 복귀
@@ -159,9 +152,7 @@ def _compute_lending_deltas(
     change_q = today_qty - prev_qty
     change_r: Decimal | None
     if prev_qty > 0:
-        change_r = (Decimal(change_q) / Decimal(prev_qty) * Decimal(100)).quantize(
-            Decimal("0.0001")
-        )
+        change_r = (Decimal(change_q) / Decimal(prev_qty) * Decimal(100)).quantize(Decimal("0.0001"))
     else:
         change_r = None
     prev_consec = int(prev.consecutive_decrease_days or 0)

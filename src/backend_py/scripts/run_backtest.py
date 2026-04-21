@@ -12,6 +12,7 @@ SignalType 별 적중률/평균수익을 재계산하고 backtest_result 에 app
 기본값: period_end=오늘(KST), years=Settings.backtest_period_years (기본 3).
 --from/--to 를 명시하면 years 는 무시.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,15 +59,14 @@ async def _run(
         return 0
 
     effective_end = period_end or date.today()
-    result = await run_backtest_pipeline(
-        period_end=effective_end, period_years=effective_years
-    )
+    result = await run_backtest_pipeline(period_end=effective_end, period_years=effective_years)
     await get_engine().dispose()
 
     if not result.succeeded:
         print(
             f"[run-backtest] 실패 {result.period_start} ~ {result.period_end} — {result.error}",
-            file=sys.stderr, flush=True,
+            file=sys.stderr,
+            flush=True,
         )
         return 1
 
@@ -85,12 +85,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="백테스트 수동 실행 — backtest_result 에 append",
     )
-    parser.add_argument("--from", dest="period_from", type=str, default=None,
-                        help="시작일 YYYY-MM-DD (기본: period_end - years)")
-    parser.add_argument("--to", dest="period_to", type=str, default=None,
-                        help="종료일 YYYY-MM-DD (기본: 오늘)")
-    parser.add_argument("--years", type=int, default=None,
-                        help="직전 N년 (기본: Settings.backtest_period_years). --from 지정 시 무시")
+    parser.add_argument(
+        "--from", dest="period_from", type=str, default=None, help="시작일 YYYY-MM-DD (기본: period_end - years)"
+    )
+    parser.add_argument("--to", dest="period_to", type=str, default=None, help="종료일 YYYY-MM-DD (기본: 오늘)")
+    parser.add_argument(
+        "--years", type=int, default=None, help="직전 N년 (기본: Settings.backtest_period_years). --from 지정 시 무시"
+    )
     args = parser.parse_args()
 
     period_from = date.fromisoformat(args.period_from) if args.period_from else None
@@ -99,9 +100,13 @@ def main() -> None:
     if (period_from is None) ^ (period_to is None):
         parser.error("--from / --to 는 둘 다 명시하거나 둘 다 생략해야 합니다")
 
-    rc = asyncio.run(_run(
-        period_start=period_from, period_end=period_to, years=args.years,
-    ))
+    rc = asyncio.run(
+        _run(
+            period_start=period_from,
+            period_end=period_to,
+            years=args.years,
+        )
+    )
     sys.exit(rc)
 
 

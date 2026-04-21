@@ -7,6 +7,7 @@ Revision ID: 005_analysis_report
 Revises: 004_dart_corp_mapping
 Create Date: 2026-04-18
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

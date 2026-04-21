@@ -1,4 +1,5 @@
 """P10 포트폴리오 도메인 — Repository · UseCase · Router 통합 테스트."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -52,9 +53,7 @@ from app.main import create_app
 
 
 @pytest_asyncio.fixture
-async def app_with_session(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[FastAPI]:
+async def app_with_session(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
     get_settings.cache_clear()
     app = create_app()
@@ -130,13 +129,9 @@ async def test_register_account_rejects_real_environment(session: AsyncSession) 
 @pytest.mark.asyncio
 async def test_register_account_rejects_duplicate_alias(session: AsyncSession) -> None:
     uc = RegisterAccountUseCase(session)
-    await uc.execute(
-        account_alias="dup", broker_code="manual", connection_type="manual"
-    )
+    await uc.execute(account_alias="dup", broker_code="manual", connection_type="manual")
     with pytest.raises(AccountAliasConflictError):
-        await uc.execute(
-            account_alias="dup", broker_code="manual", connection_type="manual"
-        )
+        await uc.execute(account_alias="dup", broker_code="manual", connection_type="manual")
 
 
 @pytest.mark.asyncio
@@ -148,33 +143,47 @@ async def test_record_transaction_buy_then_sell_updates_holding(session: AsyncSe
     uc = RecordTransactionUseCase(session)
 
     # 1차 매수 10주 @ 70000
-    await uc.execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="BUY", quantity=10, price=Decimal("70000"),
-        executed_at=date(2026, 3, 1), source="manual",
-    ))
-    # 2차 매수 10주 @ 80000 → 평단가 75000
-    await uc.execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="BUY", quantity=10, price=Decimal("80000"),
-        executed_at=date(2026, 3, 15), source="manual",
-    ))
-    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(
-        account.id, stocks["samsung"].id
+    await uc.execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="BUY",
+            quantity=10,
+            price=Decimal("70000"),
+            executed_at=date(2026, 3, 1),
+            source="manual",
+        )
     )
+    # 2차 매수 10주 @ 80000 → 평단가 75000
+    await uc.execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="BUY",
+            quantity=10,
+            price=Decimal("80000"),
+            executed_at=date(2026, 3, 15),
+            source="manual",
+        )
+    )
+    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(account.id, stocks["samsung"].id)
     assert holding is not None
     assert holding.quantity == 20
     assert holding.avg_buy_price == Decimal("75000.00")
 
     # 일부 매도 5주 @ 82000 → 수량 15, 평단가 불변
-    await uc.execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="SELL", quantity=5, price=Decimal("82000"),
-        executed_at=date(2026, 4, 1), source="manual",
-    ))
-    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(
-        account.id, stocks["samsung"].id
+    await uc.execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="SELL",
+            quantity=5,
+            price=Decimal("82000"),
+            executed_at=date(2026, 4, 1),
+            source="manual",
+        )
     )
+    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(account.id, stocks["samsung"].id)
     assert holding.quantity == 15
     assert holding.avg_buy_price == Decimal("75000.00")
 
@@ -186,17 +195,29 @@ async def test_record_transaction_rejects_oversell(session: AsyncSession) -> Non
         account_alias="oversell", broker_code="manual", connection_type="manual"
     )
     uc = RecordTransactionUseCase(session)
-    await uc.execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["sk"].id,
-        transaction_type="BUY", quantity=3, price=Decimal("200000"),
-        executed_at=date(2026, 3, 1), source="manual",
-    ))
+    await uc.execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["sk"].id,
+            transaction_type="BUY",
+            quantity=3,
+            price=Decimal("200000"),
+            executed_at=date(2026, 3, 1),
+            source="manual",
+        )
+    )
     with pytest.raises(InsufficientHoldingError):
-        await uc.execute(TransactionRecord(
-            account_id=account.id, stock_id=stocks["sk"].id,
-            transaction_type="SELL", quantity=10, price=Decimal("210000"),
-            executed_at=date(2026, 3, 2), source="manual",
-        ))
+        await uc.execute(
+            TransactionRecord(
+                account_id=account.id,
+                stock_id=stocks["sk"].id,
+                transaction_type="SELL",
+                quantity=10,
+                price=Decimal("210000"),
+                executed_at=date(2026, 3, 2),
+                source="manual",
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -205,20 +226,26 @@ async def test_compute_snapshot_values_holdings_at_latest_close(session: AsyncSe
     account = await RegisterAccountUseCase(session).execute(
         account_alias="snap", broker_code="manual", connection_type="manual"
     )
-    await RecordTransactionUseCase(session).execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="BUY", quantity=10, price=Decimal("70000"),
-        executed_at=date(2026, 4, 1), source="manual",
-    ))
-    # 평단가 70000, 최신 종가 75000 → 미실현 +50000
-    await StockPriceRepository(session).upsert_many([
-        {"stock_id": stocks["samsung"].id, "trading_date": date(2026, 4, 1), "close_price": 72000},
-        {"stock_id": stocks["samsung"].id, "trading_date": date(2026, 4, 17), "close_price": 75000},
-    ])
-
-    record = await ComputeSnapshotUseCase(session).execute(
-        account_id=account.id, snapshot_date=date(2026, 4, 17)
+    await RecordTransactionUseCase(session).execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="BUY",
+            quantity=10,
+            price=Decimal("70000"),
+            executed_at=date(2026, 4, 1),
+            source="manual",
+        )
     )
+    # 평단가 70000, 최신 종가 75000 → 미실현 +50000
+    await StockPriceRepository(session).upsert_many(
+        [
+            {"stock_id": stocks["samsung"].id, "trading_date": date(2026, 4, 1), "close_price": 72000},
+            {"stock_id": stocks["samsung"].id, "trading_date": date(2026, 4, 17), "close_price": 75000},
+        ]
+    )
+
+    record = await ComputeSnapshotUseCase(session).execute(account_id=account.id, snapshot_date=date(2026, 4, 17))
     assert record.holdings_count == 1
     assert record.total_value == Decimal("750000.00")
     assert record.total_cost == Decimal("700000.00")
@@ -239,12 +266,17 @@ async def test_compute_performance_returns_mdd_and_sharpe(session: AsyncSession)
         (date(2026, 4, 4), Decimal("115")),
     ]
     for d, v in values:
-        await repo.upsert(PortfolioSnapshot(
-            account_id=account.id, snapshot_date=d,
-            total_value=v, total_cost=Decimal("100"),
-            unrealized_pnl=v - Decimal("100"), realized_pnl=Decimal("0"),
-            holdings_count=1,
-        ))
+        await repo.upsert(
+            PortfolioSnapshot(
+                account_id=account.id,
+                snapshot_date=d,
+                total_value=v,
+                total_cost=Decimal("100"),
+                unrealized_pnl=v - Decimal("100"),
+                realized_pnl=Decimal("0"),
+                holdings_count=1,
+            )
+        )
 
     report = await ComputePerformanceUseCase(session).execute(
         account_id=account.id, start=date(2026, 4, 1), end=date(2026, 4, 4)
@@ -388,9 +420,7 @@ async def test_create_kis_rest_real_account_succeeds(client: httpx.AsyncClient) 
 
 
 @pytest.mark.asyncio
-async def test_transaction_with_unknown_stock_returns_404(
-    session: AsyncSession, client: httpx.AsyncClient
-) -> None:
+async def test_transaction_with_unknown_stock_returns_404(session: AsyncSession, client: httpx.AsyncClient) -> None:
     await _seed_stocks(session)
     resp = await client.post(
         "/api/portfolio/accounts",
@@ -430,11 +460,10 @@ def _kis_settings() -> Settings:
 
 def _build_mock_kis_client(rows: list[dict[str, object]]) -> KisClient:
     """고정 응답을 내보내는 KIS 클라이언트 — httpx MockTransport 주입."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
-            return httpx.Response(
-                200, json={"access_token": "FAKE", "expires_in": 86400}
-            )
+            return httpx.Response(200, json={"access_token": "FAKE", "expires_in": 86400})
         if request.url.path.endswith("/inquire-balance"):
             return httpx.Response(
                 200,
@@ -460,25 +489,25 @@ async def test_sync_from_kis_creates_holdings_and_upserts_stock(
         broker_code="kis",
         connection_type="kis_rest_mock",
     )
-    kis = _build_mock_kis_client([
-        {
-            "pdno": "005930",
-            "prdt_name": "삼성전자",
-            "hldg_qty": "10",
-            "pchs_avg_pric": "70000",
-        },
-        {
-            "pdno": "000660",
-            "prdt_name": "SK하이닉스",
-            "hldg_qty": "3",
-            "pchs_avg_pric": "215000",
-        },
-    ])
+    kis = _build_mock_kis_client(
+        [
+            {
+                "pdno": "005930",
+                "prdt_name": "삼성전자",
+                "hldg_qty": "10",
+                "pchs_avg_pric": "70000",
+            },
+            {
+                "pdno": "000660",
+                "prdt_name": "SK하이닉스",
+                "hldg_qty": "3",
+                "pchs_avg_pric": "215000",
+            },
+        ]
+    )
 
     async with kis as client:
-        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
-            account_id=account.id
-        )
+        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
 
     assert result.fetched_count == 2
     assert result.created_count == 2
@@ -498,31 +527,35 @@ async def test_sync_from_kis_updates_existing_holding(session: AsyncSession) -> 
         connection_type="kis_rest_mock",
     )
     # 수동으로 먼저 등록된 보유 (수량 5, 평단 65000)
-    await RecordTransactionUseCase(session).execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="BUY", quantity=5, price=Decimal("65000"),
-        executed_at=date(2026, 3, 1), source="manual",
-    ))
+    await RecordTransactionUseCase(session).execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="BUY",
+            quantity=5,
+            price=Decimal("65000"),
+            executed_at=date(2026, 3, 1),
+            source="manual",
+        )
+    )
 
     # KIS 에서는 수량 10, 평단가 70000 으로 반환
-    kis = _build_mock_kis_client([
-        {
-            "pdno": "005930",
-            "prdt_name": "삼성전자",
-            "hldg_qty": "10",
-            "pchs_avg_pric": "70000",
-        },
-    ])
+    kis = _build_mock_kis_client(
+        [
+            {
+                "pdno": "005930",
+                "prdt_name": "삼성전자",
+                "hldg_qty": "10",
+                "pchs_avg_pric": "70000",
+            },
+        ]
+    )
     async with kis as client:
-        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
-            account_id=account.id
-        )
+        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
     assert result.updated_count == 1
     assert result.created_count == 0
 
-    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(
-        account.id, stocks["samsung"].id
-    )
+    holding = await PortfolioHoldingRepository(session).find_by_account_and_stock(account.id, stocks["samsung"].id)
     assert holding.quantity == 10
     assert holding.avg_buy_price == Decimal("70000.00")
 
@@ -537,9 +570,7 @@ async def test_sync_rejects_manual_connection_type(session: AsyncSession) -> Non
     kis = _build_mock_kis_client([])
     async with kis as client:
         with pytest.raises(UnsupportedConnectionError):
-            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
-                account_id=account.id
-            )
+            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
 
 
 @pytest.mark.asyncio
@@ -598,15 +629,11 @@ async def test_sync_kis_rest_real_requires_real_environment(
     kis = _build_mock_kis_client([])
     async with kis as client:
         with pytest.raises(InvalidRealEnvironmentError, match="environment='real'"):
-            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(
-                account_id=account.id
-            )
+            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
 
 
 @pytest.mark.asyncio
-async def test_sync_endpoint_returns_summary(
-    app_with_session: FastAPI, session: AsyncSession
-) -> None:
+async def test_sync_endpoint_returns_summary(app_with_session: FastAPI, session: AsyncSession) -> None:
     account = await RegisterAccountUseCase(session).execute(
         account_alias="kis-http",
         broker_code="kis",
@@ -614,14 +641,16 @@ async def test_sync_endpoint_returns_summary(
     )
 
     async def _kis_override():
-        kis = _build_mock_kis_client([
-            {
-                "pdno": "005930",
-                "prdt_name": "삼성전자",
-                "hldg_qty": "7",
-                "pchs_avg_pric": "68000",
-            },
-        ])
+        kis = _build_mock_kis_client(
+            [
+                {
+                    "pdno": "005930",
+                    "prdt_name": "삼성전자",
+                    "hldg_qty": "7",
+                    "pchs_avg_pric": "68000",
+                },
+            ]
+        )
         try:
             yield kis
         finally:
@@ -678,27 +707,51 @@ async def test_signal_alignment_matches_held_stocks_and_filters_by_score(
     )
     # 삼성/SK 모두 보유
     for stock_key, qty, price in (("samsung", 10, 70000), ("sk", 3, 210000)):
-        await RecordTransactionUseCase(session).execute(TransactionRecord(
-            account_id=account.id, stock_id=stocks[stock_key].id,
-            transaction_type="BUY", quantity=qty, price=Decimal(str(price)),
-            executed_at=date(2026, 3, 1), source="manual",
-        ))
+        await RecordTransactionUseCase(session).execute(
+            TransactionRecord(
+                account_id=account.id,
+                stock_id=stocks[stock_key].id,
+                transaction_type="BUY",
+                quantity=qty,
+                price=Decimal(str(price)),
+                executed_at=date(2026, 3, 1),
+                source="manual",
+            )
+        )
 
     sr = SignalRepository(session)
     # 삼성: score 85 / 55(컷오프 미달)
-    await sr.add(Signal(
-        stock_id=stocks["samsung"].id, signal_date=date(2026, 4, 10),
-        signal_type=SignalType.RAPID_DECLINE.value, score=85, grade="A", detail={},
-    ))
-    await sr.add(Signal(
-        stock_id=stocks["samsung"].id, signal_date=date(2026, 4, 12),
-        signal_type=SignalType.SHORT_SQUEEZE.value, score=55, grade="C", detail={},
-    ))
+    await sr.add(
+        Signal(
+            stock_id=stocks["samsung"].id,
+            signal_date=date(2026, 4, 10),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=85,
+            grade="A",
+            detail={},
+        )
+    )
+    await sr.add(
+        Signal(
+            stock_id=stocks["samsung"].id,
+            signal_date=date(2026, 4, 12),
+            signal_type=SignalType.SHORT_SQUEEZE.value,
+            score=55,
+            grade="C",
+            detail={},
+        )
+    )
     # SK: score 70 1건
-    await sr.add(Signal(
-        stock_id=stocks["sk"].id, signal_date=date(2026, 4, 11),
-        signal_type=SignalType.TREND_REVERSAL.value, score=70, grade="B", detail={},
-    ))
+    await sr.add(
+        Signal(
+            stock_id=stocks["sk"].id,
+            signal_date=date(2026, 4, 11),
+            signal_type=SignalType.TREND_REVERSAL.value,
+            score=70,
+            grade="B",
+            detail={},
+        )
+    )
 
     report = await SignalAlignmentUseCase(session).execute(
         account_id=account.id,
@@ -724,16 +777,28 @@ async def test_signal_alignment_excludes_signals_outside_window(
     account = await RegisterAccountUseCase(session).execute(
         account_alias="align-window", broker_code="manual", connection_type="manual"
     )
-    await RecordTransactionUseCase(session).execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="BUY", quantity=5, price=Decimal("70000"),
-        executed_at=date(2026, 2, 1), source="manual",
-    ))
+    await RecordTransactionUseCase(session).execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="BUY",
+            quantity=5,
+            price=Decimal("70000"),
+            executed_at=date(2026, 2, 1),
+            source="manual",
+        )
+    )
     # 기간 밖 시그널만 있음
-    await SignalRepository(session).add(Signal(
-        stock_id=stocks["samsung"].id, signal_date=date(2026, 2, 15),
-        signal_type=SignalType.RAPID_DECLINE.value, score=90, grade="A", detail={},
-    ))
+    await SignalRepository(session).add(
+        Signal(
+            stock_id=stocks["samsung"].id,
+            signal_date=date(2026, 2, 15),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=90,
+            grade="A",
+            detail={},
+        )
+    )
     report = await SignalAlignmentUseCase(session).execute(
         account_id=account.id,
         since=date(2026, 4, 1),
@@ -745,22 +810,32 @@ async def test_signal_alignment_excludes_signals_outside_window(
 
 
 @pytest.mark.asyncio
-async def test_signal_alignment_endpoint_e2e(
-    session: AsyncSession, client: httpx.AsyncClient
-) -> None:
+async def test_signal_alignment_endpoint_e2e(session: AsyncSession, client: httpx.AsyncClient) -> None:
     stocks = await _seed_stocks(session)
     account = await RegisterAccountUseCase(session).execute(
         account_alias="align-e2e", broker_code="manual", connection_type="manual"
     )
-    await RecordTransactionUseCase(session).execute(TransactionRecord(
-        account_id=account.id, stock_id=stocks["samsung"].id,
-        transaction_type="BUY", quantity=2, price=Decimal("70000"),
-        executed_at=date(2026, 4, 1), source="manual",
-    ))
-    await SignalRepository(session).add(Signal(
-        stock_id=stocks["samsung"].id, signal_date=date(2026, 4, 10),
-        signal_type=SignalType.RAPID_DECLINE.value, score=75, grade="B", detail={},
-    ))
+    await RecordTransactionUseCase(session).execute(
+        TransactionRecord(
+            account_id=account.id,
+            stock_id=stocks["samsung"].id,
+            transaction_type="BUY",
+            quantity=2,
+            price=Decimal("70000"),
+            executed_at=date(2026, 4, 1),
+            source="manual",
+        )
+    )
+    await SignalRepository(session).add(
+        Signal(
+            stock_id=stocks["samsung"].id,
+            signal_date=date(2026, 4, 10),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=75,
+            grade="B",
+            detail={},
+        )
+    )
 
     resp = await client.get(
         f"/api/portfolio/accounts/{account.id}/signal-alignment",

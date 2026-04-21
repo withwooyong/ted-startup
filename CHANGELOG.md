@@ -7,6 +7,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-22] chore: CI 에 ruff + mypy strict 게이트 추가 (`chore/ci-lint-type-gate`, PR #(예정))
+
+**이전 상태**: CI 가 pytest + next build + docker build 만 검증 — ruff/mypy 는 로컬 전용. 개발자별 환경 편차로 master 에 포매팅 누락·타입 에러 유입 위험.
+
+### Added
+- `.github/workflows/ci.yml` 에 **`backend-lint`** job 신설
+  - `uv run ruff check .` — lint 룰 (E/W/F/I/B/UP/N/SIM)
+  - `uv run ruff format --check .` — 포매팅 강제
+  - `uv run mypy app` — strict 타입 검증 (plugins: pydantic.mypy)
+- `backend-test` job 을 `needs: [backend-lint]` 로 의존 — lint 실패 시 pytest 스킵하여 자원 절감
+
+### Changed
+- **`src/backend_py` 전체 ruff format 일괄 적용** (98 파일 재포매팅, 로직 변경 0건). 본 레포에 ruff format 이 처음 도입된 상태였음
+- `app/adapter/web/routers/signals.py`: 리스트 컴프리헨션 내 `stocks.get(sig.stock_id)` 2회 호출 → `for` 루프로 풀어 `stock` 로컬 바인딩. mypy union-attr 2건 (pre-existing 부채) 해소 + 중복 `.get()` 호출 제거
+
+### Fixed
+- `scripts/fix_stock_names.py`, `scripts/seed_e2e_accounts.py`: ruff SIM117 (중첩 `async with` 결합) 2건 autofix
+
+### Verified
+- `uv run ruff check .` ✅
+- `uv run ruff format --check .` ✅ (123 files already formatted)
+- `uv run mypy app` ✅ (80 source files, no issues)
+- `uv run pytest -q` ✅ **295 passed, 1 deselected** — 회귀 0건
+
+### Decisions
+- **mypy 범위 `app/` 만**: tests/scripts 는 strict 미적용. 향후 확대 후보 (별도 PR). 테스트 코드는 mock 객체 다량 — strict 게이트 ROI 낮음
+- **단일 PR 통합**: format 98 파일 + lint 2건 + mypy 2건 + CI 변경을 한 PR 로 묶음. 분리 시 format PR 이 머지 전에 다른 PR 과 충돌할 위험 + 차기 작업 차단 최소화
+- **PR 5 이월 Hexagonal 부채**: 본 PR 에서 해소하지 않음. CI 게이트 추가는 현상 유지 위에서 게이트를 덮는 변경이므로 리팩터링과 분리
+
+---
+
 ## [2026-04-21] docs: 모바일 반응형 계획서 현행화 (`7b11d88`, PR #19)
 
 모바일 반응형 개선 작업계획서(`docs/mobile-responsive-plan.md`)를 **착수 전 현행화** — 작성(2026-04-20) 이후 머지된 PR #12·#15·#16 으로 UI 표면 유입 재진단.

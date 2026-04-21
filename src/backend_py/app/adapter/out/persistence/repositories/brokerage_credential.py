@@ -2,6 +2,7 @@
 
 설계: docs/kis-real-account-sync-plan.md § 3.2.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -103,10 +104,7 @@ class BrokerageAccountCredentialRepository:
 
         Returns: 1 이면 삭제됨, 0 이면 대상 없음.
         """
-        stmt = (
-            delete(BrokerageAccountCredential)
-            .where(BrokerageAccountCredential.account_id == account_id)
-        )
+        stmt = delete(BrokerageAccountCredential).where(BrokerageAccountCredential.account_id == account_id)
         # AsyncSession.execute 의 반환은 런타임상 CursorResult 지만 mypy 는 Result[Any] 로
         # 좁히지 못해 rowcount 접근이 type 오류. 안전한 런타임 동작을 기반으로 명시 캐스트.
         result: CursorResult[object] = await self._session.execute(stmt)  # type: ignore[assignment]
@@ -138,7 +136,5 @@ class BrokerageAccountCredentialRepository:
         )
 
     async def _find(self, account_id: int) -> BrokerageAccountCredential | None:
-        stmt = select(BrokerageAccountCredential).where(
-            BrokerageAccountCredential.account_id == account_id
-        )
+        stmt = select(BrokerageAccountCredential).where(BrokerageAccountCredential.account_id == account_id)
         return (await self._session.execute(stmt)).scalar_one_or_none()

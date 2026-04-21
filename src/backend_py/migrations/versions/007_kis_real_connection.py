@@ -7,6 +7,7 @@ Revision ID: 007_kis_real_connection
 Revises: 006_portfolio_excel_source
 Create Date: 2026-04-21
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

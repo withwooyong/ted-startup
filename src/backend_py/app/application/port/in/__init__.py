@@ -1,4 +1,5 @@
 """Inbound ports — UseCase 인터페이스."""
+
 from __future__ import annotations
 
 from datetime import date

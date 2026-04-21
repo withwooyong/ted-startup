@@ -18,6 +18,7 @@
 Rate limit:
 - 무료 키 일 10,000 호출 — 본 어댑터는 단건 호출만 수행. 캐시는 상위 UseCase 책임.
 """
+
 from __future__ import annotations
 
 import logging
@@ -86,14 +87,14 @@ class DartDisclosure:
 
 @dataclass(slots=True)
 class DartFinancialRow:
-    account_nm: str           # 계정명 (예: '매출액')
-    account_id: str | None    # XBRL 태그
-    fs_div: str               # CFS(연결) / OFS(개별)
-    fs_nm: str                # 재무제표명
-    sj_div: str               # BS / IS / CIS / CF 등
+    account_nm: str  # 계정명 (예: '매출액')
+    account_id: str | None  # XBRL 태그
+    fs_div: str  # CFS(연결) / OFS(개별)
+    fs_nm: str  # 재무제표명
+    sj_div: str  # BS / IS / CIS / CF 등
     sj_nm: str
-    thstrm_nm: str            # 당기 (예: '제 54 기')
-    thstrm_amount: Decimal    # 당기 금액
+    thstrm_nm: str  # 당기 (예: '제 54 기')
+    thstrm_amount: Decimal  # 당기 금액
     frmtrm_nm: str | None
     frmtrm_amount: Decimal | None
     bfefrmtrm_nm: str | None
@@ -152,12 +153,12 @@ class DartClient:
         s = settings or get_settings()
         self._api_key = s.dart_api_key
         timeout = httpx.Timeout(
-            connect=5.0, read=s.dart_request_timeout_seconds,
-            write=s.dart_request_timeout_seconds, pool=5.0,
+            connect=5.0,
+            read=s.dart_request_timeout_seconds,
+            write=s.dart_request_timeout_seconds,
+            pool=5.0,
         )
-        self._client = httpx.AsyncClient(
-            base_url=s.dart_base_url, timeout=timeout, transport=transport
-        )
+        self._client = httpx.AsyncClient(base_url=s.dart_base_url, timeout=timeout, transport=transport)
 
     @property
     def configured(self) -> bool:
@@ -188,9 +189,7 @@ class DartClient:
         merged = {"crtfc_key": self._api_key, **params}
         resp = await self._client.get(path, params=merged)
         if resp.status_code != 200:
-            raise DartUpstreamError(
-                f"DART HTTP {resp.status_code} path={path} body={resp.text[:200]}"
-            )
+            raise DartUpstreamError(f"DART HTTP {resp.status_code} path={path} body={resp.text[:200]}")
         try:
             body = cast(dict[str, Any], resp.json())
         except ValueError as exc:
@@ -198,9 +197,7 @@ class DartClient:
         status_code = str(body.get("status", ""))
         if status_code in (_OK, _NO_DATA):
             return body
-        raise DartUpstreamError(
-            f"DART status={status_code} message={body.get('message', '')}"
-        )
+        raise DartUpstreamError(f"DART status={status_code} message={body.get('message', '')}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -229,8 +226,8 @@ class DartClient:
         self,
         corp_code: str,
         *,
-        bgn_de: str,   # YYYYMMDD
-        end_de: str,   # YYYYMMDD
+        bgn_de: str,  # YYYYMMDD
+        end_de: str,  # YYYYMMDD
         page_no: int = 1,
         page_count: int = 20,
     ) -> list[DartDisclosure]:
@@ -248,16 +245,18 @@ class DartClient:
         raw = body.get("list") or []
         rows: list[DartDisclosure] = []
         for r in raw:
-            rows.append(DartDisclosure(
-                corp_code=str(r.get("corp_code", corp_code)),
-                corp_name=str(r.get("corp_name", "")),
-                stock_code=_str_or_none(r.get("stock_code")),
-                report_nm=str(r.get("report_nm", "")),
-                rcept_no=str(r.get("rcept_no", "")),
-                rcept_dt=str(r.get("rcept_dt", "")),
-                flr_nm=_str_or_none(r.get("flr_nm")),
-                rm=_str_or_none(r.get("rm")),
-            ))
+            rows.append(
+                DartDisclosure(
+                    corp_code=str(r.get("corp_code", corp_code)),
+                    corp_name=str(r.get("corp_name", "")),
+                    stock_code=_str_or_none(r.get("stock_code")),
+                    report_nm=str(r.get("report_nm", "")),
+                    rcept_no=str(r.get("rcept_no", "")),
+                    rcept_dt=str(r.get("rcept_dt", "")),
+                    flr_nm=_str_or_none(r.get("flr_nm")),
+                    rm=_str_or_none(r.get("rm")),
+                )
+            )
         return rows
 
     @retry(
@@ -281,14 +280,14 @@ class DartClient:
             "/corpCode.xml",
             params={"crtfc_key": self._api_key},
             timeout=httpx.Timeout(
-                connect=5.0, read=60.0, write=60.0, pool=5.0,
+                connect=5.0,
+                read=60.0,
+                write=60.0,
+                pool=5.0,
             ),
         )
         if resp.status_code != 200:
-            raise DartUpstreamError(
-                f"DART HTTP {resp.status_code} path=/corpCode.xml "
-                f"body={resp.text[:200]}"
-            )
+            raise DartUpstreamError(f"DART HTTP {resp.status_code} path=/corpCode.xml body={resp.text[:200]}")
         content = resp.content
         if content.startswith(b"PK\x03\x04"):
             return content
@@ -296,13 +295,8 @@ class DartClient:
         try:
             body = cast(dict[str, Any], resp.json())
         except ValueError as exc:
-            raise DartUpstreamError(
-                f"DART corpCode 예상치 못한 응답 head={content[:64]!r}"
-            ) from exc
-        raise DartUpstreamError(
-            f"DART corpCode status={body.get('status')} "
-            f"message={body.get('message', '')}"
-        )
+            raise DartUpstreamError(f"DART corpCode 예상치 못한 응답 head={content[:64]!r}") from exc
+        raise DartUpstreamError(f"DART corpCode status={body.get('status')} message={body.get('message', '')}")
 
     async def fetch_financial_summary(
         self,
@@ -310,7 +304,7 @@ class DartClient:
         *,
         bsns_year: int,
         reprt_code: str = "11011",  # 기본: 사업보고서(연간). 분기: 11013(1Q), 11012(반기), 11014(3Q)
-        fs_div: str = "CFS",        # CFS 연결 / OFS 별도
+        fs_div: str = "CFS",  # CFS 연결 / OFS 별도
     ) -> DartFinancialStatement:
         """단일회사 재무제표 주요계정 (전체 계정)."""
         params = {
@@ -323,21 +317,23 @@ class DartClient:
         rows: list[DartFinancialRow] = []
         if str(body.get("status")) == _OK:
             for r in body.get("list") or []:
-                rows.append(DartFinancialRow(
-                    account_nm=str(r.get("account_nm", "")),
-                    account_id=_str_or_none(r.get("account_id")),
-                    fs_div=str(r.get("fs_div", fs_div)),
-                    fs_nm=str(r.get("fs_nm", "")),
-                    sj_div=str(r.get("sj_div", "")),
-                    sj_nm=str(r.get("sj_nm", "")),
-                    thstrm_nm=str(r.get("thstrm_nm", "")),
-                    thstrm_amount=_to_decimal(r.get("thstrm_amount")) or Decimal("0"),
-                    frmtrm_nm=_str_or_none(r.get("frmtrm_nm")),
-                    frmtrm_amount=_to_decimal(r.get("frmtrm_amount")),
-                    bfefrmtrm_nm=_str_or_none(r.get("bfefrmtrm_nm")),
-                    bfefrmtrm_amount=_to_decimal(r.get("bfefrmtrm_amount")),
-                    currency=_str_or_none(r.get("currency")),
-                ))
+                rows.append(
+                    DartFinancialRow(
+                        account_nm=str(r.get("account_nm", "")),
+                        account_id=_str_or_none(r.get("account_id")),
+                        fs_div=str(r.get("fs_div", fs_div)),
+                        fs_nm=str(r.get("fs_nm", "")),
+                        sj_div=str(r.get("sj_div", "")),
+                        sj_nm=str(r.get("sj_nm", "")),
+                        thstrm_nm=str(r.get("thstrm_nm", "")),
+                        thstrm_amount=_to_decimal(r.get("thstrm_amount")) or Decimal("0"),
+                        frmtrm_nm=_str_or_none(r.get("frmtrm_nm")),
+                        frmtrm_amount=_to_decimal(r.get("frmtrm_amount")),
+                        bfefrmtrm_nm=_str_or_none(r.get("bfefrmtrm_nm")),
+                        bfefrmtrm_amount=_to_decimal(r.get("bfefrmtrm_amount")),
+                        currency=_str_or_none(r.get("currency")),
+                    )
+                )
         return DartFinancialStatement(
             corp_code=corp_code,
             bsns_year=bsns_year,

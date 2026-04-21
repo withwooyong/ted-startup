@@ -4,6 +4,7 @@ Revision ID: 002_notification_preference
 Revises: 001_init_schema
 Create Date: 2026-04-18
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

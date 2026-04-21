@@ -2,6 +2,7 @@
 
 KRX/Telegram 은 MagicMock/stub 으로 대체. DB 는 testcontainers PG16(conftest 공용).
 """
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -54,9 +55,7 @@ def db_cleaner(database_url: str):  # type: ignore[no-untyped-def]
                 )
             )
             # V2 migration 의 기본 row 복구(다른 테스트의 get_or_create 기대값)
-            conn.execute(
-                text("INSERT INTO notification_preference (id) VALUES (1) ON CONFLICT DO NOTHING")
-            )
+            conn.execute(text("INSERT INTO notification_preference (id) VALUES (1) ON CONFLICT DO NOTHING"))
     finally:
         sync_engine.dispose()
 
@@ -86,6 +85,7 @@ def test_is_trading_day_sunday_false() -> None:
 def _tele_stub_always_ok() -> TelegramClient:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
     return TelegramClient(
         Settings(telegram_bot_token="fake", telegram_chat_id="-1001"),
         transport=httpx.MockTransport(handler),
@@ -126,28 +126,43 @@ async def test_pipeline_skips_on_weekend() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_runs_three_steps_on_trading_day(
-    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001  — 픽스처 의존
+    engine,
+    database_url,
+    apply_migrations,
+    db_cleaner,  # noqa: ARG001  — 픽스처 의존
 ) -> None:
     # 파이프라인은 자체 세션 팩토리를 사용하므로 testcontainers 엔진을 직접 주입
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
     fake_prices = [
         StockPriceRow(
-            stock_code="005930", stock_name="삼성전자", market_type="KOSPI",
-            close_price=78_500, open_price=78_000, high_price=79_200, low_price=77_800,
-            volume=15_234_567, market_cap=468_500_000_000_000, change_rate="0.64",
+            stock_code="005930",
+            stock_name="삼성전자",
+            market_type="KOSPI",
+            close_price=78_500,
+            open_price=78_000,
+            high_price=79_200,
+            low_price=77_800,
+            volume=15_234_567,
+            market_cap=468_500_000_000_000,
+            change_rate="0.64",
         )
     ]
     fake_shorts = [
         ShortSellingRow(
-            stock_code="005930", stock_name="삼성전자",
-            short_volume=1_234_567, short_amount=98_765_432_100, short_ratio="8.1",
+            stock_code="005930",
+            stock_name="삼성전자",
+            short_volume=1_234_567,
+            short_amount=98_765_432_100,
+            short_ratio="8.1",
         )
     ]
     fake_lendings = [
         LendingBalanceRow(
-            stock_code="005930", stock_name="삼성전자",
-            balance_quantity=12_345_678, balance_amount=987_654_321_000,
+            stock_code="005930",
+            stock_name="삼성전자",
+            balance_quantity=12_345_678,
+            balance_amount=987_654_321_000,
         )
     ]
 
@@ -161,16 +176,17 @@ async def test_pipeline_runs_three_steps_on_trading_day(
     assert result.skipped is False
     names = [s.name for s in result.steps]
     assert names == ["collect", "detect", "notify"]
-    assert all(s.succeeded for s in result.steps), [
-        (s.name, s.error) for s in result.steps if not s.succeeded
-    ]
+    assert all(s.succeeded for s in result.steps), [(s.name, s.error) for s in result.steps if not s.succeeded]
     collect = next(s for s in result.steps if s.name == "collect")
     assert collect.summary and collect.summary.get("prices") == 1
 
 
 @pytest.mark.asyncio
 async def test_pipeline_step3_dispatches_seeded_signal_to_telegram(
-    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+    engine,
+    database_url,
+    apply_migrations,
+    db_cleaner,  # noqa: ARG001
 ) -> None:
     """Step 3(notify) 배선 회귀 가드.
 
@@ -188,11 +204,16 @@ async def test_pipeline_step3_dispatches_seeded_signal_to_telegram(
         stock = Stock(stock_code="035420", stock_name="NAVER", market_type="KOSPI")
         session.add(stock)
         await session.flush()
-        session.add(Signal(
-            stock_id=stock.id, signal_date=trading_date,
-            signal_type=SignalType.RAPID_DECLINE.value,
-            score=90, grade="A", detail={"seed": True},
-        ))
+        session.add(
+            Signal(
+                stock_id=stock.id,
+                signal_date=trading_date,
+                signal_type=SignalType.RAPID_DECLINE.value,
+                score=90,
+                grade="A",
+                detail={"seed": True},
+            )
+        )
         await session.commit()
 
     captured: list[dict[str, object]] = []
@@ -216,8 +237,9 @@ async def test_pipeline_step3_dispatches_seeded_signal_to_telegram(
     assert result.skipped is False
     outcomes = {s.name: s for s in result.steps}
     assert outcomes["notify"].succeeded is True
-    assert outcomes["notify"].summary == {"sent": 1}, \
+    assert outcomes["notify"].summary == {"sent": 1}, (
         f"seed 된 시그널이 Telegram 으로 발송돼야 함. 실제: {outcomes['notify'].summary}"
+    )
     assert len(captured) == 1, "Telegram 호출 정확히 1회"
     body = captured[0]
     assert body["parse_mode"] == "HTML"
@@ -227,7 +249,10 @@ async def test_pipeline_step3_dispatches_seeded_signal_to_telegram(
 
 @pytest.mark.asyncio
 async def test_pipeline_collect_failure_is_isolated(
-    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+    engine,
+    database_url,
+    apply_migrations,
+    db_cleaner,  # noqa: ARG001
 ) -> None:
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -260,7 +285,9 @@ async def test_pipeline_collect_failure_is_isolated(
 def test_build_scheduler_registers_weekday_cron() -> None:
     # backtest 는 별도 테스트에서 검증 — 여기서는 market_data 단독 등록만 확인
     settings = Settings(
-        scheduler_hour_kst=6, scheduler_minute_kst=30, backtest_enabled=False,
+        scheduler_hour_kst=6,
+        scheduler_minute_kst=30,
+        backtest_enabled=False,
     )
     scheduler = build_scheduler(settings)
     jobs = scheduler.get_jobs()
@@ -305,7 +332,10 @@ def test_build_scheduler_skips_backtest_when_disabled() -> None:
 
 @pytest.mark.asyncio
 async def test_backtest_pipeline_persists_result_rows(
-    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+    engine,
+    database_url,
+    apply_migrations,
+    db_cleaner,  # noqa: ARG001
 ) -> None:
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
@@ -318,22 +348,30 @@ async def test_backtest_pipeline_persists_result_rows(
 
         # 40 영업일치 우상향 가격 (+1%/day) — 5/10/20일 수익률 모두 양수
         for i in range(40):
-            session.add(StockPrice(
-                stock_id=stock.id,
-                trading_date=base_date + timedelta(days=i),
-                close_price=int(10_000 * (1.01 ** i)),
-            ))
+            session.add(
+                StockPrice(
+                    stock_id=stock.id,
+                    trading_date=base_date + timedelta(days=i),
+                    close_price=int(10_000 * (1.01**i)),
+                )
+            )
         # 시그널 1건 (RAPID_DECLINE) seed
-        session.add(Signal(
-            stock_id=stock.id,
-            signal_date=base_date,
-            signal_type=SignalType.RAPID_DECLINE.value,
-            score=85, grade="A", detail={"seed": True},
-        ))
+        session.add(
+            Signal(
+                stock_id=stock.id,
+                signal_date=base_date,
+                signal_type=SignalType.RAPID_DECLINE.value,
+                score=85,
+                grade="A",
+                detail={"seed": True},
+            )
+        )
         await session.commit()
 
     result = await run_backtest_pipeline(
-        period_end=base_date, period_years=1, session_factory=factory,
+        period_end=base_date,
+        period_years=1,
+        session_factory=factory,
     )
 
     assert result.succeeded is True
@@ -347,11 +385,15 @@ async def test_backtest_pipeline_persists_result_rows(
 
     # DB 확인 — backtest_result 에 RAPID_DECLINE 1건 append
     async with factory() as session:
-        rows = (await session.execute(
-            select(BacktestResult).where(
-                BacktestResult.signal_type == SignalType.RAPID_DECLINE.value
+        rows = (
+            (
+                await session.execute(
+                    select(BacktestResult).where(BacktestResult.signal_type == SignalType.RAPID_DECLINE.value)
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         row = rows[0]
         assert row.total_signals == 1
@@ -362,13 +404,18 @@ async def test_backtest_pipeline_persists_result_rows(
 
 @pytest.mark.asyncio
 async def test_backtest_pipeline_handles_empty_period(
-    engine, database_url, apply_migrations, db_cleaner  # noqa: ARG001
+    engine,
+    database_url,
+    apply_migrations,
+    db_cleaner,  # noqa: ARG001
 ) -> None:
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
     # 시그널 0 건 — 엔진은 signals_processed=0 으로 조기 종료, result_rows=0
     result = await run_backtest_pipeline(
-        period_end=date(2020, 6, 30), period_years=1, session_factory=factory,
+        period_end=date(2020, 6, 30),
+        period_years=1,
+        session_factory=factory,
     )
     assert result.succeeded is True
     assert result.execution is not None

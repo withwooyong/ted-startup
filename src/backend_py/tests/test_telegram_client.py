@@ -1,4 +1,5 @@
 """TelegramClient 단위 테스트 — httpx.MockTransport 로 네트워크 없이 검증."""
+
 from __future__ import annotations
 
 import json

@@ -7,6 +7,7 @@ Revision ID: 004_dart_corp_mapping
 Revises: 003_portfolio_schema
 Create Date: 2026-04-18
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

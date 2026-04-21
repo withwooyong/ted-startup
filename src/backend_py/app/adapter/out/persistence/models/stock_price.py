@@ -26,6 +26,4 @@ class StockPrice(Base):
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     market_cap: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     change_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

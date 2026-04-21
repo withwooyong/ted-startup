@@ -1,4 +1,5 @@
 """/api/signals, /api/stocks/{code} 및 탐지 실행 라우터."""
+
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -84,14 +85,15 @@ async def list_latest_signals(
 
     stock_ids = list({s.stock_id for s in signals})
     stocks = {s.id: s for s in await StockRepository(session).list_by_ids(stock_ids)}
-    return LatestSignalsResponse(
-        signal_date=latest,
-        signals=[
+    items: list[SignalResponse] = []
+    for sig in signals:
+        stock = stocks.get(sig.stock_id)
+        items.append(
             SignalResponse(
                 id=sig.id,
                 stock_id=sig.stock_id,
-                stock_code=stocks.get(sig.stock_id).stock_code if stocks.get(sig.stock_id) else None,
-                stock_name=stocks.get(sig.stock_id).stock_name if stocks.get(sig.stock_id) else None,
+                stock_code=stock.stock_code if stock else None,
+                stock_name=stock.stock_name if stock else None,
                 signal_date=sig.signal_date,
                 signal_type=sig.signal_type,
                 score=sig.score,
@@ -101,9 +103,8 @@ async def list_latest_signals(
                 return_10d=sig.return_10d,
                 return_20d=sig.return_20d,
             )
-            for sig in signals
-        ],
-    )
+        )
+    return LatestSignalsResponse(signal_date=latest, signals=items)
 
 
 @router.get("/stocks/{stock_code}", response_model=StockDetailResponse)

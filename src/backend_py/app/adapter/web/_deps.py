@@ -1,4 +1,5 @@
 """FastAPI Depends 모음 — 세션·KRX 클라이언트·관리자 API Key 검증."""
+
 from __future__ import annotations
 
 import hmac

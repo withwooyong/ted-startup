@@ -1,4 +1,5 @@
 """모든 라우터 모음."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

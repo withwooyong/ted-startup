@@ -3,6 +3,7 @@
 실제 KIS 체결내역 엑셀 샘플을 확보하지 못한 상태라 fixture 를 openpyxl 로 직접
 작성해 테스트. 컬럼 alias 가 실 파일과 어긋나면 `_COLUMN_ALIASES` 를 보정해야 함.
 """
+
 from __future__ import annotations
 
 import io
@@ -158,9 +159,7 @@ def test_parser_accepts_column_aliases() -> None:
 async def test_service_imports_and_creates_missing_stock(session: AsyncSession) -> None:
     account = await _seed_account(session)
     # 삼성전자만 사전 등록 — SK하이닉스는 service 가 자동 생성해야 함
-    samsung = await StockRepository(session).add(
-        Stock(stock_code="005930", stock_name="삼성전자", market_type="KOSPI")
-    )
+    samsung = await StockRepository(session).add(Stock(stock_code="005930", stock_name="삼성전자", market_type="KOSPI"))
     xlsx = _make_xlsx(
         columns=_KIS_COLUMNS,
         rows=[
@@ -169,9 +168,7 @@ async def test_service_imports_and_creates_missing_stock(session: AsyncSession) 
         ],
     )
 
-    result = await ExcelImportService(session).import_from_xlsx(
-        account_id=account.id, file_bytes=xlsx
-    )
+    result = await ExcelImportService(session).import_from_xlsx(account_id=account.id, file_bytes=xlsx)
     assert result.total_rows == 2
     assert result.imported == 2
     assert result.skipped_duplicates == 0
@@ -192,15 +189,11 @@ async def test_service_skips_duplicates_on_repeated_import(session: AsyncSession
         columns=_KIS_COLUMNS,
         rows=[["2026-04-01", "005930", "삼성전자", "매수", 10, 72000]],
     )
-    first = await ExcelImportService(session).import_from_xlsx(
-        account_id=account.id, file_bytes=xlsx
-    )
+    first = await ExcelImportService(session).import_from_xlsx(account_id=account.id, file_bytes=xlsx)
     assert first.imported == 1 and first.skipped_duplicates == 0
 
     # 동일 파일 재업로드 → 1건 duplicate
-    second = await ExcelImportService(session).import_from_xlsx(
-        account_id=account.id, file_bytes=xlsx
-    )
+    second = await ExcelImportService(session).import_from_xlsx(account_id=account.id, file_bytes=xlsx)
     assert second.imported == 0
     assert second.skipped_duplicates == 1
 
@@ -209,24 +202,17 @@ async def test_service_skips_duplicates_on_repeated_import(session: AsyncSession
 async def test_service_raises_when_account_missing(session: AsyncSession) -> None:
     xlsx = _make_xlsx(columns=_KIS_COLUMNS, rows=[])
     with pytest.raises(AccountNotFoundForImportError):
-        await ExcelImportService(session).import_from_xlsx(
-            account_id=99_999, file_bytes=xlsx
-        )
+        await ExcelImportService(session).import_from_xlsx(account_id=99_999, file_bytes=xlsx)
 
 
 @pytest.mark.asyncio
 async def test_service_raises_on_too_many_rows(session: AsyncSession) -> None:
     account = await _seed_account(session, alias="big")
     # MAX_ROWS(10_000) + 1 로 구성
-    rows = [
-        ["2026-04-01", "005930", "삼성전자", "매수", 1, 1]
-        for _ in range(10_001)
-    ]
+    rows = [["2026-04-01", "005930", "삼성전자", "매수", 1, 1] for _ in range(10_001)]
     xlsx = _make_xlsx(columns=_KIS_COLUMNS, rows=rows)
     with pytest.raises(TooManyRowsError):
-        await ExcelImportService(session).import_from_xlsx(
-            account_id=account.id, file_bytes=xlsx
-        )
+        await ExcelImportService(session).import_from_xlsx(account_id=account.id, file_bytes=xlsx)
 
 
 # -----------------------------------------------------------------------------
@@ -235,9 +221,7 @@ async def test_service_raises_on_too_many_rows(session: AsyncSession) -> None:
 
 
 @pytest_asyncio.fixture
-async def app_with_session(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[FastAPI]:
+async def app_with_session(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
     monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
     get_settings.cache_clear()
     app = create_app()
@@ -265,9 +249,7 @@ async def client(app_with_session: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 
 
 @pytest.mark.asyncio
-async def test_router_happy_path(
-    session: AsyncSession, client: httpx.AsyncClient
-) -> None:
+async def test_router_happy_path(session: AsyncSession, client: httpx.AsyncClient) -> None:
     account = await _seed_account(session, alias="router-acc")
     xlsx = _make_xlsx(
         columns=_KIS_COLUMNS,
@@ -291,9 +273,7 @@ async def test_router_happy_path(
 
 
 @pytest.mark.asyncio
-async def test_router_rejects_non_xlsx_extension(
-    session: AsyncSession, client: httpx.AsyncClient
-) -> None:
+async def test_router_rejects_non_xlsx_extension(session: AsyncSession, client: httpx.AsyncClient) -> None:
     account = await _seed_account(session, alias="router-acc2")
     resp = await client.post(
         f"/api/portfolio/accounts/{account.id}/import/excel",
@@ -304,9 +284,7 @@ async def test_router_rejects_non_xlsx_extension(
 
 
 @pytest.mark.asyncio
-async def test_router_returns_422_on_missing_columns(
-    session: AsyncSession, client: httpx.AsyncClient
-) -> None:
+async def test_router_returns_422_on_missing_columns(session: AsyncSession, client: httpx.AsyncClient) -> None:
     account = await _seed_account(session, alias="router-acc3")
     xlsx = _make_xlsx(
         columns=["체결일자", "종목코드"],  # 필수 대부분 누락

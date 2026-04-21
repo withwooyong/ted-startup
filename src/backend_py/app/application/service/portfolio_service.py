@@ -7,6 +7,7 @@
 
 수동 등록(P10)과 KIS 동기화(P11)는 모두 `RecordTransactionUseCase` 뒤에 얹힌다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -203,9 +204,7 @@ class SignalAlignmentReport:
 # ---------- Shared helpers ----------
 
 
-async def _ensure_kis_real_account(
-    account_repo: BrokerageAccountRepository, account_id: int
-) -> BrokerageAccount:
+async def _ensure_kis_real_account(account_repo: BrokerageAccountRepository, account_id: int) -> BrokerageAccount:
     """credential 등록·조회·연결테스트·실 sync 공통 전처리.
 
     계좌 존재 + `connection_type='kis_rest_real'` + `environment='real'` 보장.
@@ -216,13 +215,10 @@ async def _ensure_kis_real_account(
         raise AccountNotFoundError(f"account_id={account_id} 없음")
     if account.connection_type != "kis_rest_real":
         raise UnsupportedConnectionError(
-            f"실계정 전용 기능 — connection_type='kis_rest_real' 필요 "
-            f"(현재 {account.connection_type})"
+            f"실계정 전용 기능 — connection_type='kis_rest_real' 필요 (현재 {account.connection_type})"
         )
     if account.environment != "real":
-        raise InvalidRealEnvironmentError(
-            "kis_rest_real 계좌는 environment='real' 필수"
-        )
+        raise InvalidRealEnvironmentError("kis_rest_real 계좌는 environment='real' 필수")
     return account
 
 
@@ -252,13 +248,9 @@ class RegisterAccountUseCase:
         # connection_type × environment 조합 검증 — 운영 실수 방지.
         # kis_rest_real 은 오직 environment='real' 과만, 나머지는 'mock' 과만 짝지어야 함.
         if connection_type == "kis_rest_real" and environment != "real":
-            raise InvalidRealEnvironmentError(
-                "kis_rest_real 계좌는 environment='real' 필수"
-            )
+            raise InvalidRealEnvironmentError("kis_rest_real 계좌는 environment='real' 필수")
         if connection_type != "kis_rest_real" and environment == "real":
-            raise InvalidRealEnvironmentError(
-                "environment='real' 은 connection_type='kis_rest_real' 에서만 허용"
-            )
+            raise InvalidRealEnvironmentError("environment='real' 은 connection_type='kis_rest_real' 에서만 허용")
 
         existing = await self._repo.find_by_alias(account_alias)
         if existing is not None:
@@ -318,9 +310,7 @@ class RecordTransactionUseCase:
         return tx
 
     async def _apply_holding(self, record: TransactionRecord) -> None:
-        holding = await self._holding_repo.find_by_account_and_stock(
-            record.account_id, record.stock_id
-        )
+        holding = await self._holding_repo.find_by_account_and_stock(record.account_id, record.stock_id)
         qty_delta = record.quantity if record.transaction_type == "BUY" else -record.quantity
 
         if holding is None:
@@ -339,16 +329,12 @@ class RecordTransactionUseCase:
 
         new_qty = holding.quantity + qty_delta
         if new_qty < 0:
-            raise InsufficientHoldingError(
-                f"잔고 부족: 보유 {holding.quantity} vs 매도 {record.quantity}"
-            )
+            raise InsufficientHoldingError(f"잔고 부족: 보유 {holding.quantity} vs 매도 {record.quantity}")
         if record.transaction_type == "BUY":
             # 가중평균 평단가 갱신
             prev_cost = Decimal(holding.quantity) * holding.avg_buy_price
             add_cost = Decimal(record.quantity) * record.price
-            holding.avg_buy_price = (
-                (prev_cost + add_cost) / Decimal(new_qty)
-            ).quantize(Decimal("0.01"))
+            holding.avg_buy_price = ((prev_cost + add_cost) / Decimal(new_qty)).quantize(Decimal("0.01"))
         holding.quantity = new_qty
         holding.last_transacted_at = record.executed_at
         await self._holding_repo.upsert(holding)
@@ -379,7 +365,9 @@ class ComputeSnapshotUseCase:
             if price is None:
                 logger.warning(
                     "스냅샷 skip: 시세 부재 account=%d stock=%d asof=%s",
-                    account_id, h.stock_id, snapshot_date,
+                    account_id,
+                    h.stock_id,
+                    snapshot_date,
                 )
                 continue
             value = Decimal(h.quantity) * price
@@ -450,9 +438,7 @@ class ComputePerformanceUseCase:
         self._session = session
         self._snapshot_repo = PortfolioSnapshotRepository(session)
 
-    async def execute(
-        self, *, account_id: int, start: date, end: date
-    ) -> PerformanceReport:
+    async def execute(self, *, account_id: int, start: date, end: date) -> PerformanceReport:
         snaps = await self._snapshot_repo.list_between(account_id, start, end)
         if len(snaps) < 2:
             return PerformanceReport(
@@ -537,18 +523,20 @@ class SignalAlignmentUseCase:
         total = len(holdings)
         if not holdings:
             return SignalAlignmentReport(
-                account_id=account_id, since=since, until=until,
-                min_score=min_score, total_holdings=0,
-                aligned_holdings=0, items=[],
+                account_id=account_id,
+                since=since,
+                until=until,
+                min_score=min_score,
+                total_holdings=0,
+                aligned_holdings=0,
+                items=[],
             )
 
         stock_ids = [h.stock_id for h in holdings]
         stocks = await self._stock_repo.list_by_ids(stock_ids)
         stock_map: dict[int, Stock] = {s.id: s for s in stocks}
 
-        signals = await self._signal_repo.list_by_stocks_between(
-            stock_ids, since, until, min_score=min_score
-        )
+        signals = await self._signal_repo.list_by_stocks_between(stock_ids, since, until, min_score=min_score)
         # stock_id → [Signal...] 버킷
         bucket: dict[int, list[Signal]] = {}
         for sig in signals:
@@ -627,9 +615,7 @@ class SyncPortfolioFromKisUseCase:
         if account is None:
             raise AccountNotFoundError(f"account_id={account_id} 없음")
         if account.connection_type not in ("kis_rest_mock", "kis_rest_real"):
-            raise UnsupportedConnectionError(
-                f"connection_type={account.connection_type} 는 동기화 비지원"
-            )
+            raise UnsupportedConnectionError(f"connection_type={account.connection_type} 는 동기화 비지원")
 
         # connection_type × environment 조합 검증을 분기 진입 전에 수행. 공통 규칙은
         # `_ensure_kis_real_account` 와 `_fetch_balance_mock` 에 집중돼 있고, execute
@@ -658,9 +644,7 @@ class SyncPortfolioFromKisUseCase:
                 )
                 stock_created += 1
 
-            holding = await self._holding_repo.find_by_account_and_stock(
-                account_id, stock.id
-            )
+            holding = await self._holding_repo.find_by_account_and_stock(account_id, stock.id)
             if holding is None:
                 holding = PortfolioHolding(
                     account_id=account_id,
@@ -703,14 +687,10 @@ class SyncPortfolioFromKisUseCase:
         """
         if self._credential_repo is None or self._real_client_factory is None:
             # 호출자가 REAL 경로용 DI 를 주입하지 않았음. 라우터/테스트 배선 오류.
-            raise RuntimeError(
-                "kis_rest_real 동기화는 credential_repo + real_client_factory 주입 필수"
-            )
+            raise RuntimeError("kis_rest_real 동기화는 credential_repo + real_client_factory 주입 필수")
         credentials = await self._credential_repo.get_decrypted(account_id)
         if credentials is None:
-            raise CredentialNotFoundError(
-                f"account_id={account_id} credential 미등록 — Settings 에서 등록 후 재시도"
-            )
+            raise CredentialNotFoundError(f"account_id={account_id} credential 미등록 — Settings 에서 등록 후 재시도")
         try:
             async with self._real_client_factory(credentials) as client:
                 return await client.fetch_balance()
@@ -720,9 +700,7 @@ class SyncPortfolioFromKisUseCase:
     async def _fetch_balance_mock(self, environment: str) -> list[KisHoldingRow]:
         """kis_rest_mock 분기 — 주입된 프로세스 공유 MOCK 클라이언트 사용."""
         if environment != "mock":
-            raise InvalidRealEnvironmentError(
-                "kis_rest_mock 계좌는 environment='mock' 필수"
-            )
+            raise InvalidRealEnvironmentError("kis_rest_mock 계좌는 environment='mock' 필수")
         if self._kis is None:
             raise RuntimeError("kis_rest_mock 동기화는 kis_client 주입 필수")
         try:
@@ -764,18 +742,14 @@ class TestKisConnectionUseCase:
         await _ensure_kis_real_account(self._account_repo, account_id)
         credentials = await self._cred_repo.get_decrypted(account_id)
         if credentials is None:
-            raise CredentialNotFoundError(
-                f"account_id={account_id} credential 미등록 — Settings 에서 등록 필요"
-            )
+            raise CredentialNotFoundError(f"account_id={account_id} credential 미등록 — Settings 에서 등록 필요")
         try:
             async with self._factory(credentials) as client:
                 await client.test_connection()
         except KisClientError as exc:
             # 토큰 발급 실패 = KIS 업스트림 오류. 라우터에서 502 로 변환.
             raise SyncError(f"KIS 토큰 발급 실패: {exc}") from exc
-        return TestConnectionResult(
-            account_id=account_id, environment="real", ok=True
-        )
+        return TestConnectionResult(account_id=account_id, environment="real", ok=True)
 
 
 # ---------- P15 — KIS 실계정 자격증명 CRUD (2단계 온보딩) ----------
@@ -798,9 +772,7 @@ class BrokerageCredentialUseCase:
         self._account_repo = BrokerageAccountRepository(session)
         self._cred_repo = BrokerageAccountCredentialRepository(session, cipher)
 
-    async def create(
-        self, *, account_id: int, credentials: KisCredentials
-    ) -> MaskedCredentialView:
+    async def create(self, *, account_id: int, credentials: KisCredentials) -> MaskedCredentialView:
         """신규 등록 — 이미 존재하면 `CredentialAlreadyExistsError`. POST 매핑."""
         await self._ensure_real_account(account_id)
         existing = await self._cred_repo.find_row(account_id)
@@ -811,23 +783,17 @@ class BrokerageCredentialUseCase:
         await self._cred_repo.upsert(account_id, credentials)
         return self._require_view(await self._cred_repo.get_masked_view(account_id), account_id)
 
-    async def replace(
-        self, *, account_id: int, credentials: KisCredentials
-    ) -> MaskedCredentialView:
+    async def replace(self, *, account_id: int, credentials: KisCredentials) -> MaskedCredentialView:
         """기존 교체 — 존재하지 않으면 `CredentialNotFoundError`. PUT 매핑."""
         await self._ensure_real_account(account_id)
         existing = await self._cred_repo.find_row(account_id)
         if existing is None:
-            raise CredentialNotFoundError(
-                f"account_id={account_id} credential 미등록 — POST 로 생성"
-            )
+            raise CredentialNotFoundError(f"account_id={account_id} credential 미등록 — POST 로 생성")
         await self._cred_repo.upsert(account_id, credentials)
         return self._require_view(await self._cred_repo.get_masked_view(account_id), account_id)
 
     @staticmethod
-    def _require_view(
-        view: MaskedCredentialView | None, account_id: int
-    ) -> MaskedCredentialView:
+    def _require_view(view: MaskedCredentialView | None, account_id: int) -> MaskedCredentialView:
         """`upsert` 직후 조회이므로 항상 존재해야 함.
 
         `assert` 는 `python -O` 에서 제거돼 프로덕션에서 silent None 반환 위험이 있으므로
@@ -845,9 +811,7 @@ class BrokerageCredentialUseCase:
         await self._ensure_real_account(account_id)
         view = await self._cred_repo.get_masked_view(account_id)
         if view is None:
-            raise CredentialNotFoundError(
-                f"account_id={account_id} credential 미등록"
-            )
+            raise CredentialNotFoundError(f"account_id={account_id} credential 미등록")
         return view
 
     async def delete(self, account_id: int) -> None:
@@ -855,9 +819,7 @@ class BrokerageCredentialUseCase:
         await self._ensure_real_account(account_id)
         deleted = await self._cred_repo.delete(account_id)
         if not deleted:
-            raise CredentialNotFoundError(
-                f"account_id={account_id} credential 미등록"
-            )
+            raise CredentialNotFoundError(f"account_id={account_id} credential 미등록")
 
     async def _ensure_real_account(self, account_id: int) -> BrokerageAccount:
         """대상 계좌 존재 + `kis_rest_real` + `environment='real'` 보장.

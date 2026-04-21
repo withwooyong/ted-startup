@@ -8,6 +8,7 @@
 현재 구현체: OpenAIProvider (Plan B). 추후 PerplexityProvider / ClaudeProvider 를
 동일 Protocol 뒤에 꽂아 AI_PROVIDER 환경변수로 Plan A 전환 가능하게 설계.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -33,7 +34,7 @@ class Tier1CompanyInfo:
 @dataclass(slots=True)
 class Tier1DisclosureItem:
     report_nm: str
-    rcept_dt: str        # YYYYMMDD
+    rcept_dt: str  # YYYYMMDD
     rcept_no: str
     viewer_url: str
 
@@ -66,6 +67,7 @@ class Tier1SignalItem:
 @dataclass(slots=True)
 class Tier1Payload:
     """공식 출처 전량 — 리포트 본문 숫자·사실의 유일한 원천."""
+
     stock_code: str
     stock_name: str
     company: Tier1CompanyInfo | None
@@ -92,8 +94,8 @@ class Tier2QualitativeItem:
 
 @dataclass(slots=True)
 class ReportSource:
-    tier: int            # 1 또는 2
-    type: str            # 'dart' | 'krx' | 'ecos' | 'news' | 'official'
+    tier: int  # 1 또는 2
+    type: str  # 'dart' | 'krx' | 'ecos' | 'news' | 'official'
     url: str
     label: str
     published_at: str | None = None
@@ -105,7 +107,7 @@ class ReportContent:
     strengths: list[str]
     risks: list[str]
     outlook: str
-    opinion: str          # BUY / HOLD / SELL / NEUTRAL
+    opinion: str  # BUY / HOLD / SELL / NEUTRAL
     disclaimer: str
 
 
@@ -148,9 +150,7 @@ class LLMProvider(Protocol):
         """Tier1+Tier2 → 구조화 리포트. 숫자는 Tier1 만, 정성은 Tier2 만 인용."""
         ...
 
-    async def repackage(
-        self, report: GeneratedReport
-    ) -> GeneratedReport:
+    async def repackage(self, report: GeneratedReport) -> GeneratedReport:
         """프론트 카드 UI 형태로 재구성. 기본 구현은 passthrough."""
         ...
 

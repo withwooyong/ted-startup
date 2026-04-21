@@ -1,4 +1,5 @@
 """NotificationService — N+1 방어 + HTML 이스케이프 + 라벨 매핑 + 필터·실패·no-op 회귀 테스트."""
+
 from __future__ import annotations
 
 import json
@@ -34,9 +35,7 @@ def _tele_disabled() -> TelegramClient:
 
 
 @pytest.mark.asyncio
-async def test_notify_signals_bulk_fetches_stocks_once(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_notify_signals_bulk_fetches_stocks_once(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """3개 시그널 발송 시 stock 조회가 '단일 list_by_ids 1회'로 수행되는지 검증 (N+1 금지)."""
     # 종목 3개 시드
     stock_repo = StockRepository(session)
@@ -88,9 +87,7 @@ async def test_notify_signals_bulk_fetches_stocks_once(
 @pytest.mark.asyncio
 async def test_notify_signals_escapes_html_in_stock_name(session: AsyncSession) -> None:
     """종목명에 <, & 가 포함돼도 Telegram HTML parse 안전하게 이스케이프."""
-    stock = await StockRepository(session).add(
-        Stock(stock_code="123456", stock_name="A<b>&조작", market_type="KOSPI")
-    )
+    stock = await StockRepository(session).add(Stock(stock_code="123456", stock_name="A<b>&조작", market_type="KOSPI"))
     await NotificationPreferenceRepository(session).get_or_create()
     signal = await SignalRepository(session).add(
         Signal(
@@ -107,6 +104,7 @@ async def test_notify_signals_escapes_html_in_stock_name(session: AsyncSession) 
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json
+
         body = json.loads(request.content)
         captured["text"] = body["text"]
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
@@ -123,9 +121,7 @@ async def test_notify_signals_escapes_html_in_stock_name(session: AsyncSession) 
 
 @pytest.mark.asyncio
 async def test_notify_signals_uses_korean_label(session: AsyncSession) -> None:
-    stock = await StockRepository(session).add(
-        Stock(stock_code="654321", stock_name="테스트종목", market_type="KOSPI")
-    )
+    stock = await StockRepository(session).add(Stock(stock_code="654321", stock_name="테스트종목", market_type="KOSPI"))
     await NotificationPreferenceRepository(session).get_or_create()
     signal = await SignalRepository(session).add(
         Signal(
@@ -142,6 +138,7 @@ async def test_notify_signals_uses_korean_label(session: AsyncSession) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json
+
         body = json.loads(request.content)
         captured["text"] = body["text"]
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
@@ -167,14 +164,26 @@ async def test_min_score_filter_drops_below_threshold(session: AsyncSession) -> 
     await NotificationPreferenceRepository(session).get_or_create()  # 기본 min_score=60
 
     sig_repo = SignalRepository(session)
-    low = await sig_repo.add(Signal(
-        stock_id=stock_low.id, signal_date=date(2026, 4, 17),
-        signal_type=SignalType.RAPID_DECLINE.value, score=55, grade="C", detail={},
-    ))
-    high = await sig_repo.add(Signal(
-        stock_id=stock_high.id, signal_date=date(2026, 4, 17),
-        signal_type=SignalType.RAPID_DECLINE.value, score=80, grade="A", detail={},
-    ))
+    low = await sig_repo.add(
+        Signal(
+            stock_id=stock_low.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=55,
+            grade="C",
+            detail={},
+        )
+    )
+    high = await sig_repo.add(
+        Signal(
+            stock_id=stock_high.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=80,
+            grade="A",
+            detail={},
+        )
+    )
 
     captured: list[str] = []
 
@@ -195,26 +204,42 @@ async def test_min_score_filter_drops_below_threshold(session: AsyncSession) -> 
 @pytest.mark.asyncio
 async def test_signal_types_filter_drops_disabled_types(session: AsyncSession) -> None:
     """pref.signal_types=[RAPID_DECLINE] 이면 TREND_REVERSAL/SHORT_SQUEEZE 는 드롭."""
-    stock = await StockRepository(session).add(
-        Stock(stock_code="222222", stock_name="타입필터", market_type="KOSPI")
-    )
+    stock = await StockRepository(session).add(Stock(stock_code="222222", stock_name="타입필터", market_type="KOSPI"))
     pref = await NotificationPreferenceRepository(session).get_or_create()
     pref.signal_types = ["RAPID_DECLINE"]
     await NotificationPreferenceRepository(session).save(pref)
 
     sig_repo = SignalRepository(session)
-    rapid = await sig_repo.add(Signal(
-        stock_id=stock.id, signal_date=date(2026, 4, 17),
-        signal_type=SignalType.RAPID_DECLINE.value, score=85, grade="A", detail={},
-    ))
-    trend = await sig_repo.add(Signal(
-        stock_id=stock.id, signal_date=date(2026, 4, 17),
-        signal_type=SignalType.TREND_REVERSAL.value, score=85, grade="A", detail={},
-    ))
-    squeeze = await sig_repo.add(Signal(
-        stock_id=stock.id, signal_date=date(2026, 4, 17),
-        signal_type=SignalType.SHORT_SQUEEZE.value, score=85, grade="A", detail={},
-    ))
+    rapid = await sig_repo.add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=85,
+            grade="A",
+            detail={},
+        )
+    )
+    trend = await sig_repo.add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.TREND_REVERSAL.value,
+            score=85,
+            grade="A",
+            detail={},
+        )
+    )
+    squeeze = await sig_repo.add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.SHORT_SQUEEZE.value,
+            score=85,
+            grade="A",
+            detail={},
+        )
+    )
 
     captured: list[str] = []
 
@@ -232,20 +257,22 @@ async def test_signal_types_filter_drops_disabled_types(session: AsyncSession) -
 
 
 @pytest.mark.asyncio
-async def test_telegram_disabled_skips_db_access(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_telegram_disabled_skips_db_access(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """client.enabled=False 면 pref/stock 조회 자체를 수행하지 않아야 한다.
 
     의미 없는 DB 왕복 방지 — early return 이 pref_repo.get_or_create 앞에 있어야 함.
     """
-    stock = await StockRepository(session).add(
-        Stock(stock_code="333333", stock_name="비활성", market_type="KOSPI")
+    stock = await StockRepository(session).add(Stock(stock_code="333333", stock_name="비활성", market_type="KOSPI"))
+    signal = await SignalRepository(session).add(
+        Signal(
+            stock_id=stock.id,
+            signal_date=date(2026, 4, 17),
+            signal_type=SignalType.RAPID_DECLINE.value,
+            score=90,
+            grade="A",
+            detail={},
+        )
     )
-    signal = await SignalRepository(session).add(Signal(
-        stock_id=stock.id, signal_date=date(2026, 4, 17),
-        signal_type=SignalType.RAPID_DECLINE.value, score=90, grade="A", detail={},
-    ))
 
     pref_calls = {"count": 0}
     original = NotificationPreferenceRepository.get_or_create
@@ -274,10 +301,16 @@ async def test_partial_send_failure_counts_successes_only(session: AsyncSession)
 
     sig_repo = SignalRepository(session)
     signals = [
-        await sig_repo.add(Signal(
-            stock_id=s.id, signal_date=date(2026, 4, 17),
-            signal_type=SignalType.RAPID_DECLINE.value, score=85, grade="A", detail={},
-        ))
+        await sig_repo.add(
+            Signal(
+                stock_id=s.id,
+                signal_date=date(2026, 4, 17),
+                signal_type=SignalType.RAPID_DECLINE.value,
+                score=85,
+                grade="A",
+                detail={},
+            )
+        )
         for s in stocks
     ]
 
@@ -298,9 +331,7 @@ async def test_partial_send_failure_counts_successes_only(session: AsyncSession)
 
 
 @pytest.mark.asyncio
-async def test_empty_signals_short_circuits_before_db(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_empty_signals_short_circuits_before_db(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     """signals=[] 면 pref/stock 조회 없이 0 반환 — DB 라운드트립 낭비 방지."""
     pref_calls = {"count": 0}
     original = NotificationPreferenceRepository.get_or_create

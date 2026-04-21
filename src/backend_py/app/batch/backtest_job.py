@@ -7,6 +7,7 @@ BacktestEngineService.execute 내부에서 `session.flush()` 로 backtest_result
 스케줄러(build_scheduler) 에서 주 1회 cron 으로 호출하며, 수동 one-shot 실행은
 `scripts/run_backtest.py` 가 동일 함수를 재사용한다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,20 +63,29 @@ async def run_backtest_pipeline(
             elapsed = int((time.monotonic() - t0) * 1000)
             logger.exception("백테스트 파이프라인 실패 %s ~ %s", start, end)
             return BacktestPipelineResult(
-                period_start=start, period_end=end, succeeded=False,
-                elapsed_ms=elapsed, error=f"{type(e).__name__}: {e}",
+                period_start=start,
+                period_end=end,
+                succeeded=False,
+                elapsed_ms=elapsed,
+                error=f"{type(e).__name__}: {e}",
             )
 
     elapsed = int((time.monotonic() - t0) * 1000)
     logger.info(
         "백테스트 파이프라인 완료 %s ~ %s signals=%d returns=%d rows=%d elapsed=%dms",
-        start, end,
-        execution.signals_processed, execution.returns_calculated, execution.result_rows,
+        start,
+        end,
+        execution.signals_processed,
+        execution.returns_calculated,
+        execution.result_rows,
         elapsed,
     )
     return BacktestPipelineResult(
-        period_start=start, period_end=end, succeeded=True,
-        elapsed_ms=elapsed, execution=execution,
+        period_start=start,
+        period_end=end,
+        succeeded=True,
+        elapsed_ms=elapsed,
+        execution=execution,
     )
 
 

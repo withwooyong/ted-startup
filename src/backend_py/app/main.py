@@ -30,9 +30,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         scheduler.start()
         logger.info(
             "배치 스케줄러 기동: market_data KST %02d:%02d 월~금 / backtest KST %02d:%02d %s (enabled=%s)",
-            settings.scheduler_hour_kst, settings.scheduler_minute_kst,
-            settings.backtest_cron_hour_kst, settings.backtest_cron_minute_kst,
-            settings.backtest_cron_day_of_week, settings.backtest_enabled,
+            settings.scheduler_hour_kst,
+            settings.scheduler_minute_kst,
+            settings.backtest_cron_hour_kst,
+            settings.backtest_cron_minute_kst,
+            settings.backtest_cron_day_of_week,
+            settings.backtest_enabled,
         )
     try:
         yield

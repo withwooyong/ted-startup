@@ -1,4 +1,5 @@
 """/api/reports/* — AI 분석 리포트 (§11.3 온디맨드)."""
+
 from __future__ import annotations
 
 from dataclasses import asdict

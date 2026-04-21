@@ -5,6 +5,7 @@
 - 마이그레이션은 배포 시 1회성이라 동기 드라이버가 도리어 단순·안정
 - 앱 워크로드(요청 처리, 배치)만 asyncpg 로 고성능 이점 유지
 """
+
 from __future__ import annotations
 
 from logging.config import fileConfig

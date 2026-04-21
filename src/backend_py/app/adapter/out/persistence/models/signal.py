@@ -14,9 +14,7 @@ from app.adapter.out.persistence.base import Base
 
 class Signal(Base):
     __tablename__ = "signal"
-    __table_args__ = (
-        UniqueConstraint("stock_id", "signal_date", "signal_type", name="uq_signal_stock_date_type"),
-    )
+    __table_args__ = (UniqueConstraint("stock_id", "signal_date", "signal_type", name="uq_signal_stock_date_type"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     stock_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("stock.id"), nullable=False, index=True)
@@ -28,6 +26,4 @@ class Signal(Base):
     return_5d: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     return_10d: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     return_20d: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
