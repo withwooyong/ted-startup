@@ -8,6 +8,7 @@ import {
   getCredential,
   listAccounts,
   replaceCredential,
+  testKisConnection,
 } from '@/lib/api/portfolio';
 import type {
   Account,
@@ -226,6 +227,30 @@ export function RealAccountSection(): React.JSX.Element {
     }
   }
 
+  async function handleTestConnection(accountId: number) {
+    if (actionPending !== null) return;
+    setActionPending(accountId);
+    try {
+      // BE 는 성공 시 `{ ok: true }` 만 반환. 실패는 HTTP 예외로 전파.
+      await testKisConnection(accountId);
+      setToast('연결 성공 — KIS 토큰 발급 확인됨');
+    } catch (err) {
+      // 502 는 KIS 업스트림 오류 — 자격증명 거부와 일시 장애를 단일 코드로 구분 못 함.
+      // 중립적 표현으로 양쪽 원인 모두 커버하며 구체적 행동 지침은 강요하지 않음.
+      const status =
+        err && typeof err === 'object' && 'status' in err
+          ? (err as { status?: number }).status
+          : undefined;
+      if (status === 502) {
+        setToast('연결 실패 — KIS 업스트림 오류. 잠시 후 재시도하거나 자격증명을 확인해주세요.');
+      } else {
+        setToast(mapError(err, '연결 테스트에 실패했습니다.'));
+      }
+    } finally {
+      setActionPending(null);
+    }
+  }
+
   async function handleDelete(accountId: number, accountAlias: string) {
     if (actionPending !== null) return;
     if (!window.confirm(`"${accountAlias}" 의 자격증명을 삭제하시겠습니까? 실 sync 는 더 이상 동작하지 않습니다.`)) {
@@ -308,13 +333,24 @@ export function RealAccountSection(): React.JSX.Element {
                 )}
               </div>
               <div className="flex gap-2 shrink-0">
+                {credential && (
+                  <button
+                    type="button"
+                    onClick={() => void handleTestConnection(account.id)}
+                    disabled={actionPending !== null}
+                    className="px-3 py-1.5 rounded-lg text-xs bg-[#1A1F2E] border border-white/10 text-[#65D6A1] hover:border-[#65D6A1]/40 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#65D6A1]/50"
+                    title="KIS OAuth 토큰 발급만 시도 (잔고 영향 없음)"
+                  >
+                    {actionPending === account.id ? '연결중…' : '연결 테스트'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void handleReplace(account.id)}
                   disabled={actionPending !== null}
                   className="px-3 py-1.5 rounded-lg text-xs bg-[#1A1F2E] border border-white/10 text-[#E8ECF1] hover:border-[#6395FF]/40 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
                 >
-                  {actionPending === account.id ? '처리중…' : '수정'}
+                  수정
                 </button>
                 {credential && (
                   <button

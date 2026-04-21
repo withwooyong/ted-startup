@@ -248,6 +248,14 @@ class BrokerageCredentialResponse(_Base):
     updated_at: datetime
 
 
+class TestConnectionResponse(_Base):
+    """실 KIS 연결 테스트 응답 — 토큰 발급 성공 여부."""
+
+    account_id: int
+    environment: str
+    ok: bool
+
+
 class AlignedSignalItem(BaseModel):
     signal_date: date
     signal_type: str

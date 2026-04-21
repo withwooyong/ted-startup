@@ -98,4 +98,15 @@ ignore_missing_imports = true
 minversion = "8.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = ["--strict-markers", "-ra"]
+# 기본 addopts 는 마커가 붙은 smoke 테스트를 스킵 — CI 는 외부 호출 0 유지.
+# 로컬 개발자가 실 KIS 계정으로 검증하려면 `pytest -m requires_kis_real_account` 명시 실행.
+# pytest 8.x 는 커맨드라인 `-m` 이 addopts 의 `-m` 을 override 한다 (마지막 값 승리 규칙).
+addopts = [
+    "--strict-markers",
+    "-ra",
+    "-m",
+    "not requires_kis_real_account",
+]
+markers = [
+    "requires_kis_real_account: 실 KIS 계정 자격증명 필요 (KIS_REAL_APP_KEY/SECRET/ACCOUNT env). CI 기본 skip, 로컬에서 `pytest -m requires_kis_real_account` 로 실행.",
+]

@@ -145,7 +145,20 @@ export default function PortfolioPage() {
         });
       }
     } catch (err) {
-      setBanner({ kind: 'error', text: `KIS 동기화 실패: ${(err as Error).message}` });
+      // 실계좌 sync 에서 404 는 "credential 미등록" 이 유일한 원인 (계좌는 selected 에서
+      // 이미 유효함을 보장). 사용자에게 "설정에서 자격증명 등록" 맥락 메시지 표시.
+      const status =
+        err && typeof err === 'object' && 'status' in err
+          ? (err as { status?: number }).status
+          : undefined;
+      if (status === 404 && selected?.connection_type === 'kis_rest_real') {
+        setBanner({
+          kind: 'error',
+          text: 'KIS 자격증명이 등록되지 않았습니다. 설정 페이지에서 등록 후 재시도해주세요.',
+        });
+      } else {
+        setBanner({ kind: 'error', text: `KIS 동기화 실패: ${(err as Error).message}` });
+      }
     } finally {
       setActionPending(null);
     }
@@ -264,14 +277,17 @@ export default function PortfolioPage() {
             >
               스냅샷 생성
             </ActionButton>
-            {selected.connection_type === 'kis_rest_mock' && (
+            {(selected.connection_type === 'kis_rest_mock' ||
+              selected.connection_type === 'kis_rest_real') && (
               <ActionButton
                 onClick={handleSync}
                 disabled={actionPending !== null}
                 pending={actionPending === 'sync'}
                 variant="accent"
               >
-                KIS 모의 동기화
+                {selected.connection_type === 'kis_rest_real'
+                  ? 'KIS 실계좌 동기화'
+                  : 'KIS 모의 동기화'}
               </ActionButton>
             )}
             <Link

@@ -309,6 +309,22 @@ class KisClient:
     # Public API
     # ------------------------------------------------------------------
 
+    async def test_connection(self) -> None:
+        """OAuth 토큰 발급만 시도하는 dry-run. 자격증명 유효성 검증용.
+
+        실패 시 `KisAuthError` (부정확 app_key/secret, 네트워크 등). 잔고 조회 API 는
+        호출하지 않아 KIS 서비스에 부하 최소 + 계좌 상태 변경 0.
+
+        **부수 효과**: 성공 시 인스턴스에 `access_token` 이 캐시된다 — 이후 동일 인스턴스로
+        `fetch_balance()` 를 호출하면 토큰 재발급이 생략된다. 본 프로젝트의 REAL 클라이언트는
+        요청 스코프(use case `async with`) 라 영향 범위가 1회 요청 내로 한정.
+
+        **재시도 없음**: `fetch_balance()` 와 달리 tenacity `@retry` 데코레이터를 두지 않아
+        일시 네트워크 오류도 즉시 실패. 연결 테스트는 "빠른 1회 검증" 의미 — 재시도로
+        위장된 성공을 만들지 않도록 의도된 설계.
+        """
+        await self._get_access_token()
+
     @retry(
         retry=retry_if_exception_type(httpx.HTTPError),
         stop=stop_after_attempt(3),
