@@ -70,7 +70,7 @@ class InsufficientHoldingError(PortfolioError):
 
 
 class InvalidRealEnvironmentError(PortfolioError):
-    """MVP: environment='real' 진입 차단."""
+    """connection_type 과 environment 매칭 위반 (예: kis_rest_real 인데 environment='mock')."""
 
 
 class UnsupportedConnectionError(PortfolioError):
@@ -79,6 +79,15 @@ class UnsupportedConnectionError(PortfolioError):
 
 class SyncError(PortfolioError):
     """외부 API 동기화 중 오류(업스트림 장애 포함)."""
+
+
+class KisCredentialsNotWiredError(PortfolioError):
+    """실 KIS 자격증명 저장소(PR 3) 가 아직 연결되지 않음 — 임시 장벽.
+
+    PR 2 는 `kis_rest_real` 분기 스캐폴딩만 — 이 PR 에서 실 호출이 발생하지 않도록
+    명시적 예외를 던진다. PR 3 에서 `brokerage_account_credential` 조회 경로가
+    연결되면 이 예외는 제거되고 정상 실 sync 로 진입.
+    """
 
 
 # ---------- DTOs ----------
@@ -541,12 +550,28 @@ class SyncPortfolioFromKisUseCase:
         account = await self._account_repo.get(account_id)
         if account is None:
             raise AccountNotFoundError(f"account_id={account_id} 없음")
-        if account.connection_type != "kis_rest_mock":
+        if account.connection_type not in ("kis_rest_mock", "kis_rest_real"):
             raise UnsupportedConnectionError(
                 f"connection_type={account.connection_type} 는 동기화 비지원"
             )
+
+        if account.connection_type == "kis_rest_real":
+            # 실 계좌는 environment='real' 필수. 매칭이 틀리면 운영 실수 방지 차원에서 차단.
+            if account.environment != "real":
+                raise InvalidRealEnvironmentError(
+                    "kis_rest_real 계좌는 environment='real' 필수"
+                )
+            # PR 3 이후 Fernet 저장소에서 credential 조회 → KisClient(REAL, credentials) 생성.
+            # 본 PR 2 는 분기 스캐폴딩만 — 실 호출 경로는 명시적 예외로 봉쇄.
+            raise KisCredentialsNotWiredError(
+                "실 KIS credential 저장소(PR 3) 가 아직 연결되지 않음"
+            )
+
+        # 이하 기존 kis_rest_mock 경로 — 100% 회귀 없음.
         if account.environment != "mock":
-            raise InvalidRealEnvironmentError("모의 계좌만 동기화 허용")
+            raise InvalidRealEnvironmentError(
+                "kis_rest_mock 계좌는 environment='mock' 필수"
+            )
 
         try:
             rows = await self._kis.fetch_balance()

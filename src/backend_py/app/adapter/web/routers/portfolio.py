@@ -44,6 +44,7 @@ from app.application.service.portfolio_service import (
     ComputeSnapshotUseCase,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
+    KisCredentialsNotWiredError,
     PortfolioError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
@@ -254,6 +255,14 @@ async def sync_from_kis(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except InvalidRealEnvironmentError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except KisCredentialsNotWiredError as exc:
+        # 501 Not Implemented — 엔드포인트·라우팅은 정의됐으나 실 credential 저장소(PR 3)
+        # 가 아직 배선되지 않아 기능 자체가 구현 미완. 503(Service Unavailable) 은
+        # 일시 장애·점검을 의미해 클라이언트가 Retry-After 기반 자동 재시도하도록 유도하므로
+        # 의미론 불일치.
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)
+        ) from exc
     except SyncError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except PortfolioError as exc:

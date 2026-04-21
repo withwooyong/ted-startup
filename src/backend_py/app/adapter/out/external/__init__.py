@@ -20,6 +20,8 @@ from app.adapter.out.external.kis_client import (
     KisAuthError,
     KisClient,
     KisClientError,
+    KisCredentials,
+    KisEnvironment,
     KisHoldingRow,
     KisNotConfiguredError,
 )
@@ -38,6 +40,8 @@ __all__ = [
     "KisAuthError",
     "KisClient",
     "KisClientError",
+    "KisCredentials",
+    "KisEnvironment",
     "KisHoldingRow",
     "KisNotConfiguredError",
     "KrxClient",

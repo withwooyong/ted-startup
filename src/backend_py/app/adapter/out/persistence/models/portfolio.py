@@ -25,7 +25,7 @@ from app.adapter.out.persistence.base import Base
 # ---- Enum-like string constants (DB CHECK 제약과 동기화) ----
 
 VALID_BROKER_CODES = ("manual", "kis", "kiwoom")
-VALID_CONNECTION_TYPES = ("manual", "kis_rest_mock")
+VALID_CONNECTION_TYPES = ("manual", "kis_rest_mock", "kis_rest_real")
 VALID_ENVIRONMENTS = ("mock", "real")
 VALID_TRANSACTION_TYPES = ("BUY", "SELL")
 VALID_SOURCES = ("manual", "kis_sync", "excel_import")
