@@ -16,6 +16,7 @@ from app.adapter.web._rate_limit import limiter
 from app.adapter.web.routers import api_router
 from app.batch.scheduler import build_scheduler
 from app.config.settings import get_settings
+from app.observability.logging import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # PR 6: 민감 데이터 마스킹 processor 포함 구조화 로깅 활성화. idempotent 이므로
+    # 테스트 가 create_app() 을 여러 번 호출해도 핸들러가 누적되지 않는다.
+    # 로컬 개발은 색상·읽기 쉬운 ConsoleRenderer, 운영은 JSONRenderer (로그 집계기 연동).
+    setup_logging(log_level=settings.log_level, json_output=settings.app_env != "local")
     app = FastAPI(
         title=settings.app_name,
         version="0.1.0",

@@ -7,7 +7,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-21] KIS sync PR 5: 연결 테스트 + 실 sync wire (커밋 대기)
+## [2026-04-21] KIS sync PR 6: 로깅 마스킹 (시리즈 최종, 커밋 대기)
+
+**KIS sync 시리즈 완결** (6/6). PR 5 에서 실 KIS 외부 호출이 열린 직후 노출된 위험을 처리. structlog 기반 구조화 로깅 + 2층 민감 데이터 방어 (키 기반 `[MASKED]` 치환 + JWT/hex 정규식 scrub). 백엔드 테스트 **239 → 295** (+56). 리뷰 HIGH 3건 + MEDIUM 3건 + LOW 1건 수용.
+
+### Added
+
+- **KIS sync PR 6 — 로깅 마스킹** (시리즈 최종): 설계 문서 § 3.5 보안 하드닝 + § 5 PR 6 + § 6 결정 #4.
+  - **`app/observability/` 신규 패키지**: 관측 관심사(로깅·메트릭·트레이싱) 집중. `__init__.py` 선제 import 0 유지 (순환 방지, PR 3 `app/security/` 와 동일 규칙).
+  - **`app/observability/logging.py`** (~180 lines):
+    - `SENSITIVE_KEYS` frozenset — 표준 OAuth2/JWT 키(`app_key`·`app_secret`·`access_token`·`authorization`) + 프로젝트 특이 env 필드(`openai_api_key`·`dart_api_key`·`telegram_bot_token`·`krx_id`·`krx_pw`·`kis_app_key_mock`) 명시
+    - `SENSITIVE_KEY_SUFFIXES` tuple — 신규 env 필드 자동 커버용 접미 일치 (`_api_key`·`_app_secret`·`_bot_token`·`_master_key`·`_credential` 등 14종)
+    - `_is_sensitive_key(key)` 헬퍼 — 완전 일치 + 접미 일치 OR 검사, 대소문자 무시
+    - `_scan(node)` 재귀 스캔 — dict/list/tuple 의 민감 키 값 `[MASKED]`, string leaf 는 `_scrub_string`
+    - `_scrub_string(s)` — `eyJ` 접두 JWT 3-segment (`[MASKED_JWT]`) + 40자 이상 hex (`[MASKED_HEX]`). JOSE 표준 준수 덕에 structlog logger 이름 false positive 차단
+    - `mask_sensitive` structlog processor — renderer 직전에 event_dict 전체 재귀 마스킹
+    - `setup_logging(log_level, json_output)` — stdlib ↔ structlog `ProcessorFormatter` 브릿지. `_configured` guard 로 **1회만 유효** (재호출 no-op) → pytest `caplog` 외부 핸들러 보존
+    - `reset_logging_for_tests()` — 테스트 전용 guard 리셋
+  - **`app/main.py`**: `create_app()` 앞단에서 `setup_logging(log_level, json_output=app_env!="local")` 호출. idempotent 라 re-invocation 안전.
+  - **`app/config/settings.py`**: `log_level: Literal["DEBUG","INFO","WARNING","ERROR","CRITICAL"]` 필드 추가 — 오타 env var 가 Pydantic 검증에서 즉시 실패.
+  - **README**:
+    - "**KIS OpenAPI 토큰 revoke 한계**" 섹션 신설 — 24h 고정 TTL, 명시적 폐기 엔드포인트 부재. credential 삭제 시 기존 토큰은 만료까지 유효. 유출 의심 시 KIS 웹사이트에서 `app_key` 재발급(roll) 절차 명시 (결정 #4 반영).
+    - "**로깅 민감 데이터 보호**" 섹션 — 2층 방어 메커니즘과 `SENSITIVE_KEYS` 확장 방법 안내.
+  - **테스트 56건 추가** (백엔드 **239 → 295**):
+    - `_scrub_string` 5건 (JWT eyJ 접두 + hex 40자+ + 한국어 보존 + `eyJ` 없는 dotted 식별자 false positive 방어)
+    - `_scan` 9건 (parametrized SENSITIVE_KEYS 26 + 중첩 dict/list + 비민감 키 보존 + None 유지)
+    - compound keys via suffix 8건 — `openai_api_key`·`dart_api_key`·`kis_app_key_mock`·`telegram_bot_token`·`krx_pw` 등 실제 env 필드 검증
+    - `mask_sensitive` processor 2건
+    - 통합 4건 (stdlib logger extra drop + JWT scrub + structlog native bind + idempotent guard 강화 — foreign 핸들러 보존 검증)
+
+### Process Notes
+
+- **리뷰 HIGH 3건 전부 수용**:
+  - HIGH #1 JWT 패턴 false positive → `eyJ` 접두 제약으로 Python 식별자 오탐 차단
+  - HIGH #2 `_configured` dead code → 실제 early-return guard 로 전환 + `reset_logging_for_tests` 헬퍼 노출. pytest `caplog` 같은 외부 핸들러를 silently 제거하던 문제 해결
+  - HIGH #3 SENSITIVE_KEYS 누락 → `SENSITIVE_KEY_SUFFIXES` 도입 + 프로젝트 특이 필드 explicit 목록화로 2층 방어
+- **리뷰 MEDIUM 3건 + LOW 1건 수용**: `assert` → 방어적 `if isinstance` 분기 (`-O` 환경 안전), `log_level: Literal[...]` Pydantic enum 좁히기, 테스트 `type: ignore` 제거 + `Callable[[], None]` 타입 힌트.
+- **Defer (사유)**: LOW #2 hex 40자 임계값 유지 — 현 KIS 도메인 실문제 없음, 56자 상향은 별도 정책 논의. LOW #3 테스트 격리 — `reset_logging_for_tests` + `autouse` fixture 로 해소됨.
+
+### 🎉 KIS sync 시리즈 완결
+
+6 PR 누적 성과:
+- PR #12 (엑셀 import, `6ea71fe`)
+- PR #13 (어댑터 분기 스캐폴딩, `269651e`)
+- PR #14 (Fernet credential 저장소, `3db778f`)
+- PR #15 (등록 API + Settings UI, `d470a73`)
+- PR #16 (연결 테스트 + 실 sync wire, `1461582`)
+- **PR #N (로깅 마스킹, 본 PR)**
+
+백엔드 테스트: 197 → **295** (+98, smoke 1 deselected). CI 6회 연속 4/4 PASS. 외부 호출 0 에서 출발해 실 KIS 호출 개시 + 민감 데이터 로그 누수 방어까지 완결.
+
+---
+
+## [2026-04-21] KIS sync PR 5: 연결 테스트 + 실 sync wire (`1461582`, PR #16)
 
 1-PR 세션: KIS sync 시리즈 5/6. 본 PR 머지부터 **운영 코드에서 실 KIS 외부 호출이 가능** — CI 는 `@pytest.mark.requires_kis_real_account` 마커 + pyproject `addopts` 로 smoke 1건을 skip, 나머지 real 경로 테스트 11건은 `httpx.MockTransport` 로 실 URL 차단. 백엔드 테스트 **227 → 239** (+12, smoke 1 deselected). 리뷰 HIGH 6건 중 4건 수용, 2건 구조적(Hexagonal 위반·Optional 파라미터 런타임 퇴화) defer.
 
