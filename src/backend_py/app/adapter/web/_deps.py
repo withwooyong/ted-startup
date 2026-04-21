@@ -13,6 +13,7 @@ from app.adapter.out.external import DartClient, KisClient, KrxClient, TelegramC
 from app.adapter.out.persistence.session import get_sessionmaker
 from app.application.port.out.llm_provider import LLMProvider
 from app.config.settings import Settings, get_settings
+from app.security.credential_cipher import CredentialCipher
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -62,6 +63,17 @@ async def get_kis_client() -> AsyncIterator[KisClient]:
         yield client
     finally:
         await client.close()
+
+
+@lru_cache(maxsize=1)
+def get_credential_cipher() -> CredentialCipher:
+    """프로세스 수명 공유 Fernet cipher — 마스터키가 빈 값이면 기동 시 즉시 실패.
+
+    `lru_cache` 로 인스턴스 1개만 유지해 매 요청마다 Fernet 초기화 비용을 피한다.
+    테스트는 `dependency_overrides` 또는 `get_credential_cipher.cache_clear()` 로 격리.
+    """
+    settings = get_settings()
+    return CredentialCipher(settings.kis_credential_master_key)
 
 
 def get_telegram_client() -> TelegramClient:

@@ -6,6 +6,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **KIS sync PR 3 — `brokerage_account_credential` + Fernet 암호화**: 설계 문서 § 3.2 / § 5 PR 3. 외부 호출 0, PR 2 머지 후 다음 단계. credential 저장소만 — 등록 API/UI 는 PR 4.
+  - **신규 패키지** `app/security/` — 도메인 중립 보안 프리미티브. `__init__.py` 는 선제 import 0 (순환 방지용).
+  - **`CredentialCipher`** (`app/security/credential_cipher.py`): Fernet 래퍼. `encrypt(plain) -> (bytes, key_version)` / `decrypt(cipher, version) -> plain`. `key_version` 다중 저장 dict 로 회전 대비 (현재 v1). 예외 계층:
+    - `MasterKeyNotConfiguredError`: 빈 env var 시 생성자 loud fail
+    - `UnknownKeyVersionError`: 등록 안 된 key_version 복호화 시도
+    - `DecryptionFailedError`: Fernet `InvalidToken` 감싸기 (외부로 cryptography 예외 미노출, 메시지에 plaintext/bytes 없음)
+  - **신규 테이블** `brokerage_account_credential` (migration `008_brokerage_credential`): `app_key_cipher`/`app_secret_cipher`/`account_no_cipher` BYTEA + `key_version` + `UNIQUE(account_id)` + FK CASCADE. downgrade 에 `DO $$` PL/pgSQL 가드로 데이터 있을 시 RAISE EXCEPTION (운영 안전망).
+  - **`BrokerageAccountCredentialRepository`**: cipher 주입, `upsert`/`get_decrypted`/`delete` async 메서드. `CursorResult` 타입 캐스트로 mypy strict 호환.
+  - **`get_credential_cipher()`** DI (`_deps.py`): `lru_cache(maxsize=1)` 싱글톤. `conftest.apply_migrations` 가 `cache_clear()` 호출로 테스트 격리 보장.
+  - **`Settings.kis_credential_master_key: str`** env var 매핑, default `""` (빈 값이면 cipher 생성자에서 loud fail).
+  - **`cryptography>=43.0`** 의존성 추가.
+  - **conftest fixture**: 세션 시작 시 빈 env var 면 `Fernet.generate_key()` 로 더미 마스터키 주입 (CI 실 자격증명 없이 테스트 통과).
+  - **테스트 9건 추가** (백엔드 **204 → 213**): cipher 유닛 5건 (왕복·잘못된 키·빈 키·잘못된 형식 키·unknown version) + repo 통합 4건 (upsert→get 왕복·재 upsert update·delete·FK CASCADE).
+
+### Process Notes
+- 리뷰 CRITICAL 1 + HIGH 2 + MEDIUM 2 모두 반영 (mypy CursorResult 캐스트, DecryptionFailedError 래퍼, ruff import 정렬, conftest cache_clear, downgrade DO$$ 가드).
+- 초기 `app/application/service/credential_cipher.py` 위치 → `service/__init__.py` 가 BacktestEngineService→repositories 체인 유발해 circular import. `app/security/` 신규 패키지로 이동 (도메인 중립, `__init__.py` 순수) 해 해결.
+
+---
+
+## [2026-04-21] KIS sync PR 2: `kis_rest_real` 어댑터 분기 스캐폴딩 (`269651e`, PR #13)
+
+1-PR 세션: KIS sync 시리즈 2/6. 외부 호출 0, credential 저장소(PR 3) 미연결 상태에서 분기 구조만 선제 구축. CI 4/4 PASS × 1회. 백엔드 테스트 **197 → 204** (+7).
+
+### Added
 - **KIS sync PR 2 — `kis_rest_real` 어댑터 분기 스캐폴딩**: 설계 문서 `docs/kis-real-account-sync-plan.md` § 5 PR 2. 외부 호출 0, credential 저장소(PR 3) 미연결 상태에서 분기 구조만 선제 구축.
   - `KisEnvironment(StrEnum)`: `MOCK` / `REAL` — OpenAPI 환경 구분.
   - `KisCredentials` DTO (`frozen=True, slots=True`): `app_key`·`app_secret`·`account_no`. `__repr__` 마스킹 (`app_secret`/`account_no` `<masked>`, `app_key` 끝 4자리만 노출).

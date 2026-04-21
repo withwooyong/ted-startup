@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from app.adapter.out.persistence.repositories.analysis_report import AnalysisReportRepository
 from app.adapter.out.persistence.repositories.backtest_result import BacktestResultRepository
+from app.adapter.out.persistence.repositories.brokerage_credential import (
+    BrokerageAccountCredentialRepository,
+)
 from app.adapter.out.persistence.repositories.dart import DartCorpMappingRepository
 from app.adapter.out.persistence.repositories.lending_balance import LendingBalanceRepository
 from app.adapter.out.persistence.repositories.notification_preference import (
@@ -22,6 +25,7 @@ from app.adapter.out.persistence.repositories.stock_price import StockPriceRepos
 __all__ = [
     "AnalysisReportRepository",
     "BacktestResultRepository",
+    "BrokerageAccountCredentialRepository",
     "BrokerageAccountRepository",
     "DartCorpMappingRepository",
     "LendingBalanceRepository",

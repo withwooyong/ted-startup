@@ -56,9 +56,18 @@ def apply_migrations(database_url: str) -> None:
     """Alembic upgrade head — 테스트 DB URL을 alembic 설정에 직접 주입."""
     # env.py 가 config.get_main_option("sqlalchemy.url") 를 우선 사용하도록 함
     os.environ["DATABASE_URL"] = database_url
+    # PR 3 KIS credential cipher — 테스트 세션에서 Fernet 마스터키가 없으면
+    # `CredentialCipher` 초기화가 실패하므로 더미 키 주입. 실 운영 키와 무관.
+    if "KIS_CREDENTIAL_MASTER_KEY" not in os.environ:
+        from cryptography.fernet import Fernet
+        os.environ["KIS_CREDENTIAL_MASTER_KEY"] = Fernet.generate_key().decode()
     from app.config.settings import get_settings
 
     get_settings.cache_clear()
+    # get_credential_cipher 는 lru_cache 싱글톤 — 테스트 환경에서 더미 마스터키가
+    # 주입된 뒤에도 이전 세션의 cipher 인스턴스가 살아있을 수 있어 명시 초기화.
+    from app.adapter.web._deps import get_credential_cipher
+    get_credential_cipher.cache_clear()
 
     alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
     alembic_cfg.set_main_option("sqlalchemy.url", database_url)
