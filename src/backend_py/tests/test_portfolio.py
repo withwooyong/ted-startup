@@ -332,8 +332,14 @@ async def test_create_account_then_record_transactions_end_to_end(
 
 
 @pytest.mark.asyncio
-async def test_create_account_blocks_real_environment(client: httpx.AsyncClient) -> None:
-    # Pydantic 패턴 검증에서 먼저 걸려서 400. 실제로도 403 로 의도하지만, pattern 이 먼저 발동.
+async def test_create_account_blocks_mismatched_real_environment(
+    client: httpx.AsyncClient,
+) -> None:
+    """PR 4: environment='real' 은 connection_type='kis_rest_real' 에서만 허용 → 403.
+
+    이전 PR 까지 Pydantic 패턴이 environment='real' 자체를 400 으로 차단했지만,
+    PR 4 에서 실계정 등록 경로를 열면서 패턴을 완화. 조합 검증은 UseCase 로 이관.
+    """
     resp = await client.post(
         "/api/portfolio/accounts",
         json={
@@ -343,7 +349,42 @@ async def test_create_account_blocks_real_environment(client: httpx.AsyncClient)
             "environment": "real",
         },
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_account_blocks_real_connection_with_mock_env(
+    client: httpx.AsyncClient,
+) -> None:
+    """역조합: connection_type='kis_rest_real' + environment='mock' → 403."""
+    resp = await client.post(
+        "/api/portfolio/accounts",
+        json={
+            "account_alias": "real-wrong-env",
+            "broker_code": "kis",
+            "connection_type": "kis_rest_real",
+            "environment": "mock",
+        },
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_kis_rest_real_account_succeeds(client: httpx.AsyncClient) -> None:
+    """PR 4: 올바른 조합(kis_rest_real + environment='real')은 201 로 생성."""
+    resp = await client.post(
+        "/api/portfolio/accounts",
+        json={
+            "account_alias": "real-ok",
+            "broker_code": "kis",
+            "connection_type": "kis_rest_real",
+            "environment": "real",
+        },
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["connection_type"] == "kis_rest_real"
+    assert body["environment"] == "real"
 
 
 @pytest.mark.asyncio

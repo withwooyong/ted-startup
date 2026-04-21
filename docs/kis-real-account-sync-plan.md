@@ -1,9 +1,10 @@
 # KIS 실계정 sync 설계안
 
 - **작성일**: 2026-04-20
-- **상태**: 설계 확정 (5개 열린 질문 결정 완료 → PR 1 착수 대기)
+- **최종 수정**: 2026-04-21 (PR 1·2·3·4 구현 완료 — PR 4 커밋 대기)
+- **상태**: PR 1~3 머지 완료 (3db778f). PR 4 (실계정 등록 API + UI) 구현·검증 완료, 커밋/PR 대기
 - **범위**: 한국투자증권(KIS) 실계좌 REST API 연동으로 `portfolio_holding` 자동 동기화 + 엑셀 거래내역 import
-- **전제**: 현재 `kis_rest_mock` 만 지원. 실계좌 연동은 DB 스키마·보안·UX 모두 변경 필요.
+- **전제**: 현재 `kis_rest_mock` + `kis_rest_real` 분기 (PR 2), credential 저장소 (PR 3), 등록 API + UI (PR 4) 완료. 실 호출은 PR 5 까지 `KisCredentialsNotWiredError` 로 차단.
 
 ---
 
@@ -167,14 +168,14 @@ class SyncPortfolioFromKisUseCase:
 
 온보딩 UX 순서(엑셀 → API key → OAuth)에 맞춰 **PR 순서를 사용자 여정 순서로** 정렬. 낮은 위험도(엑셀 import, 외부 호출 0건) 부터 단계적으로 도입.
 
-| PR | 제목 | 범위 | 의존 |
-|----|---|---|---|
-| 1 | 엑셀 거래내역 import (1단계 온보딩) | `openpyxl` 파서, 컬럼 매핑 규칙, `portfolio_transaction` 에 `source='excel_import'` 로 적재. 증권사별 엑셀 포맷 차이는 1~2종만 (KIS 국내주식 체결내역 우선). API·UI 포함 | — |
-| 2 | `kis_rest_real` 어댑터 분기 | KisClient `environment` 파라미터, `kis_rest_real` connection_type enum, use case 분기. In-memory mock 통합 테스트로 real URL/TR_ID 검증 (외부 호출 0) | — |
-| 3 | `brokerage_account_credential` 스키마 + Fernet 암호화 | Alembic 마이그레이션, Credential repository, Fernet wrapper, CI fixture (더미 마스터키 주입), 암호화 왕복 테스트 | PR 2 |
-| 4 | 실계정 등록 API + Settings UI (2단계 온보딩) | POST/PUT/GET credential 엔드포인트, Settings 페이지 "실계좌 추가" 섹션, masked view, 외부 호출 여전히 0 | PR 3 |
-| 5 | "연결 테스트" + 실 sync (3단계 온보딩) | 토큰 발급 테스트 엔드포인트, Use case 분기 실 호출. 로컬 `@pytest.mark.requires_kis_real_account` smoke | PR 4 |
-| 6 | 로깅 마스킹 + 문자열 scrub | structlog processor 추가, 기존 로그 호출 점검, token revoke 한계 README 명시 (결정 #4 반영) | PR 5 |
+| PR | 제목 | 범위 | 의존 | 상태 |
+|----|---|---|---|---|
+| 1 | 엑셀 거래내역 import (1단계 온보딩) | `openpyxl` 파서, 컬럼 매핑 규칙, `portfolio_transaction` 에 `source='excel_import'` 로 적재. 증권사별 엑셀 포맷 차이는 1~2종만 (KIS 국내주식 체결내역 우선). API·UI 포함 | — | ✅ #12 (`6ea71fe`) |
+| 2 | `kis_rest_real` 어댑터 분기 | KisClient `environment` 파라미터, `kis_rest_real` connection_type enum, use case 분기. In-memory mock 통합 테스트로 real URL/TR_ID 검증 (외부 호출 0) | — | ✅ #13 (`269651e`) |
+| 3 | `brokerage_account_credential` 스키마 + Fernet 암호화 | Alembic 마이그레이션, Credential repository, Fernet wrapper, CI fixture (더미 마스터키 주입), 암호화 왕복 테스트 | PR 2 | ✅ #14 (`3db778f`) |
+| 4 | 실계정 등록 API + Settings UI (2단계 온보딩) | POST/PUT/GET/DELETE credential 엔드포인트, Settings 페이지 "실계좌 연동" 섹션, 비례 길이 마스킹 (`••…1234`), 외부 호출 여전히 0 | PR 3 | ✅ 구현 완료 (커밋 대기) |
+| 5 | "연결 테스트" + 실 sync (3단계 온보딩) | 토큰 발급 테스트 엔드포인트, Use case 분기 실 호출. 로컬 `@pytest.mark.requires_kis_real_account` smoke | PR 4 | ⬜ 대기 |
+| 6 | 로깅 마스킹 + 문자열 scrub | structlog processor 추가, 기존 로그 호출 점검, token revoke 한계 README 명시 (결정 #4 반영) | PR 5 | ⬜ 대기 |
 
 **예상 작업 시간 (1인 기준):**
 - PR 1: 3~4h (엑셀 포맷 탐색 + 파서 + UI)
@@ -214,6 +215,15 @@ class SyncPortfolioFromKisUseCase:
 ## 8. 다음 액션
 
 1. ~~본 설계안 사용자 리뷰 + "6. 열린 질문" 5건 결정~~ ✅ **완료 (2026-04-20)**
-2. **PR 1 (엑셀 import) 착수** — 가장 낮은 위험, 외부 호출 0. 증권사 엑셀 포맷 탐색이 선행 조사 필요.
-3. 각 PR 완료 시 `/ted-run` 파이프라인으로 구현 → 리뷰 → 빌드 → 머지.
-4. PR 2~6 는 PR 1 머지 후 의존 순서대로 순차 진입.
+2. ~~PR 1 (엑셀 import)~~ ✅ **완료 (2026-04-20, #12)**
+3. ~~PR 2 (`kis_rest_real` 어댑터 분기)~~ ✅ **완료 (2026-04-21, #13)**
+4. ~~PR 3 (`brokerage_account_credential` + Fernet)~~ ✅ **완료 (2026-04-21, #14)**
+5. ~~PR 4 (실계정 등록 API + Settings UI)~~ ✅ **구현 완료 (2026-04-21, 커밋 대기)** — `POST/PUT/GET/DELETE /api/portfolio/accounts/{id}/credentials`, Settings 페이지 "실계좌 연동" 섹션, 비례 길이 마스킹 뷰, `CredentialCipherError` 500 변환, 외부 호출 여전히 0. 백엔드 테스트 213 → 227 (+14).
+6. **PR 5 (연결 테스트 + 실 sync, 3단계 온보딩) 착수 대기** — 토큰 발급 테스트 엔드포인트, `SyncPortfolioFromKisUseCase` 에 credential repo wire, `@pytest.mark.requires_kis_real_account` smoke.
+7. 이후 PR 6 (로깅 마스킹).
+
+## 9. 운영 메모 (PR 3 머지 후 추가)
+
+- **마스터키 배포**: 운영 환경에 `KIS_CREDENTIAL_MASTER_KEY` env var 주입 필수. `Fernet.generate_key()` 출력 (32 bytes url-safe base64). 미설정 시 앱 기동 시 `get_credential_cipher()` DI 가 `MasterKeyNotConfiguredError` 로 fail-fast.
+- **downgrade 주의**: `alembic downgrade -1` 시도 시 `brokerage_account_credential` 에 데이터가 있으면 `DO $$` 가드가 `RAISE EXCEPTION` → 수동 삭제 후 재시도 필요. 실 자격증명 복구 불가 상태 방지 설계.
+- **실 sync 여전히 봉쇄**: PR 5 까지 `SyncPortfolioFromKisUseCase` 의 `kis_rest_real` 분기는 `KisCredentialsNotWiredError` → HTTP 501. Credential 저장소는 완성됐지만 use case 에 wire 되지 않았음 (의도적 단계 분리).

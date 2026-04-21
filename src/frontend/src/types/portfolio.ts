@@ -3,7 +3,7 @@
 // 포맷과 타입을 일치시켜 변환 레이어를 제거한다.
 
 export type BrokerCode = 'manual' | 'kis' | 'kiwoom';
-export type ConnectionType = 'manual' | 'kis_rest_mock';
+export type ConnectionType = 'manual' | 'kis_rest_mock' | 'kis_rest_real';
 export type TransactionType = 'BUY' | 'SELL';
 export type TransactionSource = 'manual' | 'kis_sync' | 'excel_import';
 
@@ -21,7 +21,23 @@ export interface AccountCreateRequest {
   account_alias: string;
   broker_code: BrokerCode;
   connection_type: ConnectionType;
-  environment: 'mock';
+  // connection_type='kis_rest_real' 은 'real' 필수, 그 외는 'mock'. 조합 검증은 서버.
+  environment: 'mock' | 'real';
+}
+
+export interface BrokerageCredentialRequest {
+  app_key: string;
+  app_secret: string;
+  account_no: string;
+}
+
+export interface BrokerageCredentialResponse {
+  account_id: number;
+  app_key_masked: string;
+  account_no_masked: string;
+  key_version: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Holding {

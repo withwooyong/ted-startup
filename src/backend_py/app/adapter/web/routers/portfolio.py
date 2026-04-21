@@ -1,6 +1,7 @@
 """/api/portfolio/* — 계좌·보유·거래·성과."""
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from datetime import date
 
@@ -8,7 +9,7 @@ from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.external import KisClient
+from app.adapter.out.external import KisClient, KisCredentials
 from app.adapter.out.persistence.repositories import (
     BrokerageAccountRepository,
     PortfolioHoldingRepository,
@@ -16,10 +17,17 @@ from app.adapter.out.persistence.repositories import (
     PortfolioTransactionRepository,
     StockRepository,
 )
-from app.adapter.web._deps import get_kis_client, get_session, require_admin_key
+from app.adapter.web._deps import (
+    get_credential_cipher,
+    get_kis_client,
+    get_session,
+    require_admin_key,
+)
 from app.adapter.web._schemas import (
     AccountCreateRequest,
     AccountResponse,
+    BrokerageCredentialRequest,
+    BrokerageCredentialResponse,
     ExcelImportResponse,
     ExcelImportRowError,
     HoldingResponse,
@@ -40,8 +48,11 @@ from app.application.service.excel_import_service import (
 from app.application.service.portfolio_service import (
     AccountAliasConflictError,
     AccountNotFoundError,
+    BrokerageCredentialUseCase,
     ComputePerformanceUseCase,
     ComputeSnapshotUseCase,
+    CredentialAlreadyExistsError,
+    CredentialNotFoundError,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
     KisCredentialsNotWiredError,
@@ -55,6 +66,9 @@ from app.application.service.portfolio_service import (
     TransactionRecord,
     UnsupportedConnectionError,
 )
+from app.security.credential_cipher import CredentialCipher, CredentialCipherError
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/portfolio",
@@ -380,3 +394,140 @@ async def import_transactions_from_excel(
         stock_created_count=result.stock_created_count,
         errors=[ExcelImportRowError(row=e.row, reason=e.reason) for e in result.errors],
     )
+
+
+# ---------- Brokerage Credentials (P15 / KIS sync PR 4 — 2단계 온보딩) ----------
+
+
+def _credential_response(view: object) -> BrokerageCredentialResponse:
+    """UseCase DTO → API 응답 매핑. `_Base(from_attributes=True)` 가 dataclass 읽기 지원."""
+    return BrokerageCredentialResponse.model_validate(view)
+
+
+def _raise_for_credential_error(exc: PortfolioError) -> HTTPException:
+    """credential 도메인 예외 → HTTP 매핑 공통 처리."""
+    if isinstance(exc, AccountNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, UnsupportedConnectionError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if isinstance(exc, InvalidRealEnvironmentError):
+        return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    if isinstance(exc, CredentialAlreadyExistsError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    if isinstance(exc, CredentialNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+def _cipher_failure_as_http(account_id: int, exc: CredentialCipherError) -> HTTPException:
+    """Fernet 복호화/키 버전 오류 → 500 으로 변환 + 운영 로그에 예외 타입만 남김.
+
+    `DecryptionFailedError` / `UnknownKeyVersionError` 는 `PortfolioError` 계열이 아니라
+    router 의 `except PortfolioError` 에서 잡히지 않고 FastAPI 기본 500 으로 전파된다.
+    사용자 응답에는 내부 스택트레이스·메시지를 노출하지 않고, 로그에만 예외 타입 + account_id
+    만 기록해 운영팀이 키 회전 상태를 점검할 수 있게 한다.
+    """
+    logger.error(
+        "Credential cipher failure: account_id=%s exc_type=%s",
+        account_id,
+        type(exc).__name__,
+    )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="자격증명 복호화 실패 — 운영자에게 문의하세요",
+    )
+
+
+@router.post(
+    "/accounts/{account_id}/credentials",
+    response_model=BrokerageCredentialResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_credential(
+    account_id: int,
+    body: BrokerageCredentialRequest,
+    session: AsyncSession = Depends(get_session),
+    cipher: CredentialCipher = Depends(get_credential_cipher),
+) -> BrokerageCredentialResponse:
+    """실계정 자격증명 신규 등록. 이미 있으면 409 — 교체는 PUT 사용."""
+    uc = BrokerageCredentialUseCase(session, cipher)
+    try:
+        view = await uc.create(
+            account_id=account_id,
+            credentials=KisCredentials(
+                app_key=body.app_key,
+                app_secret=body.app_secret,
+                account_no=body.account_no,
+            ),
+        )
+    except PortfolioError as exc:
+        raise _raise_for_credential_error(exc) from exc
+    except CredentialCipherError as exc:
+        raise _cipher_failure_as_http(account_id, exc) from exc
+    return _credential_response(view)
+
+
+@router.put(
+    "/accounts/{account_id}/credentials",
+    response_model=BrokerageCredentialResponse,
+)
+async def replace_credential(
+    account_id: int,
+    body: BrokerageCredentialRequest,
+    session: AsyncSession = Depends(get_session),
+    cipher: CredentialCipher = Depends(get_credential_cipher),
+) -> BrokerageCredentialResponse:
+    """기존 자격증명 교체. 존재하지 않으면 404 — 신규는 POST 사용."""
+    uc = BrokerageCredentialUseCase(session, cipher)
+    try:
+        view = await uc.replace(
+            account_id=account_id,
+            credentials=KisCredentials(
+                app_key=body.app_key,
+                app_secret=body.app_secret,
+                account_no=body.account_no,
+            ),
+        )
+    except PortfolioError as exc:
+        raise _raise_for_credential_error(exc) from exc
+    except CredentialCipherError as exc:
+        raise _cipher_failure_as_http(account_id, exc) from exc
+    return _credential_response(view)
+
+
+@router.get(
+    "/accounts/{account_id}/credentials",
+    response_model=BrokerageCredentialResponse,
+)
+async def get_credential(
+    account_id: int,
+    session: AsyncSession = Depends(get_session),
+    cipher: CredentialCipher = Depends(get_credential_cipher),
+) -> BrokerageCredentialResponse:
+    """마스킹된 자격증명 뷰. `app_secret` 은 어떤 경로로도 반환되지 않음."""
+    uc = BrokerageCredentialUseCase(session, cipher)
+    try:
+        view = await uc.get_masked(account_id)
+    except PortfolioError as exc:
+        raise _raise_for_credential_error(exc) from exc
+    except CredentialCipherError as exc:
+        raise _cipher_failure_as_http(account_id, exc) from exc
+    return _credential_response(view)
+
+
+@router.delete(
+    "/accounts/{account_id}/credentials",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_credential(
+    account_id: int,
+    session: AsyncSession = Depends(get_session),
+    cipher: CredentialCipher = Depends(get_credential_cipher),
+) -> None:
+    """자격증명 명시 삭제. 계좌는 유지, credential 레코드만 제거."""
+    uc = BrokerageCredentialUseCase(session, cipher)
+    try:
+        await uc.delete(account_id)
+    except PortfolioError as exc:
+        raise _raise_for_credential_error(exc) from exc
+    return None

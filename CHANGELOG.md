@@ -5,6 +5,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [2026-04-21] KIS sync PR 4: 실계정 등록 API + Settings UI (커밋 대기)
+
+1-PR 세션: KIS sync 시리즈 4/6. 외부 호출 0 유지 — credential 등록·마스킹·삭제 CRUD 만, 실 KIS 호출은 PR 5. 백엔드 테스트 **213 → 227** (+14), Next.js build PASS, mypy strict 0 (내 파일), ruff 0. 리뷰 HIGH 6건 전부 반영.
+
+### Added
+
+- **KIS sync PR 4 — 실계정 등록 API + Settings UI**: 설계 문서 § 3.4 (2단계 온보딩) + § 5 PR 4.
+  - **BE 4 엔드포인트** (`app/adapter/web/routers/portfolio.py`):
+    - `POST /api/portfolio/accounts/{id}/credentials` → 201, 이미 있으면 409
+    - `PUT /api/portfolio/accounts/{id}/credentials` → 200, 없으면 404
+    - `GET /api/portfolio/accounts/{id}/credentials` → 마스킹 뷰 (`app_key_masked` / `account_no_masked` + `key_version`·`created_at`·`updated_at`). `app_secret` 은 어떤 경로로도 노출 0.
+    - `DELETE /api/portfolio/accounts/{id}/credentials` → 204, 없으면 404
+    - 모든 엔드포인트 `require_admin_key` 보호. 계좌는 `connection_type='kis_rest_real'` + `environment='real'` 조합만 허용 — 위반 시 400/403.
+  - **`BrokerageCredentialUseCase`** (`portfolio_service.py`): `create`/`replace`/`get_masked`/`delete` + `_ensure_real_account` 공통 전처리. `_require_view` 로 `assert` 대신 `RuntimeError` loud fail (`python -O` 대응).
+  - **`RegisterAccountUseCase` 완화**: `environment='real'` 을 `kis_rest_real` 조합에서 허용. 불일치 조합은 `InvalidRealEnvironmentError` → 403.
+  - **예외 추가**: `CredentialAlreadyExistsError` (→ 409), `CredentialNotFoundError` (→ 404). `CredentialCipherError` 계층(`DecryptionFailedError`/`UnknownKeyVersionError`)은 router 에서 별도 catch → 500 + 내부 스택트레이스/예외 타입 미노출 (`_cipher_failure_as_http`).
+  - **Repository 확장** (`brokerage_credential.py`): `find_row` (복호화 없이 존재 체크), `get_masked_view` (필요 필드만 복호화 후 마스킹 DTO 반환). `_mask_tail` 헬퍼는 **비례 길이 마스킹** — `len(value) - keep` 만큼 불릿 생성해 "얼마나 가렸는지" 가 시각적으로 드러남.
+  - **Pydantic 스키마**: `BrokerageCredentialRequest` (app_key `min_length=16` + `\S+`, app_secret 동일, account_no `^\d{8}-\d{2}$`), `BrokerageCredentialResponse` (`_Base` 상속, `app_secret` 필드 없음). `AccountCreateRequest` 패턴 완화 — `connection_type` 에 `kis_rest_real`, `environment` 에 `real` 추가. 조합 검증은 UseCase 로 이관.
+  - **FE `RealAccountSection`** (`components/features/RealAccountSection.tsx`, 신규 ~380 lines): 계좌 목록 + 등록 폼 (별칭 · app_key · app_secret · 계좌번호) + 수정(window.prompt × 3) + 삭제 버튼. 비례 길이 마스킹 뷰. `actionPending` state 로 수정/삭제 버튼 중복 클릭 차단. PUT→POST 폴백 + 409 경합 시 PUT 재시도로 race 자동 해소.
+  - **FE Settings 페이지**: 기존 알림 설정 아래에 `<RealAccountSection/>` 섹션 추가. 알림 설정 저장 UI 는 불변.
+  - **FE API 클라이언트**: `getCredential/createCredential/replaceCredential/deleteCredential`. DELETE 는 204 No Content 본문 없어서 `adminCall` 대신 direct fetch (`adminCall` 의 `res.json()` 강제 실행 한계 회피).
+  - **테스트 14건 추가** (백엔드 **213 → 227**):
+    - cipher/repo 단위 2건 (비례 마스킹 정확도·부재 시 None)
+    - HTTP 엔드포인트 9건 (admin key 강제, POST 201/409, PUT 200/404, GET 마스킹/404 + DELETE 204 → 후속 GET 404, 비 `kis_rest_real` 거부, account_no 형식 검증, 모든 verb unknown account 404, cipher 실패 → 500 + 내부 예외 타입 응답 미노출)
+    - `test_portfolio.py` 3건: PR 4 조합 검증 (mismatched env → 403, 역조합 → 403, 정상 `kis_rest_real` → 201)
+
+### Process Notes
+
+- 리뷰 HIGH 6건(BE 2 + FE 4) 전부 반영: CredentialCipherError catch + 500 변환, `assert` → `RuntimeError`, `_mask_tail` 비례 마스킹, `BrokerageCredentialResponse` `_Base` 상속, `handleCreate` 흐름 재구성 (reload 실패와 폼 클로저 분리), `showForm` 토글 stale closure 함수형 업데이터 내부로, `actionPending` 추가.
+- 스킵: MEDIUM `MaskedCredentialView` layer re-export (구조 리팩터 PR 5 때), TOCTOU POST race (Admin + DB UNIQUE 보호), DELETE 의 cipher 주입 필수 (repo 생성자 구조 — PR 5 때 재조직), `adminCall` void 지원 (별도 리팩터), toast 중복 (공용 Context 후보), window.prompt UX (MVP 허용).
+
+---
+
+## [2026-04-21] KIS sync PR 3: `brokerage_account_credential` + Fernet 암호화 (`3db778f`, PR #14)
+
+1-PR 세션: KIS sync 시리즈 3/6. 외부 호출 0, credential 저장소만 — 등록 API/UI 는 PR 4. CI 4/4 PASS × 1회. 백엔드 테스트 **204 → 213** (+9).
+
 ### Added
 - **KIS sync PR 3 — `brokerage_account_credential` + Fernet 암호화**: 설계 문서 § 3.2 / § 5 PR 3. 외부 호출 0, PR 2 머지 후 다음 단계. credential 저장소만 — 등록 API/UI 는 PR 4.
   - **신규 패키지** `app/security/` — 도메인 중립 보안 프리미티브. `__init__.py` 는 선제 import 0 (순환 방지용).
