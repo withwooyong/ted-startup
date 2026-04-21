@@ -4,6 +4,8 @@ import { ADMIN_BASE, adminCall as call } from '@/lib/api/admin';
 import type {
   Account,
   AccountCreateRequest,
+  BrokerageCredentialRequest,
+  BrokerageCredentialResponse,
   ExcelImportResult,
   Holding,
   PerformanceReport,
@@ -98,6 +100,51 @@ export async function importExcelTransactions(
     throw err;
   }
   return (await res.json()) as ExcelImportResult;
+}
+
+// ---------- Brokerage Credentials (P15 / KIS sync PR 4) ----------
+
+export async function getCredential(
+  accountId: number,
+): Promise<BrokerageCredentialResponse> {
+  return call<BrokerageCredentialResponse>(
+    `/portfolio/accounts/${accountId}/credentials`,
+  );
+}
+
+export async function createCredential(
+  accountId: number,
+  body: BrokerageCredentialRequest,
+): Promise<BrokerageCredentialResponse> {
+  return call<BrokerageCredentialResponse>(
+    `/portfolio/accounts/${accountId}/credentials`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+}
+
+export async function replaceCredential(
+  accountId: number,
+  body: BrokerageCredentialRequest,
+): Promise<BrokerageCredentialResponse> {
+  return call<BrokerageCredentialResponse>(
+    `/portfolio/accounts/${accountId}/credentials`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  );
+}
+
+export async function deleteCredential(accountId: number): Promise<void> {
+  // adminCall 은 JSON 바디를 기대하지만 204 에서는 본문이 없어 파싱 실패 가능. 직접 fetch 경유.
+  const res = await fetch(`${ADMIN_BASE}/portfolio/accounts/${accountId}/credentials`, {
+    method: 'DELETE',
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { detail?: string };
+    const msg = body.detail ?? `API Error: ${res.status}`;
+    const err = new Error(msg) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
 }
 
 export async function getSignalAlignment(

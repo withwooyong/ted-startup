@@ -4,6 +4,9 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
+
 from sqlalchemy import delete, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +14,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapter.out.external import KisCredentials
 from app.adapter.out.persistence.models import BrokerageAccountCredential
 from app.security.credential_cipher import CredentialCipher
+
+
+@dataclass(frozen=True, slots=True)
+class MaskedCredentialView:
+    """GET 응답용 마스킹된 자격증명 뷰.
+
+    `app_secret` 은 어떤 경로로도 노출되지 않는다. `app_key`·`account_no` 는
+    마지막 4자리만 남기고 나머지는 `•` 로 치환한 문자열.
+    """
+
+    account_id: int
+    app_key_masked: str
+    account_no_masked: str
+    key_version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+def _mask_tail(value: str, keep: int = 4) -> str:
+    """`<masked prefix><last N>` 형태로 치환 — 비례 길이 마스킹.
+
+    마스킹된 prefix 의 불릿 수가 실제 가려진 문자 수와 일치해야 "얼마나 가렸는지" 가
+    시각적으로 드러난다. 고정 4개 불릿은 짧은 값에서 노출 비율이 과도해질 수 있어 지양.
+    길이가 `keep` 이하면 전체를 불릿으로 치환, 빈 값은 단일 불릿으로.
+    """
+    if not value:
+        return "•"
+    if len(value) <= keep:
+        return "•" * len(value)
+    return "•" * (len(value) - keep) + value[-keep:]
 
 
 class BrokerageAccountCredentialRepository:
@@ -80,6 +113,29 @@ class BrokerageAccountCredentialRepository:
         await self._session.flush()
         rowcount = result.rowcount
         return bool(rowcount is not None and rowcount > 0)
+
+    async def find_row(self, account_id: int) -> BrokerageAccountCredential | None:
+        """복호화 없이 ORM 행만 반환 — 존재 여부 체크나 메타데이터(updated_at 등)용."""
+        return await self._find(account_id)
+
+    async def get_masked_view(self, account_id: int) -> MaskedCredentialView | None:
+        """GET 응답용 마스킹 뷰. `app_key`·`account_no` 만 복호화해 tail 4자리만 남김.
+
+        `app_secret` 은 어떤 경로로도 plaintext 화되지 않는다 — 조회 기능 자체가 없음.
+        """
+        row = await self._find(account_id)
+        if row is None:
+            return None
+        app_key_plain = self._cipher.decrypt(row.app_key_cipher, row.key_version)
+        account_no_plain = self._cipher.decrypt(row.account_no_cipher, row.key_version)
+        return MaskedCredentialView(
+            account_id=row.account_id,
+            app_key_masked=_mask_tail(app_key_plain),
+            account_no_masked=_mask_tail(account_no_plain),
+            key_version=row.key_version,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     async def _find(self, account_id: int) -> BrokerageAccountCredential | None:
         stmt = select(BrokerageAccountCredential).where(

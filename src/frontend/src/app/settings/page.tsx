@@ -5,6 +5,7 @@ import {
   getNotificationPreferences,
   updateNotificationPreferences,
 } from '@/lib/api/client';
+import { RealAccountSection } from '@/components/features/RealAccountSection';
 import {
   NOTIFICATION_CHANNEL_LABELS,
   type NotificationPreference,
@@ -265,6 +266,8 @@ export default function SettingsPage() {
               {toast}
             </div>
           )}
+
+          <RealAccountSection />
         </>
       )}
     </main>

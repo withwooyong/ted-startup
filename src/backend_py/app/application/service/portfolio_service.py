@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.external import KisClient, KisClientError
+from app.adapter.out.external import KisClient, KisClientError, KisCredentials
 from app.adapter.out.persistence.models import (
     BrokerageAccount,
     PortfolioHolding,
@@ -30,10 +30,12 @@ from app.adapter.out.persistence.models import (
 from app.adapter.out.persistence.models.portfolio import (
     VALID_BROKER_CODES,
     VALID_CONNECTION_TYPES,
+    VALID_ENVIRONMENTS,
     VALID_SOURCES,
     VALID_TRANSACTION_TYPES,
 )
 from app.adapter.out.persistence.repositories import (
+    BrokerageAccountCredentialRepository,
     BrokerageAccountRepository,
     PortfolioHoldingRepository,
     PortfolioSnapshotRepository,
@@ -42,6 +44,10 @@ from app.adapter.out.persistence.repositories import (
     StockPriceRepository,
     StockRepository,
 )
+from app.adapter.out.persistence.repositories.brokerage_credential import (
+    MaskedCredentialView,  # noqa: F401 — re-export for router imports
+)
+from app.security.credential_cipher import CredentialCipher
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +94,14 @@ class KisCredentialsNotWiredError(PortfolioError):
     명시적 예외를 던진다. PR 3 에서 `brokerage_account_credential` 조회 경로가
     연결되면 이 예외는 제거되고 정상 실 sync 로 진입.
     """
+
+
+class CredentialAlreadyExistsError(PortfolioError):
+    """해당 계좌에 이미 credential 이 등록돼 있음. POST → 409 로 매핑."""
+
+
+class CredentialNotFoundError(PortfolioError):
+    """해당 계좌에 credential 이 없음. PUT·GET·DELETE → 404 로 매핑."""
 
 
 # ---------- DTOs ----------
@@ -187,12 +201,23 @@ class RegisterAccountUseCase:
         connection_type: str,
         environment: str = "mock",
     ) -> BrokerageAccount:
-        if environment != "mock":
-            raise InvalidRealEnvironmentError("MVP 는 environment='mock' 만 허용")
         if broker_code not in VALID_BROKER_CODES:
             raise PortfolioError(f"broker_code 불가: {broker_code}")
         if connection_type not in VALID_CONNECTION_TYPES:
             raise PortfolioError(f"connection_type 불가: {connection_type}")
+        if environment not in VALID_ENVIRONMENTS:
+            raise PortfolioError(f"environment 불가: {environment}")
+
+        # connection_type × environment 조합 검증 — 운영 실수 방지.
+        # kis_rest_real 은 오직 environment='real' 과만, 나머지는 'mock' 과만 짝지어야 함.
+        if connection_type == "kis_rest_real" and environment != "real":
+            raise InvalidRealEnvironmentError(
+                "kis_rest_real 계좌는 environment='real' 필수"
+            )
+        if connection_type != "kis_rest_real" and environment == "real":
+            raise InvalidRealEnvironmentError(
+                "environment='real' 은 connection_type='kis_rest_real' 에서만 허용"
+            )
 
         existing = await self._repo.find_by_alias(account_alias)
         if existing is not None:
@@ -632,3 +657,101 @@ class SyncPortfolioFromKisUseCase:
             unchanged_count=unchanged,
             stock_created_count=stock_created,
         )
+
+
+# ---------- P15 — KIS 실계정 자격증명 CRUD (2단계 온보딩) ----------
+
+
+class BrokerageCredentialUseCase:
+    """KIS 실계정 자격증명 CRUD — 외부 호출 0.
+
+    - 대상 계좌는 반드시 `connection_type='kis_rest_real'` + `environment='real'`.
+    - 저장 시 `BrokerageAccountCredentialRepository.upsert` 로 Fernet 암호화.
+    - GET 응답은 `app_key`/`account_no` 의 tail 4자리만 마스킹 노출, `app_secret` 은
+      어떤 경로로도 plaintext 반환하지 않는다.
+    - 실 sync 연결(PR 5) 전까지는 credential 은 저장·마스킹·삭제만 수행.
+
+    설계: docs/kis-real-account-sync-plan.md § 3.4 2단계 + § 5 PR 4.
+    """
+
+    def __init__(self, session: AsyncSession, cipher: CredentialCipher) -> None:
+        self._session = session
+        self._account_repo = BrokerageAccountRepository(session)
+        self._cred_repo = BrokerageAccountCredentialRepository(session, cipher)
+
+    async def create(
+        self, *, account_id: int, credentials: KisCredentials
+    ) -> MaskedCredentialView:
+        """신규 등록 — 이미 존재하면 `CredentialAlreadyExistsError`. POST 매핑."""
+        await self._ensure_real_account(account_id)
+        existing = await self._cred_repo.find_row(account_id)
+        if existing is not None:
+            raise CredentialAlreadyExistsError(
+                f"account_id={account_id} 에 이미 credential 이 등록돼 있음 — PUT 으로 교체"
+            )
+        await self._cred_repo.upsert(account_id, credentials)
+        return self._require_view(await self._cred_repo.get_masked_view(account_id), account_id)
+
+    async def replace(
+        self, *, account_id: int, credentials: KisCredentials
+    ) -> MaskedCredentialView:
+        """기존 교체 — 존재하지 않으면 `CredentialNotFoundError`. PUT 매핑."""
+        await self._ensure_real_account(account_id)
+        existing = await self._cred_repo.find_row(account_id)
+        if existing is None:
+            raise CredentialNotFoundError(
+                f"account_id={account_id} credential 미등록 — POST 로 생성"
+            )
+        await self._cred_repo.upsert(account_id, credentials)
+        return self._require_view(await self._cred_repo.get_masked_view(account_id), account_id)
+
+    @staticmethod
+    def _require_view(
+        view: MaskedCredentialView | None, account_id: int
+    ) -> MaskedCredentialView:
+        """`upsert` 직후 조회이므로 항상 존재해야 함.
+
+        `assert` 는 `python -O` 에서 제거돼 프로덕션에서 silent None 반환 위험이 있으므로
+        명시적 예외로 대체. 도달 불가 케이스(동시 DELETE 등)는 500 으로 loud fail.
+        """
+        if view is None:
+            raise RuntimeError(
+                f"account_id={account_id}: upsert 직후 get_masked_view 가 None — "
+                "DB flush 타이밍 이상 또는 동시 DELETE 레이스 가능성"
+            )
+        return view
+
+    async def get_masked(self, account_id: int) -> MaskedCredentialView:
+        """마스킹 뷰 반환. 없으면 `CredentialNotFoundError`."""
+        await self._ensure_real_account(account_id)
+        view = await self._cred_repo.get_masked_view(account_id)
+        if view is None:
+            raise CredentialNotFoundError(
+                f"account_id={account_id} credential 미등록"
+            )
+        return view
+
+    async def delete(self, account_id: int) -> None:
+        """명시 삭제. 레코드 없으면 `CredentialNotFoundError`."""
+        await self._ensure_real_account(account_id)
+        deleted = await self._cred_repo.delete(account_id)
+        if not deleted:
+            raise CredentialNotFoundError(
+                f"account_id={account_id} credential 미등록"
+            )
+
+    async def _ensure_real_account(self, account_id: int) -> BrokerageAccount:
+        """대상 계좌 존재 + `kis_rest_real` + `environment='real'` 보장."""
+        account = await self._account_repo.get(account_id)
+        if account is None:
+            raise AccountNotFoundError(f"account_id={account_id} 없음")
+        if account.connection_type != "kis_rest_real":
+            raise UnsupportedConnectionError(
+                f"credential 은 connection_type='kis_rest_real' 만 지원 "
+                f"(현재 {account.connection_type})"
+            )
+        if account.environment != "real":
+            raise InvalidRealEnvironmentError(
+                "kis_rest_real 계좌는 environment='real' 필수"
+            )
+        return account

@@ -121,8 +121,11 @@ PriceNonNegative = Annotated[Decimal, Field(ge=Decimal("0"))]
 class AccountCreateRequest(BaseModel):
     account_alias: AliasStr
     broker_code: Annotated[str, Field(pattern=r"^(manual|kis|kiwoom)$")]
-    connection_type: Annotated[str, Field(pattern=r"^(manual|kis_rest_mock)$")]
-    environment: Annotated[str, Field(pattern=r"^mock$")] = "mock"
+    connection_type: Annotated[
+        str, Field(pattern=r"^(manual|kis_rest_mock|kis_rest_real)$")
+    ]
+    # connection_type 과의 조합 검증은 UseCase 에서 수행. 여기선 enum 범위만 방어.
+    environment: Annotated[str, Field(pattern=r"^(mock|real)$")] = "mock"
 
 
 class AccountResponse(_Base):
@@ -212,6 +215,37 @@ class ExcelImportResponse(BaseModel):
     skipped_duplicates: int
     stock_created_count: int
     errors: list[ExcelImportRowError] = []
+
+
+# ---------- Brokerage Credential (P15 / KIS sync PR 4) ----------
+
+
+# KIS app_key/secret 는 운영상 수십 자. 여백·개행이 포함되면 인증 실패로 이어지므로
+# `\S` (공백 불가) + 길이 하한만 강제. 상한은 보수적 128자.
+KisAppKey = Annotated[str, Field(min_length=16, max_length=128, pattern=r"^\S+$")]
+KisAppSecret = Annotated[str, Field(min_length=16, max_length=256, pattern=r"^\S+$")]
+# CANO(8) + '-' + ACNT_PRDT_CD(2) 형식. KIS OpenAPI 표준.
+KisAccountNo = Annotated[str, Field(pattern=r"^\d{8}-\d{2}$")]
+
+
+class BrokerageCredentialRequest(BaseModel):
+    """실계정 자격증명 등록/교체 요청. plaintext 는 이 스키마 바깥으로 새지 않도록
+    router 에서만 사용, 로그·응답에 재노출 금지."""
+
+    app_key: KisAppKey
+    app_secret: KisAppSecret
+    account_no: KisAccountNo
+
+
+class BrokerageCredentialResponse(_Base):
+    """마스킹된 자격증명 뷰 — `app_secret` 미포함, `app_key`/`account_no` 는 tail 4자리만 공개."""
+
+    account_id: int
+    app_key_masked: str
+    account_no_masked: str
+    key_version: int
+    created_at: datetime
+    updated_at: datetime
 
 
 class AlignedSignalItem(BaseModel):
