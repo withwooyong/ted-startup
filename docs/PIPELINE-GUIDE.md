@@ -48,8 +48,12 @@
 | Claude Code | 최신 (Opus 4.7 권장, 단일 운영) |
 | 구독 | Max / Team / Enterprise (1M 컨텍스트 + Opus 단일 운영 전제) |
 | `.claude/settings.json` env | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`<br>`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=90` |
-| Git | `init`, worktree 지원 |
-| 기본 스택 | Java 21, Node 20+, PostgreSQL 16, Docker |
+| `.claude/settings.local.json` | 개인 오버라이드용 (gitignored). 예: `{"includeCoAuthoredBy": true}` |
+| Git | `init`, worktree 지원, GitHub CLI (`gh`) |
+| 기본 스택 (본 프로젝트) | Python 3.12 + FastAPI, Next.js 16, Node 20+, PostgreSQL 16, Docker |
+| 패키지 매니저 | `uv` (Python), `npm` (Node) |
+
+> 📌 **스택 변경 시**: Scaffolding 생성기(`/init-agent-team`)는 본 프로젝트가 Java→Python 이전(Phase 1~9)을 거치며 진화했다. 다른 스택(Kotlin/Go/Rust 등)에 적용하려면 `agents/08-backend/AGENT.md` · `agents/09-frontend/AGENT.md` 를 팀 컨벤션으로 교체. 언어별 reviewer 에이전트 매핑은 §8 참조.
 
 ### 문서
 - **반드시 숙지**: `docs/design/ai-agent-team-master.md` 목차 + Part I
@@ -298,9 +302,24 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 - `/handoff` 스킬로 매 세션 종료 시 HANDOFF.md 생성해두면 안전
 
 ### Q3. 코드리뷰 결과 CRITICAL이 너무 많아요
-- `/review` → java-reviewer, typescript-reviewer 에이전트가 자동 스캔
+- `/review` → 언어별 reviewer 에이전트가 자동 스캔 (아래 매핑 표)
 - Phase 4의 Verify 게이트는 Critical 0건이 필수 조건
 - 배치 크기가 크면 도메인별로 나눠서 리뷰
+
+**언어별 reviewer 에이전트 매핑** (`everything-claude-code` 플러그인):
+
+| 프로젝트 언어 | 리뷰어 에이전트 | 이 프로젝트 사용 여부 |
+|---|---|---|
+| Python | `everything-claude-code:python-reviewer` | ✅ 백엔드 |
+| TypeScript / React | `everything-claude-code:typescript-reviewer` | ✅ 프론트엔드 |
+| Kotlin / Android / Spring | `everything-claude-code:kotlin-reviewer` | 이전 스택 참고 |
+| Java / Spring Boot | `everything-claude-code:java-reviewer` | Phase 1~9 이전 스택 |
+| Go / Rust / C++ | `everything-claude-code:go-reviewer` 등 | — |
+
+**병렬 리뷰 실전 패턴** (본 프로젝트 PR #12~#16 에서 검증):
+- 풀스택 PR 은 python-reviewer + typescript-reviewer 를 **단일 메시지에 동시** Agent 호출
+- 각 리뷰어에게 리뷰 대상 파일 경로를 명시, "기존 코드 이슈 vs 이번 변경 이슈" 구분 요청
+- ~4분 내 양쪽 리뷰 완료 → HIGH 즉시 반영, MEDIUM 은 ROI 판단, 스킵 시 사유 기록
 
 ### Q4. 1인 프로젝트인데 팀 공유 구조가 필요한가요?
 - `pipeline/` 디렉토리 커밋을 권장: Compaction 방어 + 팀원 합류 대비
@@ -361,7 +380,23 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 
 ## 💡 이 프로젝트(ted-startup)의 실전 학습 포인트
 
-Sprint 1~3에서 체득한 패턴:
+### 🆕 KIS sync 시리즈 (PR #12~#16, 2026-04, Python 스택)
+
+| 상황 | 교훈 | 참고 |
+|------|------|------|
+| 다단계 외부 API 연동 (6 PR) | `docs/*-plan.md` 설계서 선행 + 사용자 승인 → PR 단위로 위험 낮은 것부터 진입 | `docs/kis-real-account-sync-plan.md` |
+| 외부 호출 0 단계적 해제 | PR 1(엑셀) → PR 2(어댑터 분기) → PR 3(저장소) → PR 4(등록 API/UI) → PR 5(실 호출 개시) 로 **신뢰 빌드업** | — |
+| 민감 자격증명 저장 | Fernet 대칭암호화 + Key 회전 대비 `key_version` 필드 + `DO $$` downgrade 가드 | PR #14 |
+| 예외 계층 래핑 | `InvalidToken` → `DecryptionFailedError` 로 래핑해 스택트레이스에 bytes/plaintext 노출 차단 | PR #14 |
+| 마스킹 뷰 | **비례 길이** 마스킹 (`(len - 4)` 불릿 + tail 4) — 고정 4개 불릿은 짧은 값 노출 비율 과다 | PR #15 |
+| HTTP 시맨틱 501 vs 503 | "미구현 기능" 은 501, "일시 장애" 는 503 — 재시도 루프 유발 방지 | PR #13 |
+| `python -O` 대응 | 프로덕션 코드의 `assert` 전면 금지 → `if not X: raise RuntimeError(...)` | PR #15 |
+| 요청 스코프 팩토리 DI | 계좌별 credential 이 달라 프로세스 공유 불가 → `Callable[[Creds], Client]` 팩토리 주입 | PR #16 |
+| smoke 마커 CI skip | `@pytest.mark.requires_kis_real_account` + pyproject `addopts = [..., "-m", "not ..."]` | PR #16 |
+| 예외 매퍼 네이밍 | `_raise_for_*` = 내부 raise, `_*_to_http` = return (caller 가 raise) — 이름과 동작 일치 | PR #16 |
+| FE dead code 제거 | `adminCall` 이 !ok 를 throw → 응답 `ok: true` 리터럴로 좁혀 타입 계약 강제 | PR #16 |
+
+### Sprint 1~3 (Java 스택 이전 시대, 참고용 보존)
 
 | 상황 | 교훈 | 기록 위치 |
 |------|------|-----------|
@@ -369,9 +404,21 @@ Sprint 1~3에서 체득한 패턴:
 | N+1 쿼리 17,500건 | 일자별 벌크 조회로 전환 | Sprint 4 계획 Task 1 |
 | Testcontainers 컨텍스트 충돌 | 싱글톤 패턴으로 해결 | 의사결정 D-3.10 |
 | Hexagonal 경계 위반 | Config → Service 위임 | 의사결정 D-3.12 |
-| 1인 → 팀 확장 가정 | pipeline/ 커밋 대상화 | 이 세션(2026-04-17) |
+| 1인 → 팀 확장 가정 | pipeline/ 커밋 대상화 | 세션 2026-04-17 |
+
+### 공통 워크플로우 (검증됨)
+
+본 프로젝트에서 반복적으로 증명된 SDLC 루틴:
+
+1. **설계 승인 루프**: 복잡 과제는 `docs/*-plan.md` 선행 작성 + 열린 질문 명시 → 사용자 결정 → 착수
+2. **`/ted-run` 파이프라인**: 구현 → 병렬 리뷰(언어별 reviewer) → 빌드검증 → 핸드오프/커밋/PR
+3. **Feature branch + Squash Merge**: `feature/<topic>` → push → `gh pr create` → CI 4/4 PASS 확인 → `gh pr merge --squash --delete-branch`
+4. **CI 필수 통과 게이트**: Backend Test / Frontend Build / Docker Build / E2E (gitignore·문서 단독 변경 시 e2e skip path filter 가능)
+5. **매 세션 마감 `/handoff`**: `HANDOFF.md` 에 당일 결정·미커밋·다음 액션·알려진 부채 명시 → 차기 세션 Compaction 안전망
+6. **커밋 메시지 한글 + Co-Authored-By**: `.claude/settings.local.json` 에 `includeCoAuthoredBy: true` 로 자동 부여
 
 **이 가이드를 업데이트할 타이밍**:
-- 신규 스프린트 완료 시 실전 교훈 추가
-- 새 슬래시 커맨드 도입 시 치트시트 갱신
-- Compaction 방어 패턴 개선 시 섹션 7 보강
+- 신규 PR 시리즈 완료 시 실전 교훈 추가 (위 표 형식 유지)
+- 새 슬래시 커맨드 도입 시 치트시트 갱신 (§5)
+- Compaction 방어 패턴 개선 시 §7 보강
+- 스택 변경 시 §2 표 + §8 리뷰어 매핑 갱신
