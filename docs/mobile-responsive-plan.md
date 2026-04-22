@@ -199,7 +199,7 @@ Tailwind v4 기본을 준수하되 프로젝트 컨벤션 명시화:
 
 - **Gate 1**: Phase A 완료 후 뷰포트 메타 + 모바일 E2E 프로필 동작 확인 → 사용자 승인
 - **Gate 2**: Phase B 완료 후 포트폴리오 페이지 + RealAccountSection 모바일 스크린샷 공유 → 사용자 승인
-- **Gate 3**: Phase E 완료 후 Lighthouse 스코어 + 모든 페이지 스크린샷 → 최종 머지
+- **Gate 3**: Phase E 완료 후 Lighthouse 스코어 + 모든 페이지 스크린샷 → 최종 머지 (**2026-04-23 통과** — PR #35 1차 측정 6/7, PR #36 `/stocks/005930` Perf 80→92 수정으로 7/7 달성. 세부는 `docs/lighthouse-scores.md`)
 
 ---
 
@@ -215,6 +215,7 @@ Tailwind v4 기본을 준수하되 프로젝트 컨벤션 명시화:
 | 2026-04-22 | Phase B~D 구현 완료 (PR #29/#30/#31), Phase E1 mobile.spec.ts 작성 | ted-run 파이프라인 병행 |
 | 2026-04-22 | §10 Lighthouse 수동 검증 가이드 추가, E2 자동화 이관 | lhci 세팅은 별도 CI 워크플로 추가 필요 |
 | 2026-04-23 | `scripts/lighthouse-mobile.sh` + `docs/lighthouse-scores.md` 템플릿 추가, §10 단축 | Gate 3 증빙 인프라 완비. 실제 측정값은 사용자 로컬 기동 후 scores.md 채움 |
+| 2026-04-23 | Gate 3 1차 측정 (PR #35) + `/stocks/005930` CLS 수정 (PR #36) — **Gate 3 7/7 통과** | prod docker 스택 재빌드 + caddy self-signed HTTPS 경유. 측정 · 진단 · 수정 · 재측정 1-cycle 완결. 세부 `docs/lighthouse-scores.md` |
 
 ---
 

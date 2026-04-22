@@ -7,6 +7,144 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] fix(frontend): /stocks/005930 CLS 0.36→0.12 · Perf 80→92 — footer shift 제거 + 차트 aspect CSS 이관 (`5efff74`, PR #36, 오픈)
+
+Gate 3 1차 측정(PR #35)에서 유일하게 목표 미달(Perf 80 < 85)이던 `/stocks/005930` 의 실제 원인 진단 + 수정.
+
+### Fixed
+- `src/frontend/src/app/stocks/[code]/page.tsx` — CLS 0.362 → 0.123, Perf 80 → 92
+  - `useMediaQuery` 제거 → 차트 aspect 를 Tailwind CSS (`aspect-[1.4/1] sm:aspect-[2/1]`) 로 이관. recharts `ResponsiveContainer` 는 `width="100%" height="100%"` 로 부모 CSS aspect-ratio 상속. hydration 시점 재배치 소거
+  - loading/error/loaded 세 상태의 `<main>` 에 `min-h-[calc(100dvh-8rem)]` 추가 → footer 를 뷰포트 하단에 고정. 스켈레톤 ↔ 실콘텐츠 전환 시 footer shift 0 건
+  - 스켈레톤을 실제 구조(back 버튼 + 2 카드 + 기간 선택기 + 차트) 에 맞춰 세분화 → 세로 높이 격차 축소
+
+### Changed
+- `docs/lighthouse-scores.md` — 1차 측정 결과 표의 `/stocks/005930` 행 갱신 (80 → 92, CLS 주석 추가) + "해결 이력" 섹션 신설로 "실패 항목" → 사후 분석 전환
+
+### Verified
+- `yarn lint --quiet` ✅ / `yarn type-check` ✅
+- 프론트엔드 단일 서비스 재빌드 (`docker compose up -d --build frontend`) healthcheck 통과
+- Lighthouse 재측정: CLS 0.123 / Perf 92 / A11y 96 / BP 100 / SEO 100
+
+### Decisions
+- **초기 가설(recharts dynamic import for TBT) 반증**: JSON audit 로 TBT 48ms (이미 "Good") 확인 → 실제 병목은 CLS (layout shift on footer). JSON 분석 없이 상용 가설만으로 움직였으면 잘못된 최적화에 시간 허비했을 것
+- **남은 CLS 0.123 (header card 내부) 은 닫음**: Gate 3 목표(Perf 85+) 통과 + "Needs Improvement" 범위(0.1~0.25) → 효용 낮음
+
+---
+
+## [2026-04-23] docs(mobile): Gate 3 Lighthouse 1차 측정 — 7페이지 중 6통과 · /stocks/005930 Perf 80 미달 (`9815608`, PR #35, 오픈)
+
+PR #34 의 Gate 3 증빙 인프라를 이용해 **실제 측정 수행**. prod docker 스택(`docker compose -f docker-compose.prod.yml`) 을 master 최신으로 재빌드 후 caddy self-signed HTTPS 를 통해 7 페이지 측정.
+
+### Added
+- `docs/lighthouse-scores.md` §측정 결과 표 — 1차 측정값 기록 (`/` 99/96/100/100, `/portfolio` 94/97/100/100, `/stocks/005930` **80**/96/100/100, `/reports/005930` 99/96/100/100, `/portfolio/1/alignment` 100/100/100/100, `/backtest` 97/100/100/100, `/settings` 99/96/100/100)
+- §실패 항목 → `/stocks/005930` Perf 80 의 초기 가설(추후 PR #36 에서 반증) 기록
+- §변경 이력 — 1차 측정 기록 추가
+
+### Changed
+- `scripts/lighthouse-mobile.sh` — chrome-flags 에 `--ignore-certificate-errors` 추가해 prod docker 스택(caddy self-signed HTTPS) 측정 지원. 헤더 주석에 dev(A) / prod docker(B) 두 모드 사용법 병기
+- `docs/lighthouse-scores.md` §측정 절차 — A(dev uvicorn+yarn) / B(prod docker caddy HTTPS) 병기
+
+### Decisions
+- **prod docker 스택 경유 측정 채택**: dev 서버(`uvicorn` + `yarn dev`) 대비 실제 배포 구성(캐싱, 번들 분할, caddy 압축) 과 동일해 점수 신뢰도 ↑. 단점인 self-signed 인증서는 chrome-flags 로 해결
+- **비로그인 상태 측정 한계 명시**: `/portfolio`, `/settings`, `/portfolio/1/alignment` 는 로그인 리다이렉트 셸 기준으로 측정됨 → 실데이터 상태 재측정은 DevTools 수동 절차(§B) 로 보완 예정
+
+---
+
+## [2026-04-23] docs(mobile): Gate 3 Lighthouse 증빙 인프라 — 자동 스크립트 + 결과 템플릿 (`62a7361`, PR #34, 머지 완료)
+
+모바일 반응형 작업계획서 §8 **Gate 3** (Lighthouse 스코어 증빙) 의 수동 측정 인프라. 실제 스코어는 사용자 로컬 backend+frontend 기동 후 채워짐.
+
+### Added
+- `scripts/lighthouse-mobile.sh` (실행권한 0755) — `npx lighthouse` 로 기본 7 페이지(대시보드·포트폴리오·종목·AI리포트·정합도·백테스트·설정) 모바일 프로필 측정
+  - 4 카테고리(Perf/A11y/BP/SEO) JSON 파싱 → `lighthouse-reports/summary.md` 에 paste-ready 표 누적
+  - 헤드리스 Chrome (`--headless=new --no-sandbox`) 로 CI/로컬 공통 실행
+  - 인자로 일부 페이지만 측정 가능 (`./lighthouse-mobile.sh / /backtest`)
+- `docs/lighthouse-scores.md` 신규 — 목표치(Perf 85+, A11y/BP 90+) + D1·D3·D4 개선 근거 매핑, 자동 + DevTools 2 경로 절차, 결과 표 빈 칸 초기화, 측정 체크리스트, `@lhci/cli` 자동화 이관 계획
+
+### Changed
+- `docs/mobile-responsive-plan.md` §10 단축 → `lighthouse-scores.md` 링크 위임. §9 변경 이력 업데이트.
+- `.gitignore` — `lighthouse-reports/` 제외 (JSON/HTML 리포트 커밋 금지)
+
+### Verified
+- `bash -n scripts/lighthouse-mobile.sh` ✅
+- `npx tsc --noEmit` (frontend 회귀 없음) ✅
+
+### Decisions
+- **Gate 3 는 수동 측정으로 닫음**: lhci 자동화는 staging 환경(로그인 세션 시드) 전제라 현재 scope 제외. 수동 절차 표준화 + 스크립트 제공으로 재현성 확보.
+- **로그인 세션 이슈 명시**: 자동 스크립트는 비로그인 쉘 페이지만 측정됨. portfolio/settings 정확 측정은 DevTools 로 보완 — scores.md §측정 방법 B 에 명시.
+
+### Known Issues
+- 로컬 `credential.helper` 가 `aws codecommit credential-helper` 였음 → GitHub 푸시 실패. repo 단위로 `gh auth git-credential` 로 overlay 해 해결. 전역·다른 AWS 리포엔 영향 없음.
+
+---
+
+## [2026-04-23] test(frontend): 모바일 반응형 Phase E1 — mobile.spec.ts + desktop 스펙 프로필 분리 (`be6a5f8`, PR #32)
+
+모바일 반응형 작업계획서 §4 Phase E1 (Playwright 모바일 스크린샷 회귀) 구현. Phase B/C/D 가 기존 desktop E2E 를 깨지 않도록 selector 프로필 분리도 함께 수행.
+
+### Added
+- `src/frontend/tests/e2e/mobile.spec.ts` (+171) — 모바일 프로필(`mobile-safari`/`mobile-chrome`) 전용 8 케이스
+  - 대시보드 필터 버튼 `boundingBox.height >= 44` (D1 터치 타깃)
+  - NavHeader `v1.0` 배지 `toBeHidden()` (B2)
+  - 포트폴리오 `<table>` 숨김 + `data-testid="holding-row"` 카드 LI 태그 렌더 (B1)
+  - sync 버튼 `innerText` "모의 sync"/"실계좌 sync" (C4)
+  - 종목상세/리포트/정합도/백테스트 수평 스크롤 0 + 스크린샷 수집
+  - 설정 페이지 RealAccountSection 카드 세로 배치 box height (B3)
+  - 모든 페이지 `page.screenshot({ path: 'test-results/mobile/*.png', fullPage: true })` 증빙 수집
+
+### Changed
+- `src/frontend/tests/e2e/pages/PortfolioPage.ts` (+17/-5) — `holdingRow` 를 `page.getByTestId('holding-row').filter({ hasText, visible: true })` 로 전환 (뷰포트 독립). `kisSyncButton` name regex 확장 (`/KIS 모의 동기화|모의 sync|KIS 실계좌 동기화|실계좌 sync/`). `holdingsTable` 에 desktop 전용 JSDoc 경고.
+- `src/frontend/tests/e2e/holdings.spec.ts` + `actions.spec.ts` — `test.beforeEach` 에서 `testInfo.project.name !== 'chromium'` 일 때 skip. 데스크톱 테이블 전제 스펙 보호.
+- `docs/mobile-responsive-plan.md` §4 Phase E1 체크 완료 표시.
+
+### Fixed
+- **strict mode 위반** (CI 첫 회차 실패): `hidden sm:block` / `sm:hidden` 으로 `<tr>` + `<li>` 가 DOM 에 공존해 `getByTestId('holding-row')` 가 2 매치 → `filter({ visible: true })` 로 현재 뷰포트에서 실제 렌더된 노드만 선택. 이 수정이 `c3b8911` fix 커밋에 squash.
+
+### Verified
+- `npx tsc --noEmit` ✅ / `npx eslint` ✅ / `next build` ✅ 5.0s
+- CI 6/6 green (2차 실행에서 pass)
+
+---
+
+## [2026-04-22] feat(frontend): 모바일 반응형 Phase D — P2 마감 (useMediaQuery + 터치 타깃 + aurora) (`9e02890`, PR #31)
+
+### Added
+- `src/frontend/src/lib/hooks/useMediaQuery.ts` (+23) — `useSyncExternalStore` 기반 SSR-safe 훅. React 19 `react-hooks/set-state-in-effect` 룰 준수. 서버 스냅샷 `false` 고정으로 hydration mismatch 회피.
+
+### Changed
+- `stocks/[code]/page.tsx` + `backtest/page.tsx` — recharts `aspect` 모바일 분기 (stocks: 2→1.4, backtest: 2.2→1.4). 375px 뷰포트 XAxis 틱 겹침 완화.
+- `app/page.tsx` 대시보드 — 필터 버튼 + 정렬 select 에 `min-h-[44px] sm:min-h-0` (iOS HIG 44px). 버튼에 `inline-flex items-center justify-center` 추가로 텍스트 세로 정렬 유지.
+- `globals.css` aurora blob — 모바일(`max-width: 639px`) 전용 미디어 쿼리 `blur 90px → 50px`, `opacity 0.35 → 0.25`. 저사양 GPU composite 비용 경감.
+
+### Decisions
+- **useState+useEffect → useSyncExternalStore**: React 19 신규 린트 룰 대응 + SSR-safe 외부 스토어 구독 공식 패턴. 첫 프레임 데스크톱 비율 → hydration 후 모바일 비율 전환은 작업계획서 §6 risk 에서 허용.
+- **D2(푸터 `<details>`) 스킵 유지**: 실제 3줄 짧은 문구라 과장된 claim. 작업계획서 §9 변경이력 참조.
+
+---
+
+## [2026-04-22] feat(frontend): 모바일 반응형 Phase C — P1 가독성 (stocks/reports/alignment/portfolio) (`589a7e6`, PR #33)
+
+원래 PR #30 이었으나 Phase B 머지 시 `--delete-branch` 로 base 소실 → 자동 closed → **#33 로 대체 생성**.
+
+### Changed
+- **C1** `stocks/[code]/page.tsx` 헤더 카드 grid-cols-3 — 라벨 `text-[0.6rem] sm:text-[0.7rem]`, 숫자 `text-base sm:text-xl`, `tabular-nums` 추가. Score 카드 `tracking-tighter` 제거.
+- **C2** `reports/[stockCode]/page.tsx` `SourceRow` — 모바일 2줄(메타 위/라벨 아래) / 데스크톱 `sm:contents` 1줄 flatten. order-1/order-2 로 재배치.
+- **C3** `portfolio/[accountId]/alignment/page.tsx` — 시그널 chip 모바일 3개 제한 (`idx >= 3 ? hidden sm:flex : flex`) + "+N개" 오버플로우 배지 (CSS-only, hydration 안전).
+- **C4** `portfolio/page.tsx` — KIS sync 버튼 라벨 `<span className="sm:hidden">`/`<span className="hidden sm:inline">` 분기. 모바일 "실계좌 sync"/"모의 sync" → 데스크톱 "KIS 실계좌 동기화"/"KIS 모의 동기화".
+
+---
+
+## [2026-04-22] feat(frontend): 모바일 반응형 Phase B — 포트폴리오 카드 + NavHeader + 실계좌 행 (`bd65cb3`, PR #29)
+
+### Added
+- **B1** `portfolio/page.tsx` — 데스크톱 `<table>` `hidden sm:block` + 모바일 `<ul className="sm:hidden space-y-3">` 카드 리스트 이중 렌더링. 카드 구조: 종목명·코드 헤더 + 수량/평단/매입원가 3×1 `<dl>` + AI 리포트 링크. `data-testid="holding-row"` 를 `<tr>`/`<li>` 양쪽에 공통 부여 (뷰포트별 하나만 렌더).
+
+### Changed
+- **B2** `components/NavHeader.tsx` — 로고 우측 `v1.0` 배지 `hidden sm:inline`. 모바일 로고 공간 확보.
+- **B3** `components/features/RealAccountSection.tsx` — 계좌 행 `flex-col ... sm:flex-row sm:items-center sm:justify-between`. 버튼 그룹 `flex-wrap gap-2 sm:shrink-0 sm:flex-nowrap` 로 좁은 화면 2줄 wrap 허용. 3개 버튼 `aria-disabled` 추가, masked credential `break-all`, `data-testid="real-account-row"` 신규 (Phase E1 mobile.spec.ts 용).
+
+---
+
 ## [2026-04-22] feat(frontend): 모바일 반응형 Phase A — viewport 메타 + Playwright 모바일 프로필 (`0070f97`, PR #28)
 
 `docs/mobile-responsive-plan.md` Phase A (Gate 1 스코프) 구현. 3.5~4 man-day 모바일 반응형 refactor 의 첫 단계로 "설정 도입" 까지만 범위. 모바일 전용 스펙은 Phase B~E 에서 햄버거 드로어/카드 레이아웃과 함께 추가 예정.
