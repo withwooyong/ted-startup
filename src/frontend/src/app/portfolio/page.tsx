@@ -285,9 +285,16 @@ export default function PortfolioPage() {
                 pending={actionPending === 'sync'}
                 variant="accent"
               >
-                {selected.connection_type === 'kis_rest_real'
-                  ? 'KIS 실계좌 동기화'
-                  : 'KIS 모의 동기화'}
+                <span className="sm:hidden">
+                  {selected.connection_type === 'kis_rest_real'
+                    ? '실계좌 sync'
+                    : '모의 sync'}
+                </span>
+                <span className="hidden sm:inline">
+                  {selected.connection_type === 'kis_rest_real'
+                    ? 'KIS 실계좌 동기화'
+                    : 'KIS 모의 동기화'}
+                </span>
               </ActionButton>
             )}
             <Link

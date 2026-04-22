@@ -190,7 +190,9 @@ export default function AlignmentPage({
                     {item.signals.slice(0, 6).map((s, idx) => (
                       <li
                         key={`${s.signal_date}-${s.signal_type}-${idx}`}
-                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.03] border border-white/[0.04] text-[0.7rem]"
+                        className={`items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.03] border border-white/[0.04] text-[0.7rem] ${
+                          idx >= 3 ? 'hidden sm:flex' : 'flex'
+                        }`}
                       >
                         <span
                           className={`px-1.5 py-0.5 rounded text-[0.65rem] font-bold ${
@@ -210,6 +212,15 @@ export default function AlignmentPage({
                         </span>
                       </li>
                     ))}
+                    {/* 모바일에서 3개 초과분은 "+N" 배지로 압축 (최대 6개까지 집계) */}
+                    {item.signals.length > 3 && (
+                      <li
+                        aria-label={`숨겨진 시그널 ${Math.min(item.signals.length, 6) - 3}개`}
+                        className="sm:hidden flex items-center px-2.5 py-1 rounded-md bg-white/[0.03] border border-white/[0.04] text-[0.7rem] text-[#6B7A90] font-[family-name:var(--font-mono)]"
+                      >
+                        +{Math.min(item.signals.length, 6) - 3}개
+                      </li>
+                    )}
                   </ul>
                 </li>
               ))}

@@ -292,10 +292,10 @@ function SourceRow({ source }: { source: ReportSourceItem }) {
       rel="noopener noreferrer"
       aria-label={`${source.label} (새 탭에서 열기)`}
       aria-disabled={unsafe || undefined}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors group"
+      className="flex items-start gap-2 sm:items-center sm:gap-3 px-3 py-2 rounded-lg hover:bg-white/[0.03] transition-colors group"
     >
       <span
-        className={`px-1.5 py-0.5 rounded text-[0.6rem] font-bold font-[family-name:var(--font-mono)] ${
+        className={`shrink-0 mt-0.5 sm:mt-0 px-1.5 py-0.5 rounded text-[0.6rem] font-bold font-[family-name:var(--font-mono)] ${
           source.tier === 1
             ? 'bg-[#FF4D6A]/10 text-[#FF4D6A] border border-[#FF4D6A]/30'
             : 'bg-[#FFCC00]/10 text-[#FFCC00] border border-[#FFCC00]/30'
@@ -304,19 +304,24 @@ function SourceRow({ source }: { source: ReportSourceItem }) {
       >
         T{source.tier}
       </span>
-      <span className="text-[0.65rem] text-[#6B7A90] uppercase tracking-wider font-medium w-12">
-        {SOURCE_TYPE_LABELS[source.type] ?? source.type}
-      </span>
-      <span className="flex-1 text-sm text-[#E8ECF1] group-hover:text-[#6395FF] transition-colors truncate">
-        {source.label}
-      </span>
-      {source.published_at && (
-        <span className="text-[0.65rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
-          {source.published_at}
+      {/* Mobile: 라벨 위 / 메타 아래 2줄. Desktop: 한 줄 flatten. */}
+      <div className="min-w-0 flex-1 flex flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+        <span className="order-2 sm:order-none sm:flex-1 text-sm text-[#E8ECF1] group-hover:text-[#6395FF] transition-colors truncate">
+          {source.label}
         </span>
-      )}
+        <div className="order-1 sm:order-none flex items-center gap-2 sm:contents">
+          <span className="text-[0.65rem] text-[#6B7A90] uppercase tracking-wider font-medium sm:w-12 sm:order-first shrink-0">
+            {SOURCE_TYPE_LABELS[source.type] ?? source.type}
+          </span>
+          {source.published_at && (
+            <span className="text-[0.65rem] text-[#3D4A5C] font-[family-name:var(--font-mono)] shrink-0">
+              {source.published_at}
+            </span>
+          )}
+        </div>
+      </div>
       <span
-        className="text-[0.7rem] text-[#3D4A5C] group-hover:text-[#6395FF] transition-colors"
+        className="shrink-0 text-[0.7rem] text-[#3D4A5C] group-hover:text-[#6395FF] transition-colors"
         aria-hidden="true"
       >
         ↗
