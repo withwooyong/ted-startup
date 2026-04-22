@@ -108,7 +108,9 @@ jobs:
         env:
           CI: '1'
           E2E_BASE_URL: https://localhost
-        run: npx playwright test
+        # 데스크톱 회귀만 게이트. mobile-safari/mobile-chrome 프로필은 Phase B~E 에서
+        # 전용 스펙(햄버거 드로어 등) 완성 후 활성화 예정.
+        run: npx playwright test --project=chromium
 
       - name: Upload Playwright report
         if: always()
