@@ -59,6 +59,7 @@ from app.application.service.portfolio_service import (
     ComputeSnapshotUseCase,
     CredentialAlreadyExistsError,
     CredentialNotFoundError,
+    CredentialRejectedError,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
     PortfolioError,
@@ -457,6 +458,10 @@ def _credential_error_to_http(exc: PortfolioError) -> HTTPException:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, CredentialNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, CredentialRejectedError):
+        # KIS 가 HTTP 401/403 으로 자격증명을 명시 거부 — 사용자가 Settings 에서
+        # 재등록해야 해결. 업스트림 장애(502) 와 구분해 4xx 로 매핑.
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if isinstance(exc, SyncError):
         # KIS 업스트림(토큰 발급/잔고 조회) 실패 — 업스트림 게이트웨이 오류.
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))

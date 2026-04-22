@@ -43,6 +43,7 @@ from app.adapter.web._deps import (
 )
 from app.application.service.portfolio_service import (
     CredentialNotFoundError,
+    CredentialRejectedError,
     KisRealClientFactory,
     SyncError,
     SyncPortfolioFromKisRealUseCase,
@@ -70,7 +71,8 @@ def _real_mock_transport(
 ) -> httpx.MockTransport:
     """실 KIS 엔드포인트(openapi:9443) 를 내부 MockTransport 로 대체.
 
-    `token_status=401` 로 토큰 발급 실패를 시뮬레이션해 KisAuthError 경로도 검증.
+    `token_status=401/403` 로 credential 거부 경로(KisCredentialRejectedError),
+    `token_status=500` 등으로 업스트림 장애 경로(KisAuthError) 를 각각 검증.
     """
     rows = balance_rows if balance_rows is not None else []
 
@@ -188,14 +190,37 @@ async def test_connection_rejects_non_real_account(session: AsyncSession) -> Non
         await uc.execute(account_id=account.id)
 
 
+@pytest.mark.parametrize("token_status", [401, 403])
 @pytest.mark.asyncio
-async def test_connection_token_failure_wrapped_as_sync_error(
+async def test_connection_credential_reject_raises_credential_rejected(
+    session: AsyncSession,
+    token_status: int,
+) -> None:
+    """KIS 토큰 발급 시 4xx 로 credential 거부 → `CredentialRejectedError`.
+
+    업스트림 장애(SyncError/502) 와 구분 — 사용자 재등록 안내 가능해야 함.
+    라우터에서 400 으로 매핑.
+    """
+    cipher = _fresh_cipher()
+    account = await _seed_real_account_with_credential(session, alias=f"conn-reject-{token_status}", cipher=cipher)
+    factory = _make_real_factory(_real_mock_transport(token_status=token_status))
+    uc = TestKisConnectionUseCase(session, cipher=cipher, real_client_factory=factory)
+    with pytest.raises(CredentialRejectedError, match="자격증명 거부"):
+        await uc.execute(account_id=account.id)
+
+
+@pytest.mark.asyncio
+async def test_connection_upstream_5xx_wrapped_as_sync_error(
     session: AsyncSession,
 ) -> None:
-    """KIS 토큰 발급 실패(401) → `SyncError`. 라우터에서 502 로 변환."""
+    """KIS 토큰 발급 시 5xx → `SyncError`. 라우터에서 502 로 변환.
+
+    credential 은 유효할 수 있고 KIS 서버 일시 장애인 상황. `CredentialRejectedError`
+    와 별개 계층(둘 다 `PortfolioError` 의 sibling) 이라 타입으로 자동 분리.
+    """
     cipher = _fresh_cipher()
-    account = await _seed_real_account_with_credential(session, alias="conn-token-fail", cipher=cipher)
-    factory = _make_real_factory(_real_mock_transport(token_status=401))
+    account = await _seed_real_account_with_credential(session, alias="conn-token-5xx", cipher=cipher)
+    factory = _make_real_factory(_real_mock_transport(token_status=500))
     uc = TestKisConnectionUseCase(session, cipher=cipher, real_client_factory=factory)
     with pytest.raises(SyncError, match="KIS 토큰 발급 실패"):
         await uc.execute(account_id=account.id)
@@ -347,14 +372,30 @@ async def test_endpoint_test_connection_missing_credential_404(
 
 
 @pytest.mark.asyncio
-async def test_endpoint_test_connection_token_failure_502(
+async def test_endpoint_test_connection_credential_rejected_400(
     session: AsyncSession,
     real_client: tuple[httpx.AsyncClient, CredentialCipher, dict[str, httpx.MockTransport]],
 ) -> None:
+    """토큰 4xx (credential 거부) → endpoint 400 응답 + 재등록 안내 메시지."""
     client, cipher, state = real_client
     account = await _seed_real_account_with_credential(session, alias="endpoint-conn-401", cipher=cipher)
-    # 토큰 401 로 교체
+    # 토큰 401 로 교체 — KIS 가 자격증명 거부
     state["transport"] = _real_mock_transport(token_status=401)
+    resp = await client.post(f"/api/portfolio/accounts/{account.id}/test-connection")
+    assert resp.status_code == 400
+    # 사용자가 어떤 필드를 재확인해야 할지 힌트를 포함해야 함.
+    assert "자격증명 거부" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_endpoint_test_connection_upstream_failure_502(
+    session: AsyncSession,
+    real_client: tuple[httpx.AsyncClient, CredentialCipher, dict[str, httpx.MockTransport]],
+) -> None:
+    """토큰 5xx (업스트림 장애) → endpoint 502 응답. 기존 의미 유지."""
+    client, cipher, state = real_client
+    account = await _seed_real_account_with_credential(session, alias="endpoint-conn-500", cipher=cipher)
+    state["transport"] = _real_mock_transport(token_status=500)
     resp = await client.post(f"/api/portfolio/accounts/{account.id}/test-connection")
     assert resp.status_code == 502
     assert "토큰 발급 실패" in resp.json()["detail"]

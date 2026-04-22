@@ -11,6 +11,7 @@ from app.adapter.out.external import (
     KisAuthError,
     KisClient,
     KisClientError,
+    KisCredentialRejectedError,
     KisCredentials,
     KisEnvironment,
     KisNotConfiguredError,
@@ -161,7 +162,63 @@ async def test_raises_auth_error_when_token_endpoint_fails() -> None:
 
     transport = httpx.MockTransport(handler)
     async with KisClient(_settings(), transport=transport) as client:
+        # 서브클래스도 KisAuthError 로 잡히므로 이 테스트는 회귀 안전장치 성격으로 보존.
         with pytest.raises(KisAuthError):
+            await client.fetch_balance()
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+@pytest.mark.asyncio
+async def test_token_401_or_403_raises_credential_rejected(status_code: int) -> None:
+    """KIS 가 토큰 발급 시 4xx 로 자격증명을 거부 → KisCredentialRejectedError.
+
+    업스트림 장애(5xx) 와 의미론적으로 구분되어 라우터에서 4xx 로 매핑 가능해야 함.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(status_code, json={"error_description": "invalid"})
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    async with KisClient(_settings(), transport=transport) as client:
+        with pytest.raises(KisCredentialRejectedError):
+            await client.fetch_balance()
+
+
+@pytest.mark.asyncio
+async def test_token_500_raises_base_auth_error_not_rejection() -> None:
+    """KIS 가 5xx 를 반환 → KisAuthError 만 해당. KisCredentialRejectedError 는 아님.
+
+    credential 은 유효할 수 있고 KIS 서버가 일시 장애인 상황. 라우터에서 502 로 매핑.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(500, json={"error": "internal"})
+        return httpx.Response(200, json={})
+
+    transport = httpx.MockTransport(handler)
+    async with KisClient(_settings(), transport=transport) as client:
+        with pytest.raises(KisAuthError) as exc_info:
+            await client.fetch_balance()
+        # 서브클래스가 아닌 base 타입 정확히 검증 — 의미 분리 보장.
+        assert not isinstance(exc_info.value, KisCredentialRejectedError)
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+@pytest.mark.asyncio
+async def test_balance_401_or_403_raises_credential_rejected(status_code: int) -> None:
+    """토큰은 발급됐으나 잔고조회 시점에 4xx 로 자격증명이 거부되는 드문 경로."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return _ok_token_response()
+        return httpx.Response(status_code, json={"error_description": "revoked"})
+
+    transport = httpx.MockTransport(handler)
+    async with KisClient(_settings(), transport=transport) as client:
+        with pytest.raises(KisCredentialRejectedError):
             await client.fetch_balance()
 
 

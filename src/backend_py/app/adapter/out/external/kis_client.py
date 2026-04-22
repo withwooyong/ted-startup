@@ -151,7 +151,23 @@ class KisClientError(Exception):
 
 
 class KisAuthError(KisClientError):
-    pass
+    """KIS 인증 계열 오류 — 토큰 요청 네트워크/파싱/업스트림 5xx 등.
+
+    업스트림 장애 성격이므로 라우터에서 502 Bad Gateway 로 매핑된다.
+    HTTP 401/403 으로 KIS 가 자격증명을 명시적으로 거부한 경우는 서브클래스
+    `KisCredentialRejectedError` 를 사용해 4xx 로 구분 매핑.
+    """
+
+
+class KisCredentialRejectedError(KisAuthError):
+    """KIS 업스트림이 HTTP 401/403 으로 자격증명을 거부 — 사용자 재등록 필요.
+
+    `KisAuthError` 의 서브클래스이지만 의미가 다르다:
+      - `KisAuthError` (base): 업스트림 장애 / 네트워크 / 파싱 오류 → 502
+      - `KisCredentialRejectedError`: 명시적 자격증명 거부 → 400 (사용자 조치 가능)
+    UseCase 는 이 예외를 먼저 잡아 도메인 `CredentialRejectedError` 로 변환하고,
+    그렇지 않은 `KisClientError` 는 `SyncError` 로 처리.
+    """
 
 
 class KisNotConfiguredError(KisClientError):
@@ -286,8 +302,16 @@ class KisClient:
             )
         except httpx.HTTPError as exc:
             raise KisAuthError(f"토큰 요청 네트워크 오류: {exc}") from exc
+        if resp.status_code in (401, 403):
+            # KIS 가 자격증명을 명시적 거부 — 사용자 재등록 필요. 업스트림 장애와 분리.
+            # 원 응답 body 는 DEBUG 로그로만 분리 — PR #20 로깅 마스킹 파이프라인을 거쳐
+            # JWT/hex 패턴이 자동 스크럽 되도록 함. 예외 메시지에 담으면 HTTP response
+            # detail 로 사용자 노출될 수 있어 body 는 절대 메시지에 포함 안 함.
+            logger.debug("KIS token %s body: %s", resp.status_code, resp.text[:200])
+            raise KisCredentialRejectedError(f"KIS 자격증명 거부 (토큰 발급): HTTP {resp.status_code}")
         if resp.status_code != 200:
-            raise KisAuthError(f"토큰 요청 실패: HTTP {resp.status_code} body={resp.text[:200]}")
+            logger.debug("KIS token %s body: %s", resp.status_code, resp.text[:200])
+            raise KisAuthError(f"토큰 요청 실패: HTTP {resp.status_code}")
         data = resp.json()
         raw_token = data.get("access_token")
         if not isinstance(raw_token, str) or not raw_token:
@@ -354,8 +378,14 @@ class KisClient:
             headers=headers,
             params=params,
         )
+        if resp.status_code in (401, 403):
+            # 토큰은 발급됐지만 잔고조회 시점에 자격증명이 거부되는 경우 (권한 회수 등).
+            # 사용자 조치 가능하므로 credential reject 로 승격. body 는 DEBUG 로그로 분리.
+            logger.debug("KIS balance %s body: %s", resp.status_code, resp.text[:300])
+            raise KisCredentialRejectedError(f"KIS 자격증명 거부 (잔고조회): HTTP {resp.status_code}")
         if resp.status_code != 200:
-            raise KisClientError(f"잔고조회 실패: HTTP {resp.status_code} body={resp.text[:300]}")
+            logger.debug("KIS balance %s body: %s", resp.status_code, resp.text[:300])
+            raise KisClientError(f"잔고조회 실패: HTTP {resp.status_code}")
         body = resp.json()
         rt_cd = body.get("rt_cd")
         if rt_cd not in ("0", 0):

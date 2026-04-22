@@ -380,7 +380,17 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 
 ## 💡 이 프로젝트(ted-startup)의 실전 학습 포인트
 
-### 🆕 Hexagonal + Sync UseCase mock/real 분리 (PR #(예정), 2026-04-22)
+### 🆕 KisAuthError 4xx/5xx 분리 (PR #(예정), 2026-04-22)
+
+| 상황 | 교훈 | 참고 |
+|------|------|------|
+| 외부 API 오류 일괄 502 매핑 | "credential 거부(401/403)" 와 "업스트림 장애(5xx/네트워크)" 는 사용자 조치가 다름 → 예외 타입으로 분리해 4xx/5xx 각각 매핑. 서브클래스 패턴(`KisCredentialRejectedError(KisAuthError)`)으로 타입 계층 + 도메인 계층 각각 2쌍 | `portfolio.py` `_credential_error_to_http` |
+| HTTP 401 vs 400 선택 | "우리 서버 auth 실패" = 401, "우리 서버는 요청을 이해했지만 업스트림이 사용자 credential 거부" = **400** 이 적절. 401 은 FE 가 우리 admin API 인증 실패로 오해 유도 | 리뷰어 판단 — 422 도 semantics 불일치 |
+| 예외 메시지에 원 응답 body 포함 금지 | Adapter 예외가 UseCase·Router 를 거쳐 `HTTPException.detail` 로 사용자 노출 → PR #20 로깅 마스킹 파이프라인 우회. `body=` 는 DEBUG 로그로만 분리 | `kis_client.py` raise 지점 4곳 |
+| 서브클래스 catch 순서 | `except KisCredentialRejectedError` 를 `except KisClientError` **앞** 에 둬야 서브클래스가 먼저 잡힘. 세 UseCase 모두 동일 패턴 적용 일관성 | `portfolio_service.py` `except` 블록 3곳 |
+| 테스트: 서브클래스 오탐 방지 | `pytest.raises(KisAuthError)` 는 서브클래스도 매칭하므로 "base 타입만" 을 검증하려면 `exc_info.value` 에 `isinstance` 로 명시 negative 단언 | `test_token_500_raises_base_auth_error_not_rejection` |
+
+### Hexagonal + Sync UseCase mock/real 분리 (PR #23, 2026-04-22)
 
 | 상황 | 교훈 | 참고 |
 |------|------|------|
@@ -389,7 +399,7 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 | 공통 헬퍼 파라미터 타입 좁히기 | 모듈 헬퍼가 여러 UseCase 에서 호출될 때 분기 식별자(`connection_type`) 를 `str` 로 열어두면 임의 값이 DTO 에 흘러듬. `Literal[...]` 로 좁히고 caller 가 리터럴을 명시 전달 | `KisConnectionType = Literal[...]` |
 | 테스트 의미 회귀 감지 | 단일 UseCase → 분리 시 기존 테스트가 "다른 이유로 PASS" 하는 함정. 예: `test_sync_kis_rest_real_requires_real_environment` 가 `UnsupportedConnectionError` 로 먼저 실패해 환경 검증을 실제론 테스트 안 함. 분리 후 real UseCase 로 전환하고 `get_decrypted` monkeypatch AssertionError 로 **순서** 까지 단언 | `test_portfolio.py` |
 
-### 🆕 CI lint/type 게이트 (PR #22, 2026-04-22)
+### CI lint/type 게이트 (PR #22, 2026-04-22)
 
 | 상황 | 교훈 | 참고 |
 |------|------|------|
