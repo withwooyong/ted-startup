@@ -50,9 +50,10 @@ export class PortfolioPage {
   /**
    * 보유 종목 행. 뷰포트 불문 — 데스크톱은 `<tr data-testid="holding-row">`,
    * 모바일은 `<li data-testid="holding-row">` 로 동일 testid 를 공유한다.
-   * `hasText` 로 종목코드 필터링.
+   * 두 노드가 DOM 에 공존(`hidden sm:block` / `sm:hidden`) 하므로 `visible: true`
+   * 로 현재 뷰포트에서 실제 가시 렌더된 한 행만 선택 — strict mode 위반 방지.
    */
   holdingRow(stockCode: string): Locator {
-    return this.page.getByTestId('holding-row').filter({ hasText: stockCode });
+    return this.page.getByTestId('holding-row').filter({ hasText: stockCode, visible: true });
   }
 }

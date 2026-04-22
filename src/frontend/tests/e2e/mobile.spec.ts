@@ -75,10 +75,12 @@ test.describe('Phase B~D 모바일 반응형 회귀', () => {
 
     // 보유 종목이 있으면 `data-testid="holding-row"` 카드(li) 가 렌더된다.
     // 없는 경우(빈 상태) 에는 empty 메시지가 렌더 — 둘 중 하나는 반드시 나타남.
-    const cards = page.getByTestId('holding-row');
+    // 데스크톱용 `<tr>` 도 DOM 에 공존하므로 `visible: true` 로 현재 뷰포트에서 실제
+    // 렌더되는 노드만 선택 (strict mode 대응).
+    const cards = page.getByTestId('holding-row').filter({ visible: true });
     const cardCount = await cards.count();
     if (cardCount > 0) {
-      // 첫 카드가 모바일 li (카드 리스트 분기) 인지 tag 로 확인.
+      // 모바일 프로필에선 visible 한 `holding-row` 는 `<li>` (카드 분기) 여야 한다.
       const firstTag = await cards.first().evaluate(el => el.tagName);
       expect(firstTag).toBe('LI');
     } else {
