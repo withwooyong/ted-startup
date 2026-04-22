@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Outfit, DM_Mono } from "next/font/google";
 import NavHeader from "@/components/NavHeader";
 import AuroraBackground from "@/components/ui/AuroraBackground";
@@ -18,6 +18,12 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: "SIGNAL — 공매도 커버링 시그널",
   description: "대차잔고 급감, 추세전환, 숏스퀴즈 패턴을 분석하여 상승 가능성이 높은 종목을 탐지합니다.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
