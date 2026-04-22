@@ -141,11 +141,12 @@ Tailwind v4 기본을 준수하되 프로젝트 컨벤션 명시화:
 - [ ] **D4.** aurora blob `@media (max-width: 639px) { filter: blur(50px); }` — 가볍게
 
 ### Phase E: 검증 (0.5일 → 0.75일로 상향, 신규 페이지 대상 추가)
-- [ ] **E1.** Playwright 모바일 프로필로 각 페이지 스크린샷 회귀
-  - 기존: portfolio, stocks, reports, alignment, dashboard, backtest, settings
-  - 🆕 추가: settings 페이지의 **실계좌 연동 섹션** (credential 없는 빈 상태 · 1개 등록 상태 · 등록 폼 펼침 상태 3 스크린샷)
-  - 🆕 추가: portfolio 페이지의 실계좌 선택 시 sync 404 배너 렌더
-- [ ] **E2.** Lighthouse 모바일 스코어 (Performance/Accessibility/Best Practices) 전/후 비교, 85 이상 목표
+- [x] **E1.** Playwright 모바일 프로필로 각 페이지 스크린샷 회귀 — `src/frontend/tests/e2e/mobile.spec.ts` (2026-04-22)
+  - 대시보드/포트폴리오/종목상세/AI 리포트/정합도/백테스트/설정 7페이지 스모크 + screenshot 수집
+  - B1 카드 분기, B2 v1.0 배지, B3 RealAccountSection 세로 배치, C3 +N 배지, C4 sync 단축 라벨, D1 44px 터치 타깃, D3 차트 aspect 모두 assert
+  - 기존 desktop-only 스펙 (`holdings.spec.ts`, `actions.spec.ts`) 는 `project.name !== 'chromium'` 조건으로 스킵
+  - PortfolioPage.ts → `data-testid="holding-row"` + kisSyncButton regex 확장 (`/KIS 모의 동기화|모의 sync|KIS 실계좌 동기화|실계좌 sync/`)
+- [ ] **E2.** Lighthouse 모바일 스코어 (Performance/Accessibility/Best Practices) 전/후 비교, 85 이상 목표 — **수동 검증 가이드** §10 참조. 자동화(lhci)는 별도 과제로 이관.
 - [ ] **E3.** 실기기 점검 체크리스트: iPhone SE(375×667), iPhone 13(390×844), Galaxy S8(360×740), iPad mini(768×1024)
 
 ---
@@ -211,3 +212,55 @@ Tailwind v4 기본을 준수하되 프로젝트 컨벤션 명시화:
 | 2026-04-21 | P1 item 6·7 추가 (RealAccountSection 3-버튼 · sync 라벨 확장) | KIS sync PR 후유증 |
 | 2026-04-21 | D2 (푸터 면책 `<details>`) 스킵 — 실제 3줄 짧은 문구 | 문서 claim vs 실제 코드 괴리 재평가 |
 | 2026-04-21 | Phase B·C·E 각 0.5일 상향 → 총 3.5~4 man-day | B3 + C4 + E1 신규 시나리오 |
+| 2026-04-22 | Phase B~D 구현 완료 (PR #29/#30/#31), Phase E1 mobile.spec.ts 작성 | ted-run 파이프라인 병행 |
+| 2026-04-22 | §10 Lighthouse 수동 검증 가이드 추가, E2 자동화 이관 | lhci 세팅은 별도 CI 워크플로 추가 필요 |
+
+---
+
+## 10. Lighthouse 모바일 수동 검증 가이드 (E2)
+
+**목적**: 모바일 Performance / Accessibility / Best Practices 스코어 85 이상 확보. 자동화 전까지 수동 측정 + 스프레드시트 기록.
+
+### 준비
+1. 로컬 backend + frontend 기동:
+   ```bash
+   # 터미널 1: backend
+   cd src/backend_py && uv run uvicorn src.app.main:app --host 0.0.0.0 --port 8000
+   # 터미널 2: frontend (production build 기준)
+   cd src/frontend && yarn build && yarn start
+   ```
+2. Chrome 브라우저에서 `http://localhost:3000` 접속 후 로그인 상태 확보 (seed: `e2e-manual`, `e2e-kis` 계좌)
+
+### 측정 절차
+1. Chrome DevTools → Lighthouse 탭
+2. **Mode**: Navigation (Default) / **Device**: Mobile / **Categories**: Performance + Accessibility + Best Practices + SEO
+3. 각 페이지에서 "Analyze page load" 실행:
+   - `/` 대시보드
+   - `/portfolio`
+   - `/stocks/005930`
+   - `/reports/005930`
+   - `/portfolio/1/alignment`
+   - `/backtest`
+   - `/settings`
+4. 스코어를 `docs/lighthouse-scores.md` (신규, Phase E2 완료 시) 에 기록
+
+### 기록 형식
+```markdown
+| 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 비고 |
+|---|---|---|---|---|---|---|
+| / | 2026-04-22 | 92 | 95 | 100 | 100 | Phase D 완료 직후 |
+```
+
+### 목표 스코어 & 개선 지점
+- **Performance 85+**: aurora blur 모바일 경량화(D4), 차트 aspect 축소(D3) 로 LCP/CLS 개선 기대
+- **Accessibility 90+**: `aria-label` / `aria-disabled` / `min-h-[44px]` 터치 타깃(D1) 으로 상향
+- **Best Practices 90+**: HTTPS 로컬 제외 항목은 CI/프로덕션 측정 시 확인
+
+### 자동화 이관 (별도 과제)
+`@lhci/cli` + GitHub Actions 로 PR 마다 스코어 측정하려면:
+1. `.lighthouserc.json` 추가 (assertions: `categories:performance >= 0.85` 등)
+2. `.github/workflows/lighthouse.yml` 에서 `npx @lhci/cli@0.13 autorun` 실행
+3. 측정 대상 URL 목록은 staging 환경 기준 (로컬 seed 재현 불가)
+
+### 실기기 점검 (E3) 보조
+DevTools Responsive 모드 외에 실기기 검증은 Chrome Remote Debugging (`chrome://inspect`) 으로 USB 연결된 Android 에서 Lighthouse 실행 가능. iOS 는 Xcode Instruments 활용.
