@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getStockDetail } from '@/lib/api/client';
-import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import {
   StockDetail,
@@ -39,7 +38,6 @@ export default function StockDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prevKey, setPrevKey] = useState(`${code}:${period}`);
-  const isMobile = useMediaQuery('(max-width: 639px)');
 
   // fetch 파라미터 변경 시 loading 재진입 (render 중 리셋 패턴)
   const currentKey = `${code}:${period}`;
@@ -68,20 +66,33 @@ export default function StockDetailPage() {
 
   if (loading) {
     return (
-      <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7" aria-busy="true" aria-live="polite">
-        <div className="h-8 w-32 bg-[#131720] rounded animate-pulse mb-6" />
+      <main
+        className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 min-h-[calc(100dvh-8rem)]"
+        aria-busy="true"
+        aria-live="polite"
+      >
+        <div className="h-5 w-24 bg-[#131720] rounded animate-pulse mb-5" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
           <div className="h-32 bg-[#131720] rounded-[14px] animate-pulse" />
           <div className="h-32 bg-[#131720] rounded-[14px] animate-pulse" />
         </div>
-        <div className="h-60 sm:h-72 bg-[#131720] rounded-[14px] animate-pulse" />
+        <div className="flex gap-1 mb-4">
+          <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
+          <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
+          <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
+          <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
+        </div>
+        <div className="aspect-[1.4/1] sm:aspect-[2/1] bg-[#131720] rounded-[14px] animate-pulse mb-6" />
       </main>
     );
   }
 
   if (error || !data) {
     return (
-      <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 text-center" role="alert">
+      <main
+        className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 min-h-[calc(100dvh-8rem)] text-center"
+        role="alert"
+      >
         <p className="text-[#6B7A90] py-16">{error || '데이터가 없어요'}</p>
         <button onClick={() => router.push('/')} className="px-4 py-2 rounded-lg bg-[#6395FF] text-white text-sm">
           대시보드로 이동
@@ -102,7 +113,7 @@ export default function StockDetailPage() {
   }));
 
   return (
-    <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7">
+    <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 min-h-[calc(100dvh-8rem)]">
       {/* Back */}
       <button
         onClick={() => router.push('/')}
@@ -184,7 +195,8 @@ export default function StockDetailPage() {
       <ErrorBoundary resetKeys={[period, chartData.length]}>
       <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4 mb-6">
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" aspect={isMobile ? 1.4 : 2}>
+          <div className="aspect-[1.4/1] sm:aspect-[2/1]">
+          <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
               <XAxis dataKey="date" tick={{ fill: '#4A5568', fontSize: 10 }} tickLine={false} />
@@ -226,6 +238,7 @@ export default function StockDetailPage() {
               })}
             </ComposedChart>
           </ResponsiveContainer>
+          </div>
         ) : (
           <div className="text-center py-16 text-[#6B7A90]">차트 데이터가 없어요</div>
         )}
