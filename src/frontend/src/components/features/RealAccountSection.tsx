@@ -320,24 +320,26 @@ export function RealAccountSection(): React.JSX.Element {
           {rows.map(({ account, credential }) => (
             <li
               key={account.id}
-              className="flex items-center justify-between gap-3 px-4 py-3 rounded-[14px] bg-[#131720] border border-white/[0.06]"
+              data-testid="real-account-row"
+              className="flex flex-col gap-3 px-4 py-3 rounded-[14px] bg-[#131720] border border-white/[0.06] sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-[#E8ECF1] font-medium truncate">{account.account_alias}</div>
                 {credential ? (
-                  <div className="text-xs text-[#6B7A90] mt-1 font-[family-name:var(--font-mono)]">
+                  <div className="text-xs text-[#6B7A90] mt-1 font-[family-name:var(--font-mono)] break-all">
                     app_key {credential.app_key_masked} · 계좌 {credential.account_no_masked}
                   </div>
                 ) : (
                   <div className="text-xs text-[#FF4D6A] mt-1">자격증명 미등록 — 수정으로 입력해주세요</div>
                 )}
               </div>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex flex-wrap gap-2 sm:shrink-0 sm:flex-nowrap">
                 {credential && (
                   <button
                     type="button"
                     onClick={() => void handleTestConnection(account.id)}
                     disabled={actionPending !== null}
+                    aria-disabled={actionPending !== null}
                     className="px-3 py-1.5 rounded-lg text-xs bg-[#1A1F2E] border border-white/10 text-[#65D6A1] hover:border-[#65D6A1]/40 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#65D6A1]/50"
                     title="KIS OAuth 토큰 발급만 시도 (잔고 영향 없음)"
                   >
@@ -348,6 +350,7 @@ export function RealAccountSection(): React.JSX.Element {
                   type="button"
                   onClick={() => void handleReplace(account.id)}
                   disabled={actionPending !== null}
+                  aria-disabled={actionPending !== null}
                   className="px-3 py-1.5 rounded-lg text-xs bg-[#1A1F2E] border border-white/10 text-[#E8ECF1] hover:border-[#6395FF]/40 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
                 >
                   수정
@@ -357,6 +360,7 @@ export function RealAccountSection(): React.JSX.Element {
                     type="button"
                     onClick={() => void handleDelete(account.id, account.account_alias)}
                     disabled={actionPending !== null}
+                    aria-disabled={actionPending !== null}
                     className="px-3 py-1.5 rounded-lg text-xs bg-[#1A1F2E] border border-white/10 text-[#FF4D6A] hover:border-[#FF4D6A]/40 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF4D6A]/50"
                   >
                     삭제

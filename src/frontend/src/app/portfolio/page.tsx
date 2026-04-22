@@ -326,71 +326,137 @@ export default function PortfolioPage() {
                 <p className="text-[#6B7A90] text-sm">보유 종목이 없습니다.</p>
               </div>
             ) : (
-              <div className="bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-white/[0.02]">
-                    <tr className="text-left text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider">
-                      <th className="px-4 py-2.5 font-[family-name:var(--font-display)] font-medium">
-                        종목
-                      </th>
-                      <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
-                        수량
-                      </th>
-                      <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
-                        평단가
-                      </th>
-                      <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
-                        매입원가
-                      </th>
-                      <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
-                        리포트
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {holdings.map(h => {
-                      const cost = Number(h.avg_buy_price) * h.quantity;
-                      return (
-                        <tr
-                          key={h.stock_id}
-                          className="border-t border-white/[0.04] hover:bg-white/[0.02]"
-                        >
-                          <td className="px-4 py-3">
+              <>
+                {/* Desktop / tablet: table (>= sm) */}
+                <div className="hidden sm:block bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-white/[0.02]">
+                      <tr className="text-left text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider">
+                        <th className="px-4 py-2.5 font-[family-name:var(--font-display)] font-medium">
+                          종목
+                        </th>
+                        <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
+                          수량
+                        </th>
+                        <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
+                          평단가
+                        </th>
+                        <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
+                          매입원가
+                        </th>
+                        <th className="px-4 py-2.5 text-right font-[family-name:var(--font-display)] font-medium">
+                          리포트
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {holdings.map(h => {
+                        const cost = Number(h.avg_buy_price) * h.quantity;
+                        return (
+                          <tr
+                            key={h.stock_id}
+                            data-testid="holding-row"
+                            className="border-t border-white/[0.04] hover:bg-white/[0.02]"
+                          >
+                            <td className="px-4 py-3">
+                              <Link
+                                href={`/stocks/${h.stock_code ?? ''}`}
+                                className="font-medium hover:text-[#6395FF] transition-colors"
+                              >
+                                {h.stock_name ?? '(이름 없음)'}
+                              </Link>
+                              <span className="ml-2 text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
+                                {h.stock_code ?? ''}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)] tabular-nums">
+                              {formatNumber(h.quantity)}
+                            </td>
+                            <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)] tabular-nums text-[#6B7A90]">
+                              {formatNumber(h.avg_buy_price, { fraction: 2 })}
+                            </td>
+                            <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)] tabular-nums">
+                              {formatNumber(cost)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {h.stock_code && (
+                                <Link
+                                  href={`/reports/${h.stock_code}`}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.7rem] bg-[#6395FF]/10 text-[#6395FF] border border-[#6395FF]/30 hover:bg-[#6395FF]/20 transition-colors"
+                                >
+                                  AI 리포트 →
+                                </Link>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile: card list (< sm) */}
+                <ul className="sm:hidden space-y-3">
+                  {holdings.map(h => {
+                    const cost = Number(h.avg_buy_price) * h.quantity;
+                    return (
+                      <li
+                        key={h.stock_id}
+                        data-testid="holding-row"
+                        className="bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="min-w-0 flex-1">
                             <Link
                               href={`/stocks/${h.stock_code ?? ''}`}
-                              className="font-medium hover:text-[#6395FF] transition-colors"
+                              className="block font-medium text-[#E8ECF1] hover:text-[#6395FF] transition-colors truncate"
                             >
                               {h.stock_name ?? '(이름 없음)'}
                             </Link>
-                            <span className="ml-2 text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
+                            <span className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
                               {h.stock_code ?? ''}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)] tabular-nums">
-                            {formatNumber(h.quantity)}
-                          </td>
-                          <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)] tabular-nums text-[#6B7A90]">
-                            {formatNumber(h.avg_buy_price, { fraction: 2 })}
-                          </td>
-                          <td className="px-4 py-3 text-right font-[family-name:var(--font-mono)] tabular-nums">
-                            {formatNumber(cost)}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            {h.stock_code && (
-                              <Link
-                                href={`/reports/${h.stock_code}`}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.7rem] bg-[#6395FF]/10 text-[#6395FF] border border-[#6395FF]/30 hover:bg-[#6395FF]/20 transition-colors"
-                              >
-                                AI 리포트 →
-                              </Link>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </div>
+                          {h.stock_code && (
+                            <Link
+                              href={`/reports/${h.stock_code}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.7rem] bg-[#6395FF]/10 text-[#6395FF] border border-[#6395FF]/30 hover:bg-[#6395FF]/20 transition-colors shrink-0 whitespace-nowrap"
+                            >
+                              AI 리포트 →
+                            </Link>
+                          )}
+                        </div>
+                        <dl className="grid grid-cols-3 gap-2 text-[0.75rem]">
+                          <div>
+                            <dt className="text-[0.65rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
+                              수량
+                            </dt>
+                            <dd className="font-[family-name:var(--font-mono)] tabular-nums text-[#E8ECF1]">
+                              {formatNumber(h.quantity)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[0.65rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
+                              평단가
+                            </dt>
+                            <dd className="font-[family-name:var(--font-mono)] tabular-nums text-[#6B7A90]">
+                              {formatNumber(h.avg_buy_price, { fraction: 2 })}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-[0.65rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
+                              매입원가
+                            </dt>
+                            <dd className="font-[family-name:var(--font-mono)] tabular-nums text-[#E8ECF1]">
+                              {formatNumber(cost)}
+                            </dd>
+                          </div>
+                        </dl>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
           </section>
         </>
