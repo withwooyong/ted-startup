@@ -380,7 +380,15 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 
 ## 💡 이 프로젝트(ted-startup)의 실전 학습 포인트
 
-### 🆕 KisAuthError 4xx/5xx 분리 (PR #(예정), 2026-04-22)
+### 🆕 frontend-lint 게이트 — 대칭 설계 (PR #(예정), 2026-04-22)
+
+| 상황 | 교훈 | 참고 |
+|------|------|------|
+| 큰 UI refactor 앞 CI 안전망 | 3~4일 규모 UI 작업 착수 전 30분 PR 로 lint/type 게이트 선행. 백엔드 `backend-lint`(PR #22) 도입 직후 PR #23·#24·#25 가 게이트 덕에 안전하게 쌓인 것과 같은 레버리지 | `.github/workflows/ci.yml` `frontend-lint` |
+| CI job 대칭 패턴 | backend-lint/test 쌍과 동일하게 frontend-lint/build 쌍 구성. `needs: [X-lint]` 로 풀 빌드 앞단에서 빠른 실패 | `frontend-build` needs |
+| eslint + tsc 별도 스텝 | CI 로그에서 lint vs type 에러 즉시 구분. `next build` 는 둘 다 포함하지만 `// @ts-ignore` 우회 가능 → 독립 `tsc --noEmit` 스텝이 더 엄격 | `type-check` script |
+
+### KisAuthError 4xx/5xx 분리 (PR #24, 2026-04-22)
 
 | 상황 | 교훈 | 참고 |
 |------|------|------|

@@ -7,7 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-22] refactor: KIS Hexagonal DIP 완성 + Router account 단일 로드 (`refactor/kis-port-single-account-load`, PR #(예정))
+## [2026-04-22] chore: CI 에 frontend-lint 게이트 추가 — eslint + tsc --noEmit (`chore/frontend-lint-type-gate`, PR #(예정))
+
+모바일 반응형 refactor(3.5~4 man-day) 착수 전 안전망. 백엔드 `backend-lint` (PR #22) 와 대칭.
+
+**이전 상태**: `frontend-build` job 의 `Lint` 스텝이 `npm run lint --if-present` + `continue-on-error: true` — lint 실패가 CI 를 막지 않음. `next build` 가 타입 체크를 포함하지만 `// @ts-ignore` 등은 silent.
+
+### Added
+- `.github/workflows/ci.yml` 에 **`frontend-lint`** job 신설
+  - `npm run lint` (eslint) — 이제 실패 시 CI red
+  - `npm run type-check` (`tsc --noEmit`) — 독립 타입 체크 스텝
+- `src/frontend/package.json` 에 `"type-check": "tsc --noEmit"` 스크립트 추가
+
+### Changed
+- `frontend-build` job 을 `needs: [frontend-lint]` 로 의존 — lint 실패 시 풀 `next build` (~2분) 스킵해 자원 절감
+- 기존 `frontend-build` 안의 `Lint` 스텝 제거 (신규 job 으로 이관)
+
+### Verified
+- `npm run lint` ✅ (로컬 silent success, 기존 코드 이미 clean)
+- `npm run type-check` ✅ (로컬 silent success)
+- `next build` 경로 변경 없음 — `frontend-lint` 가 먼저 실행될 뿐
+
+### Decisions
+- **lint job 을 build 앞에**: `backend-test needs backend-lint` 와 동일 패턴. 1~2분 내 빠른 실패 신호.
+- **`eslint` / `tsc` 별도 스텝**: 에러 표면 구분. CI 로그에서 "lint 실패" vs "type 실패" 즉시 식별.
+- **기존 코드 clean 이라 fix 불필요**: 백엔드 PR #22 (98 파일 ruff format) 와 달리 프론트는 이미 eslint + tsc 통과 상태. 이 PR 은 순수 게이트 추가.
+
+---
+
+## [2026-04-22] refactor: KIS Hexagonal DIP 완성 + Router account 단일 로드 (`597d5e8`, PR #25)
 
 /review 세션 감사에서 발견된 HIGH 2건을 단일 "아키텍처 정돈 PR" 로 통합 해소.
 
