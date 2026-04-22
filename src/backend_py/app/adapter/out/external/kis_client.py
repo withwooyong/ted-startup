@@ -16,50 +16,20 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from decimal import Decimal
-from enum import StrEnum
 from typing import Any
 
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from app.application.dto.kis import KisCredentials, KisEnvironment, KisHoldingRow
+from app.application.port.out.kis_port import (
+    KisCredentialRejectedError,
+    KisUpstreamError,
+)
 from app.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
-
-
-class KisEnvironment(StrEnum):
-    """KIS OpenAPI 호출 환경.
-
-    MOCK 은 모의투자(openapivts) — `VTTC*` TR_ID 계열.
-    REAL 은 실거래(openapi) — `TTTC*` TR_ID 계열.
-    """
-
-    MOCK = "mock"
-    REAL = "real"
-
-
-@dataclass(frozen=True, slots=True)
-class KisCredentials:
-    """KIS API 자격증명 — 생성자에서 주입받는 값 객체.
-
-    PR 3 이후 `brokerage_account_credential` DB 저장소에서 Fernet 복호화해 이 DTO 를
-    조립하게 됨. 현재는 MOCK Settings 경로에서만 내부 생성.
-
-    `__repr__` 는 app_secret/account_no 를 마스킹해 실수로 로그에 직렬화돼도
-    평문이 남지 않게 함. `app_key` 는 마지막 4자리만 노출 (PR 4 masked view 와 일치).
-    """
-
-    app_key: str
-    app_secret: str
-    account_no: str
-
-    def __repr__(self) -> str:  # noqa: D401 — 로그 노출 차단이 핵심 책임
-        return (
-            f"KisCredentials(app_key=••••{self.app_key[-4:] if len(self.app_key) >= 4 else '****'}, "
-            f"app_secret=<masked>, account_no=<masked>)"
-        )
 
 
 _MOCK_BASE_URL = "https://openapivts.koreainvestment.com:29443"
@@ -138,40 +108,16 @@ def _build_in_memory_transport() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-@dataclass(slots=True)
-class KisHoldingRow:
-    stock_code: str
-    stock_name: str
-    quantity: int
-    avg_buy_price: Decimal
+class KisNotConfiguredError(Exception):
+    """adapter-internal — Settings 에 KIS 자격증명이 누락됐거나 잘못된 형식.
 
+    **의도적으로 `KisUpstreamError` 를 상속하지 않음**. 서버 측 설정 오류는 KIS
+    업스트림 장애(5xx/네트워크) 와 성격이 다르며, UseCase 의 `except KisUpstreamError`
+    가 설정 오류를 함께 삼켜 `SyncError` → 502 로 오진단하는 것을 방지.
 
-class KisClientError(Exception):
-    """KIS API 호출 계층의 최상위 예외."""
-
-
-class KisAuthError(KisClientError):
-    """KIS 인증 계열 오류 — 토큰 요청 네트워크/파싱/업스트림 5xx 등.
-
-    업스트림 장애 성격이므로 라우터에서 502 Bad Gateway 로 매핑된다.
-    HTTP 401/403 으로 KIS 가 자격증명을 명시적으로 거부한 경우는 서브클래스
-    `KisCredentialRejectedError` 를 사용해 4xx 로 구분 매핑.
+    라우터는 이 예외를 잡지 않고 FastAPI 기본 500 으로 전파해 운영팀이 설정을
+    점검하도록 유도. 필요 시 `main.py` startup 훅에서 선제 검증 권장.
     """
-
-
-class KisCredentialRejectedError(KisAuthError):
-    """KIS 업스트림이 HTTP 401/403 으로 자격증명을 거부 — 사용자 재등록 필요.
-
-    `KisAuthError` 의 서브클래스이지만 의미가 다르다:
-      - `KisAuthError` (base): 업스트림 장애 / 네트워크 / 파싱 오류 → 502
-      - `KisCredentialRejectedError`: 명시적 자격증명 거부 → 400 (사용자 조치 가능)
-    UseCase 는 이 예외를 먼저 잡아 도메인 `CredentialRejectedError` 로 변환하고,
-    그렇지 않은 `KisClientError` 는 `SyncError` 로 처리.
-    """
-
-
-class KisNotConfiguredError(KisClientError):
-    pass
 
 
 def _account_parts(account_no: str) -> tuple[str, str]:
@@ -301,7 +247,7 @@ class KisClient:
                 headers={"Content-Type": "application/json"},
             )
         except httpx.HTTPError as exc:
-            raise KisAuthError(f"토큰 요청 네트워크 오류: {exc}") from exc
+            raise KisUpstreamError(f"토큰 요청 네트워크 오류: {exc}") from exc
         if resp.status_code in (401, 403):
             # KIS 가 자격증명을 명시적 거부 — 사용자 재등록 필요. 업스트림 장애와 분리.
             # 원 응답 body 는 DEBUG 로그로만 분리 — PR #20 로깅 마스킹 파이프라인을 거쳐
@@ -311,11 +257,11 @@ class KisClient:
             raise KisCredentialRejectedError(f"KIS 자격증명 거부 (토큰 발급): HTTP {resp.status_code}")
         if resp.status_code != 200:
             logger.debug("KIS token %s body: %s", resp.status_code, resp.text[:200])
-            raise KisAuthError(f"토큰 요청 실패: HTTP {resp.status_code}")
+            raise KisUpstreamError(f"토큰 요청 실패: HTTP {resp.status_code}")
         data = resp.json()
         raw_token = data.get("access_token")
         if not isinstance(raw_token, str) or not raw_token:
-            raise KisAuthError(f"access_token 부재: {data}")
+            raise KisUpstreamError(f"access_token 부재: {data}")
         expires_in = float(data.get("expires_in") or 86400)
         self._access_token = raw_token
         self._token_expires_at = now + max(expires_in - _TOKEN_RENEW_MARGIN_SECONDS, 60.0)
@@ -329,7 +275,8 @@ class KisClient:
     async def test_connection(self) -> None:
         """OAuth 토큰 발급만 시도하는 dry-run. 자격증명 유효성 검증용.
 
-        실패 시 `KisAuthError` (부정확 app_key/secret, 네트워크 등). 잔고 조회 API 는
+        실패 시 HTTP 401/403 → `KisCredentialRejectedError`, 그 외 → `KisUpstreamError`.
+        잔고 조회 API 는
         호출하지 않아 KIS 서비스에 부하 최소 + 계좌 상태 변경 0.
 
         **부수 효과**: 성공 시 인스턴스에 `access_token` 이 캐시된다 — 이후 동일 인스턴스로
@@ -385,11 +332,11 @@ class KisClient:
             raise KisCredentialRejectedError(f"KIS 자격증명 거부 (잔고조회): HTTP {resp.status_code}")
         if resp.status_code != 200:
             logger.debug("KIS balance %s body: %s", resp.status_code, resp.text[:300])
-            raise KisClientError(f"잔고조회 실패: HTTP {resp.status_code}")
+            raise KisUpstreamError(f"잔고조회 실패: HTTP {resp.status_code}")
         body = resp.json()
         rt_cd = body.get("rt_cd")
         if rt_cd not in ("0", 0):
-            raise KisClientError(f"잔고조회 응답 오류: rt_cd={rt_cd} msg={body.get('msg1')}")
+            raise KisUpstreamError(f"잔고조회 응답 오류: rt_cd={rt_cd} msg={body.get('msg1')}")
         output1 = body.get("output1") or []
         rows: list[KisHoldingRow] = []
         for row in output1:

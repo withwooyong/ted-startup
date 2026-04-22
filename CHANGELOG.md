@@ -7,7 +7,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-22] refactor: KisAuthError 401/5xx 분리 — credential 거부 vs 업스트림 장애 (`refactor/kis-auth-error-split`, PR #(예정))
+## [2026-04-22] refactor: KIS Hexagonal DIP 완성 + Router account 단일 로드 (`refactor/kis-port-single-account-load`, PR #(예정))
+
+/review 세션 감사에서 발견된 HIGH 2건을 단일 "아키텍처 정돈 PR" 로 통합 해소.
+
+**이전 상태**:
+- `portfolio_service.py` 가 `from app.adapter.out.external import KisClient, KisClientError, KisCredentialRejectedError, KisCredentials, KisHoldingRow` 로 **application → infra 직접 참조**. PR #23 에서 `MaskedCredentialView` 만 dto 로 이동했고 KIS 관련은 잔존.
+- `sync_from_kis` router 가 account 선로드 후 UseCase 내부에서 `_ensure_kis_real_account` 가 재조회. Repository.get 이 내부적으로 `session.get` (identity map 캐시) 이라 실제 DB round-trip 은 1회이지만, 리뷰 독자에게 자명하지 않음.
+
+### Added
+- **`app/application/dto/kis.py`** (신규) — `KisCredentials`, `KisHoldingRow`, `KisEnvironment` 이동. Hexagonal 경계 정합 (application layer 가 DTO 소유).
+- **`app/application/port/out/kis_port.py`** (신규) — KIS 잔고 조회 port:
+  - `KisHoldingsFetcher` Protocol (structural typing) — `KisClient` 가 명시 상속 없이 자동 만족
+  - `KisUpstreamError` (포트 최상위) + `KisCredentialRejectedError` (401/403 전용 서브) — port 레벨 예외 계층
+  - `KisRealFetcherFactory = Callable[[KisCredentials], KisHoldingsFetcher]` 타입 별칭
+
+### Changed
+- `app/adapter/out/external/kis_client.py`: DTO 정의 제거, port 예외 직접 raise. adapter-internal `KisClientError`/`KisAuthError`/`KisCredentialRejectedError` 삭제 (port 예외로 수렴).
+- `app/adapter/out/external/__init__.py`: DTO/port 예외를 `app.adapter.out.external` 네임스페이스에서 re-export (배선·테스트 편의, 기존 호출부 backward-compat).
+- `app/adapter/web/_deps.py`: DTO import 경로를 `app.application.dto.kis` 로. `get_kis_real_client_factory` 반환 타입을 `KisRealFetcherFactory` (port 타입) 로.
+- `app/application/service/portfolio_service.py`: `from app.adapter.out.external import ...` **완전 제거**. port/dto 만 참조. `_ensure_kis_real_account` + 3 UseCase(`Mock`/`Real`/`TestConnection`) `execute()` 에 optional `account: BrokerageAccount | None = None` 파라미터 추가 — 라우터가 선로드한 account 를 명시 전달 가능.
+- `app/adapter/web/routers/portfolio.py`: `sync_from_kis` 의 UseCase 호출이 `account=loaded_account` 를 명시 전달. 시그니처가 `KisHoldingsFetcher` Protocol 참조로 DIP 준수.
+
+### Fixed
+- 리뷰 HIGH: `KisNotConfiguredError` 를 `Exception` 직계로 분리 (이전 `KisUpstreamError` 상속) — 서버 설정 오류를 UseCase `except KisUpstreamError` 가 삼켜 `SyncError` → 502 로 오진단하는 경로 차단. 이제 설정 오류는 FastAPI 기본 500 으로 전파.
+- 리뷰 MEDIUM: `kis_client.py` `test_connection` docstring 의 삭제된 `KisAuthError` 이름 잔존 → `KisCredentialRejectedError` / `KisUpstreamError` 로 현행화.
+
+### Not Done (intentional)
+- **R-03 이름 중복 완화**: port `KisCredentialRejectedError` vs domain `CredentialRejectedError`. `Kis` prefix 로 구분. ruff N818(Error suffix) 때문에 suffix 유지 필요 → 리네이밍은 별도 PR 후보.
+- **다른 서비스 DIP 확장**: `notification_service`(TelegramClient), `market_data_service`(KrxClient), `analysis_report_service` 도 adapter 직접 참조 잔존. 본 PR 은 KIS 영역 leading example, 추후 PR 로 확장.
+- **Adapter __init__ re-export 제거**: 테스트·배선·기존 호출부 backward-compat 유지. application layer 는 직접 port/dto 경로로만 import 하므로 DIP 훼손 없음.
+
+### Verified
+- `uv run ruff check .` ✅
+- `uv run ruff format --check .` ✅ 126 files already formatted
+- `uv run mypy app` ✅ **83 source files** (신규 2 포함), no issues
+- `uv run pytest -q` ✅ **303 passed, 1 deselected** — 회귀 0건
+
+### Decisions
+- **Structural typing 우선**: `KisClient` 가 Protocol 을 명시 상속하지 않음. mypy strict 가 `KisClient` → `KisHoldingsFetcher` 할당 지점에서 검증 (factory 반환 경로).
+- **Protocol 에 `__aenter__`/`__aexit__` 포함**: "이 port 는 context manager 로만 사용한다" 계약 명시. `typing.AsyncContextManager` 상속 대신 explicit 선언이 가독성 우수.
+- **Optional account 파라미터 하위 호환**: `execute(*, account_id, account=None)` — 기존 호출부 수정 불필요. Router 만 명시 전달.
+- **`KisRealClientFactory` alias 유지**: `KisRealFetcherFactory` 의 하위 호환 alias, 외부 참조 없음 확인 후 다음 클린업 PR 에서 제거.
+
+---
+
+## [2026-04-22] refactor: KisAuthError 401/5xx 분리 — credential 거부 vs 업스트림 장애 (`77903d9`, PR #24)
 
 **이전 상태**: PR 5 (#16) 리뷰 이월 MEDIUM. KIS 토큰 발급/잔고조회가 HTTP 401/403 (credential 거부) 이든 5xx/네트워크 (업스트림 장애) 이든 모두 `KisAuthError`/`KisClientError` → UseCase 가 `SyncError` 로 래핑 → 라우터에서 **일괄 502** 응답. 사용자가 "KIS 자격증명 틀림" 과 "KIS 서버 다운" 을 구분 못 함.
 

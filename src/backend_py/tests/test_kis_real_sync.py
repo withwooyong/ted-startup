@@ -23,9 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.external import (
     KisClient,
-    KisClientError,
     KisCredentials,
     KisEnvironment,
+    KisUpstreamError,
 )
 from app.adapter.out.persistence.models import BrokerageAccount
 from app.adapter.out.persistence.repositories import (
@@ -41,10 +41,10 @@ from app.adapter.web._deps import (
 from app.adapter.web._deps import (
     get_session as prod_get_session,
 )
+from app.application.port.out.kis_port import KisRealFetcherFactory
 from app.application.service.portfolio_service import (
     CredentialNotFoundError,
     CredentialRejectedError,
-    KisRealClientFactory,
     SyncError,
     SyncPortfolioFromKisRealUseCase,
     TestKisConnectionUseCase,
@@ -72,7 +72,7 @@ def _real_mock_transport(
     """실 KIS 엔드포인트(openapi:9443) 를 내부 MockTransport 로 대체.
 
     `token_status=401/403` 로 credential 거부 경로(KisCredentialRejectedError),
-    `token_status=500` 등으로 업스트림 장애 경로(KisAuthError) 를 각각 검증.
+    `token_status=500` 등으로 업스트림 장애 경로(KisUpstreamError) 를 각각 검증.
     """
     rows = balance_rows if balance_rows is not None else []
 
@@ -99,7 +99,7 @@ def _real_mock_transport(
     return httpx.MockTransport(handler)
 
 
-def _make_real_factory(transport: httpx.MockTransport) -> KisRealClientFactory:
+def _make_real_factory(transport: httpx.MockTransport) -> KisRealFetcherFactory:
     """MockTransport 를 주입한 real factory — CI 에서 실 URL 로 나가지 않음."""
 
     def factory(credentials: KisCredentials) -> KisClient:
@@ -491,5 +491,5 @@ async def test_smoke_real_kis_token_issuance(session: AsyncSession) -> None:
     async with KisClient(environment=KisEnvironment.REAL, credentials=credentials) as client:
         try:
             await client.test_connection()
-        except KisClientError as exc:
+        except KisUpstreamError as exc:
             pytest.fail(f"실 KIS 토큰 발급 실패: {exc}")
