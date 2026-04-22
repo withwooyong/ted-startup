@@ -88,6 +88,15 @@ body {
   .aurora .blob { animation: none !important; }
 }
 
+/* 모바일: 저사양 GPU 에서 blur(90px) 는 프레임 드롭 원인. 시각적 유사도 유지하며
+   blur 감소 + opacity 하향으로 합성 비용 절감. */
+@media (max-width: 639px) {
+  .aurora .blob {
+    filter: blur(50px);
+    opacity: 0.25;
+  }
+}
+
 /* — Magnetic button effect — */
 .magnetic {
   transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1);
