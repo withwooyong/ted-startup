@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-22] chore: CI 에 frontend-lint 게이트 추가 — eslint + tsc --noEmit (`chore/frontend-lint-type-gate`, PR #(예정))
+## [2026-04-22] chore: CI 에 frontend-lint 게이트 추가 — eslint + tsc --noEmit (`5c0b305`, PR #26)
 
 모바일 반응형 refactor(3.5~4 man-day) 착수 전 안전망. 백엔드 `backend-lint` (PR #22) 와 대칭.
 

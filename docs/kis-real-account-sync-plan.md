@@ -1,10 +1,20 @@
 # KIS 실계정 sync 설계안
 
 - **작성일**: 2026-04-20
-- **최종 수정**: 2026-04-21 (PR 1~6 구현 완료 — 시리즈 최종 PR 6 커밋 대기)
-- **상태**: PR 1~5 머지 완료 (`1461582`). **PR 6 (로깅 마스킹, 시리즈 최종)** 구현·검증 완료, 커밋/PR 대기
+- **최종 수정**: 2026-04-22 (PR 1~6 머지 완료 + post-series 리팩터 반영)
+- **상태**: PR 1~6 (`#12`~`#20`) 전원 머지. 이후 후속 리팩터 3 PR 로 아키텍처 정돈 완료.
 - **범위**: 한국투자증권(KIS) 실계좌 REST API 연동으로 `portfolio_holding` 자동 동기화 + 엑셀 거래내역 import
 - **전제**: PR 5 머지부터 운영 코드에서 실 KIS 외부 호출 가능. CI 는 smoke 마커 skip + `httpx.MockTransport` 로 실 URL 차단 유지.
+
+> **⚠️ Post-series 리팩터 노트 (2026-04-22)**
+>
+> 본 문서는 PR 1~6 시리즈의 역사적 설계 기록. 그 이후 KIS 영역 아키텍처는 다음 3 PR 로 정돈됨 — 본문의 `SyncPortfolioFromKisUseCase`·`KisClientError`·`KisAuthError` 등은 현재 코드와 다름:
+>
+> - **PR #23** (`576e9f2`): `SyncPortfolioFromKisUseCase` → `SyncPortfolioFromKisMockUseCase` + `SyncPortfolioFromKisRealUseCase` **분리**. `MaskedCredentialView` 를 `app/application/dto/credential.py` 로 이동. `_apply_kis_holdings` 공통 헬퍼, `KisConnectionType` Literal 타입.
+> - **PR #24** (`77903d9`): `KisAuthError` → port 예외 `KisUpstreamError`/`KisCredentialRejectedError` 로 재구성. 4xx(credential 거부) 과 5xx(업스트림 장애) HTTP 매핑 분리. 도메인 `CredentialRejectedError` (HTTP 400) vs `SyncError` (HTTP 502).
+> - **PR #25** (`597d5e8`): **Hexagonal DIP 완성** — `app/application/dto/kis.py` + `app/application/port/out/kis_port.py` 신설. `KisHoldingsFetcher` Protocol(structural) + port 예외. `portfolio_service.py` 가 `app.adapter.out.external` 직접 참조 0. Router 가 선로드한 account 를 UseCase 에 명시 전달.
+>
+> 최신 구조는 `CHANGELOG.md` 2026-04-22 섹션 참조.
 
 ---
 
