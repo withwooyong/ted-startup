@@ -43,6 +43,7 @@ from app.adapter.web._schemas import (
     TransactionCreateRequest,
     TransactionResponse,
 )
+from app.application.dto.credential import MaskedCredentialView
 from app.application.service.excel_import_service import (
     AccountNotFoundForImportError,
     ExcelImportError,
@@ -60,14 +61,14 @@ from app.application.service.portfolio_service import (
     CredentialNotFoundError,
     InsufficientHoldingError,
     InvalidRealEnvironmentError,
-    MaskedCredentialView,
     PortfolioError,
     RecordTransactionUseCase,
     RegisterAccountUseCase,
     SignalAlignmentUseCase,
     StockNotFoundError,
     SyncError,
-    SyncPortfolioFromKisUseCase,
+    SyncPortfolioFromKisMockUseCase,
+    SyncPortfolioFromKisRealUseCase,
     TestKisConnectionUseCase,
     TransactionRecord,
     UnsupportedConnectionError,
@@ -265,19 +266,33 @@ async def sync_from_kis(
 ) -> SyncResponse:
     """KIS 잔고 동기화 — mock·real 2환경 동일 엔드포인트.
 
-    계좌 `connection_type` 으로 분기:
-      - kis_rest_mock → 주입된 프로세스 공유 MOCK 클라이언트
-      - kis_rest_real → credential 복호화 후 요청 스코프 REAL 클라이언트 (PR 5 wire)
+    계좌 `connection_type` 으로 분기해 **타입이 다른 두 UseCase** 중 하나를 실행:
+      - kis_rest_mock → `SyncPortfolioFromKisMockUseCase` (kis_client 필수)
+      - kis_rest_real → `SyncPortfolioFromKisRealUseCase` (credential_repo + factory 필수)
     credential 미등록 시 404, KIS 토큰 발급/잔고조회 실패 시 502.
+
+    2026-04-22: 기존 단일 UseCase Optional 파라미터 퇴화 → mock/real 전용 UseCase 2개로 분리.
     """
-    credential_repo = BrokerageAccountCredentialRepository(session, cipher)
+    # connection_type 판별을 위해 account 선로드 — UseCase 내부에서도 재검증하므로 race 안전.
+    account = await BrokerageAccountRepository(session).get(account_id)
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"account_id={account_id} 없음",
+        )
+
     try:
-        result = await SyncPortfolioFromKisUseCase(
-            session,
-            kis_client=kis,
-            credential_repo=credential_repo,
-            real_client_factory=real_client_factory,
-        ).execute(account_id=account_id)
+        if account.connection_type == "kis_rest_mock":
+            result = await SyncPortfolioFromKisMockUseCase(session, kis_client=kis).execute(account_id=account_id)
+        elif account.connection_type == "kis_rest_real":
+            credential_repo = BrokerageAccountCredentialRepository(session, cipher)
+            result = await SyncPortfolioFromKisRealUseCase(
+                session,
+                credential_repo=credential_repo,
+                real_client_factory=real_client_factory,
+            ).execute(account_id=account_id)
+        else:
+            raise UnsupportedConnectionError(f"connection_type={account.connection_type} 는 동기화 비지원")
     except PortfolioError as exc:
         raise _credential_error_to_http(exc) from exc
     except CredentialCipherError as exc:

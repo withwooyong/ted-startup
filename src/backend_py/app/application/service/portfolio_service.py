@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -51,9 +52,7 @@ from app.adapter.out.persistence.repositories import (
     StockPriceRepository,
     StockRepository,
 )
-from app.adapter.out.persistence.repositories.brokerage_credential import (
-    MaskedCredentialView as MaskedCredentialView,  # explicit re-export
-)
+from app.application.dto.credential import MaskedCredentialView
 from app.security.credential_cipher import CredentialCipher
 
 logger = logging.getLogger(__name__)
@@ -581,31 +580,94 @@ class SignalAlignmentUseCase:
         )
 
 
-class SyncPortfolioFromKisUseCase:
-    """KIS 잔고 → portfolio_holding 직접 동기화. mock + real 2 환경 지원.
+# mock/real 이 공통으로 쓰는 기본 시장 구분 — KIS 잔고 API 는 시장 정보를 반환하지 않음.
+_KIS_DEFAULT_MARKET_TYPE = "KOSPI"
 
-    - connection_type='kis_rest_mock': 주입된 프로세스 공유 `kis_client` 사용 (MOCK).
-    - connection_type='kis_rest_real': credential_repo 에서 Fernet 복호화 →
-      real_client_factory 로 요청 스코프 KisClient(REAL) 생성 → async with 로 fetch_balance.
-    - KIS 잔고 응답은 종목별 (수량, 평단가) 스냅샷 → 거래 이력 재구성 불가.
-      따라서 holding 을 직접 upsert: 수량/평단가를 KIS 값으로 덮어쓰기.
-    - 신규 종목은 stock 마스터에 KOSPI 기본값으로 등록 (실제 시장 구분은 DART 후속 보강).
+# 지원하는 KIS 연결 타입 — 헬퍼가 임의 문자열을 `SyncResult.connection_type` 에 흘리지
+# 않도록 Literal 로 좁힘. 신규 타입 추가 시 두 UseCase 와 이 타입을 함께 확장.
+KisConnectionType = Literal["kis_rest_mock", "kis_rest_real"]
+
+
+async def _apply_kis_holdings(
+    *,
+    rows: list[KisHoldingRow],
+    account_id: int,
+    connection_type: KisConnectionType,
+    holding_repo: PortfolioHoldingRepository,
+    stock_repo: StockRepository,
+    asof: date | None,
+) -> SyncResult:
+    """KIS 잔고 응답 → portfolio_holding upsert 루프. mock/real 공통 로직.
+
+    KIS 잔고 응답은 종목별 (수량, 평단가) 스냅샷 → 거래 이력 재구성 불가.
+    따라서 holding 을 직접 upsert: 수량/평단가를 KIS 값으로 덮어쓰기.
+    신규 종목은 stock 마스터에 KOSPI 기본값으로 등록 (실제 시장 구분은 DART 후속 보강).
+    """
+    today = asof or date.today()
+    created = 0
+    updated = 0
+    unchanged = 0
+    stock_created = 0
+
+    for row in rows:
+        if not row.stock_code:
+            continue
+        stock = await stock_repo.find_by_code(row.stock_code)
+        if stock is None:
+            stock = await stock_repo.upsert_by_code(
+                stock_code=row.stock_code,
+                stock_name=row.stock_name or row.stock_code,
+                market_type=_KIS_DEFAULT_MARKET_TYPE,
+            )
+            stock_created += 1
+
+        holding = await holding_repo.find_by_account_and_stock(account_id, stock.id)
+        if holding is None:
+            holding = PortfolioHolding(
+                account_id=account_id,
+                stock_id=stock.id,
+                quantity=row.quantity,
+                avg_buy_price=row.avg_buy_price,
+                first_bought_at=today,
+                last_transacted_at=today,
+            )
+            await holding_repo.upsert(holding)
+            created += 1
+            continue
+
+        qty_changed = holding.quantity != row.quantity
+        price_changed = holding.avg_buy_price != row.avg_buy_price
+        if not (qty_changed or price_changed):
+            unchanged += 1
+            continue
+        holding.quantity = row.quantity
+        holding.avg_buy_price = row.avg_buy_price
+        holding.last_transacted_at = today
+        await holding_repo.upsert(holding)
+        updated += 1
+
+    return SyncResult(
+        account_id=account_id,
+        connection_type=connection_type,
+        fetched_count=len(rows),
+        created_count=created,
+        updated_count=updated,
+        unchanged_count=unchanged,
+        stock_created_count=stock_created,
+    )
+
+
+class SyncPortfolioFromKisMockUseCase:
+    """KIS MOCK 잔고 → portfolio_holding 동기화. `connection_type='kis_rest_mock'` 전용.
+
+    프로세스 공유 `kis_client` 를 사용. `environment` 는 반드시 'mock' 이어야 함.
+    real 경로용 DI 를 받지 않으므로 Optional 퇴화(`kis_client is None` 의 RuntimeError)
+    가 생성 시점에 타입으로 차단됨.
     """
 
-    DEFAULT_MARKET_TYPE = "KOSPI"  # KIS 는 시장구분을 반환하지 않음 — 기본값
-
-    def __init__(
-        self,
-        session: AsyncSession,
-        *,
-        kis_client: KisClient | None = None,
-        credential_repo: BrokerageAccountCredentialRepository | None = None,
-        real_client_factory: KisRealClientFactory | None = None,
-    ) -> None:
+    def __init__(self, session: AsyncSession, *, kis_client: KisClient) -> None:
         self._session = session
         self._kis = kis_client
-        self._credential_repo = credential_repo
-        self._real_client_factory = real_client_factory
         self._account_repo = BrokerageAccountRepository(session)
         self._holding_repo = PortfolioHoldingRepository(session)
         self._stock_repo = StockRepository(session)
@@ -614,99 +676,71 @@ class SyncPortfolioFromKisUseCase:
         account = await self._account_repo.get(account_id)
         if account is None:
             raise AccountNotFoundError(f"account_id={account_id} 없음")
-        if account.connection_type not in ("kis_rest_mock", "kis_rest_real"):
-            raise UnsupportedConnectionError(f"connection_type={account.connection_type} 는 동기화 비지원")
+        if account.connection_type != "kis_rest_mock":
+            raise UnsupportedConnectionError(
+                f"mock UseCase 는 connection_type='kis_rest_mock' 전용 (현재 {account.connection_type})"
+            )
+        if account.environment != "mock":
+            raise InvalidRealEnvironmentError("kis_rest_mock 계좌는 environment='mock' 필수")
 
-        # connection_type × environment 조합 검증을 분기 진입 전에 수행. 공통 규칙은
-        # `_ensure_kis_real_account` 와 `_fetch_balance_mock` 에 집중돼 있고, execute
-        # 에서는 호출만 위임 — 검증 책임이 여러 곳에 퍼지는 것을 방지.
-        if account.connection_type == "kis_rest_real":
-            await _ensure_kis_real_account(self._account_repo, account_id)
-            rows = await self._fetch_balance_real(account_id)
-        else:  # kis_rest_mock
-            rows = await self._fetch_balance_mock(account.environment)
+        try:
+            rows = await self._kis.fetch_balance()
+        except KisClientError as exc:
+            raise SyncError(f"KIS 잔고 조회 실패: {exc}") from exc
 
-        today = asof or date.today()
-        created = 0
-        updated = 0
-        unchanged = 0
-        stock_created = 0
-
-        for row in rows:
-            if not row.stock_code:
-                continue
-            stock = await self._stock_repo.find_by_code(row.stock_code)
-            if stock is None:
-                stock = await self._stock_repo.upsert_by_code(
-                    stock_code=row.stock_code,
-                    stock_name=row.stock_name or row.stock_code,
-                    market_type=self.DEFAULT_MARKET_TYPE,
-                )
-                stock_created += 1
-
-            holding = await self._holding_repo.find_by_account_and_stock(account_id, stock.id)
-            if holding is None:
-                holding = PortfolioHolding(
-                    account_id=account_id,
-                    stock_id=stock.id,
-                    quantity=row.quantity,
-                    avg_buy_price=row.avg_buy_price,
-                    first_bought_at=today,
-                    last_transacted_at=today,
-                )
-                await self._holding_repo.upsert(holding)
-                created += 1
-                continue
-
-            qty_changed = holding.quantity != row.quantity
-            price_changed = holding.avg_buy_price != row.avg_buy_price
-            if not (qty_changed or price_changed):
-                unchanged += 1
-                continue
-            holding.quantity = row.quantity
-            holding.avg_buy_price = row.avg_buy_price
-            holding.last_transacted_at = today
-            await self._holding_repo.upsert(holding)
-            updated += 1
-
-        return SyncResult(
+        return await _apply_kis_holdings(
+            rows=rows,
             account_id=account_id,
-            connection_type=account.connection_type,
-            fetched_count=len(rows),
-            created_count=created,
-            updated_count=updated,
-            unchanged_count=unchanged,
-            stock_created_count=stock_created,
+            connection_type="kis_rest_mock",
+            holding_repo=self._holding_repo,
+            stock_repo=self._stock_repo,
+            asof=asof,
         )
 
-    async def _fetch_balance_real(self, account_id: int) -> list[KisHoldingRow]:
-        """kis_rest_real 분기 — DB credential 복호화 후 요청 스코프 REAL 클라이언트로 호출.
 
-        계좌 environment='real' 검증은 execute() 진입 시 `_ensure_kis_real_account` 가
-        이미 수행 — 여기선 credential 조회·외부 호출에만 집중.
-        """
-        if self._credential_repo is None or self._real_client_factory is None:
-            # 호출자가 REAL 경로용 DI 를 주입하지 않았음. 라우터/테스트 배선 오류.
-            raise RuntimeError("kis_rest_real 동기화는 credential_repo + real_client_factory 주입 필수")
+class SyncPortfolioFromKisRealUseCase:
+    """KIS REAL 잔고 → portfolio_holding 동기화. `connection_type='kis_rest_real'` 전용.
+
+    credential_repo 에서 Fernet 복호화 → real_client_factory 로 요청 스코프 KisClient(REAL)
+    생성 → async with 로 fetch_balance. mock 경로용 `kis_client` 를 받지 않으므로 Optional
+    퇴화가 생성 시점에 타입으로 차단됨.
+    """
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        credential_repo: BrokerageAccountCredentialRepository,
+        real_client_factory: KisRealClientFactory,
+    ) -> None:
+        self._session = session
+        self._credential_repo = credential_repo
+        self._real_client_factory = real_client_factory
+        self._account_repo = BrokerageAccountRepository(session)
+        self._holding_repo = PortfolioHoldingRepository(session)
+        self._stock_repo = StockRepository(session)
+
+    async def execute(self, *, account_id: int, asof: date | None = None) -> SyncResult:
+        # 계좌 존재 + connection_type='kis_rest_real' + environment='real' 검증 일원화.
+        await _ensure_kis_real_account(self._account_repo, account_id)
+
         credentials = await self._credential_repo.get_decrypted(account_id)
         if credentials is None:
             raise CredentialNotFoundError(f"account_id={account_id} credential 미등록 — Settings 에서 등록 후 재시도")
         try:
             async with self._real_client_factory(credentials) as client:
-                return await client.fetch_balance()
+                rows = await client.fetch_balance()
         except KisClientError as exc:
             raise SyncError(f"KIS 실계좌 잔고 조회 실패: {exc}") from exc
 
-    async def _fetch_balance_mock(self, environment: str) -> list[KisHoldingRow]:
-        """kis_rest_mock 분기 — 주입된 프로세스 공유 MOCK 클라이언트 사용."""
-        if environment != "mock":
-            raise InvalidRealEnvironmentError("kis_rest_mock 계좌는 environment='mock' 필수")
-        if self._kis is None:
-            raise RuntimeError("kis_rest_mock 동기화는 kis_client 주입 필수")
-        try:
-            return await self._kis.fetch_balance()
-        except KisClientError as exc:
-            raise SyncError(f"KIS 잔고 조회 실패: {exc}") from exc
+        return await _apply_kis_holdings(
+            rows=rows,
+            account_id=account_id,
+            connection_type="kis_rest_real",
+            holding_repo=self._holding_repo,
+            stock_repo=self._stock_repo,
+            asof=asof,
+        )
 
 
 # ---------- PR 5: 연결 테스트 (3단계 온보딩 1단계) ----------

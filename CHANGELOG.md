@@ -7,7 +7,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-22] chore: CI 에 ruff + mypy strict 게이트 추가 (`chore/ci-lint-type-gate`, PR #(예정))
+## [2026-04-22] refactor: Hexagonal 경계 + Sync UseCase mock/real 분리 (`refactor/hexagonal-sync-split`, PR #(예정))
+
+**이전 상태**: PR 5 (#16) 리뷰에서 HIGH 2건 carry-over.
+1. `MaskedCredentialView` 가 `app/adapter/out/persistence/repositories/brokerage_credential.py` 에 정의되고 `portfolio_service` 가 re-export — application → infra 역방향 의존.
+2. `SyncPortfolioFromKisUseCase.__init__` 가 `kis_client | None`, `credential_repo | None`, `real_client_factory | None` 세 Optional 로 받아 runtime `RuntimeError` 로 검증 — 타입 안전성 없음.
+
+### Changed
+- **`MaskedCredentialView` → `app/application/dto/credential.py` 신규 파일로 이동**. Hexagonal 경계 준수 (application layer 가 DTO 를 소유, infra 가 import 해서 반환).
+- **`SyncPortfolioFromKisUseCase` 를 두 UseCase 로 분리**:
+  - `SyncPortfolioFromKisMockUseCase` — `kis_client: KisClient` 필수 (non-Optional)
+  - `SyncPortfolioFromKisRealUseCase` — `credential_repo: BrokerageAccountCredentialRepository` + `real_client_factory: KisRealClientFactory` 필수 (둘 다 non-Optional)
+- **공통 로직 → `_apply_kis_holdings()` 모듈 헬퍼**. holding upsert 루프만 공유, 분기별 fetch 로직은 각 UseCase 에 집중.
+- **Router `sync_from_kis` 디스패치**: `account.connection_type` 으로 분기해 적절한 UseCase 선택. 로드된 account 는 동일 세션 내 재조회 (race 안전, 캐시 히트).
+- `KisConnectionType = Literal["kis_rest_mock", "kis_rest_real"]` 타입 별칭 도입 — `_apply_kis_holdings` 가 임의 문자열을 `SyncResult.connection_type` 에 흘리지 않도록 타입으로 좁힘.
+
+### Fixed
+- PR 5 이월 HIGH #1 (Hexagonal 레이어 위반) 해소
+- PR 5 이월 HIGH #2 (Optional 파라미터 퇴화) 해소
+- `test_sync_kis_rest_real_requires_real_environment`: 기존 테스트는 mock UseCase 로 `kis_rest_real` 계좌를 검증해 `UnsupportedConnectionError` 가 먼저 터져 실제로는 environment 검증을 테스트하지 못함. 신규 real UseCase 로 전환해 `_ensure_kis_real_account` 환경 검증에 정상 도달. `credential_repo.get_decrypted` + factory 둘 다 AssertionError 스텁으로 호출되면 실패하도록 해 순서 회귀 감지 강화.
+
+### Verified
+- `uv run ruff check .` ✅
+- `uv run ruff format --check .` ✅
+- `uv run mypy app` ✅ 81 source files, no issues
+- `uv run pytest -q` ✅ **295 passed, 1 deselected** — 회귀 0건
+
+### Decisions
+- **mock/real UseCase 완전 분리**: 리뷰어가 제시한 단일 UseCase + Protocol/Fetcher 패턴은 간접 층 추가로 판단해 채택 안 함. 클래스 2개 + 공통 헬퍼가 더 직관적.
+- **account 이중 로드 허용**: Router 선로드 + UseCase 재검증. 동일 세션 1트랜잭션 범위에서 race-safe, SA identity map 캐시 히트.
+- **DB 모델 `connection_type: Mapped[str]` Literal 화 분리**: Router `else` dead-path exhaustive check 가능하려면 SQLAlchemy 모델 타입을 `Literal` 로 좁혀야 하나 DB 계층 광범위 변경이라 별도 PR.
+
+---
+
+## [2026-04-22] chore: CI 에 ruff + mypy strict 게이트 추가 (`3f0061e`, PR #22)
 
 **이전 상태**: CI 가 pytest + next build + docker build 만 검증 — ruff/mypy 는 로컬 전용. 개발자별 환경 편차로 master 에 포매팅 누락·타입 에러 유입 위험.
 

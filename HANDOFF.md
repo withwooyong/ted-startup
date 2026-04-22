@@ -1,33 +1,58 @@
 # Session Handoff
 
-> Last updated: 2026-04-22 (KST, 당일 세션 — **CI lint/type 게이트 추가 작업 중**)
-> Branch: `chore/ci-lint-type-gate` (master 기반 신규 feature branch, uncommitted 변경 있음)
-> Latest commit: `1483940` — KIS sync PR 6: 로깅 마스킹 (시리즈 최종) (#20) ← 아직 master 최신 HEAD
+> Last updated: 2026-04-22 (KST, 당일 세션 — **CI lint 게이트 머지 + Hexagonal/Sync 분리 PR 준비**)
+> Branch: `refactor/hexagonal-sync-split` (master 기반, uncommitted 변경 있음)
+> Latest master HEAD: `3f0061e` — chore: CI 에 ruff + mypy strict 게이트 추가 (#22)
 
 ## Current Status (2026-04-22)
 
-**CI 에 ruff + mypy strict 게이트 추가 PR 준비 완료** (커밋 대기).
+### 머지 완료 — PR #22 (CI lint/type 게이트)
 
-### 이번 세션 변경 요약
+`.github/workflows/ci.yml` 에 `backend-lint` job 신설 (ruff check + ruff format --check + mypy app strict). 전체 98 파일 ruff format 일괄 적용. signals.py union-attr 2건 해소. scripts/ SIM117 2건 autofix. **CI 5/5 PASS** (backend-lint 30s) 확인 후 squash merge, branch 삭제.
+
+### 진행 중 — Hexagonal 리팩터 + SyncUseCase 분리 PR (커밋 대기)
+
+PR 5 (#16) 이월 HIGH 2건 해소:
 
 | 항목 | 내용 |
 |---|---|
-| CI | `.github/workflows/ci.yml` 에 `backend-lint` job 신설 (ruff check + format check + mypy app). `backend-test` 를 `needs: [backend-lint]` 로 의존 |
-| ruff format | `src/backend_py` 전체 **98 파일 일괄 재포매팅** (로직 변경 0건, 기계적) |
-| ruff check | `scripts/fix_stock_names.py` · `scripts/seed_e2e_accounts.py` SIM117 2건 autofix |
-| mypy | `app/adapter/web/routers/signals.py` L86 리스트 컴프리헨션 → `for` 루프 리팩터. `Stock \| None` union-attr 2건 해소 |
-| 문서 | CHANGELOG `[Unreleased]` 신규 엔트리, PIPELINE-GUIDE 실전학습 CI lint 게이트 교훈 4건 추가 |
+| DTO 이동 | `MaskedCredentialView` → **`app/application/dto/credential.py`** (신규). Hexagonal 경계 정합 — application layer 가 DTO 소유, infra(repository)가 import 해서 반환 |
+| re-export 제거 | `portfolio_service.py` 의 `MaskedCredentialView as MaskedCredentialView` re-export 라인 제거 |
+| UseCase 분할 | `SyncPortfolioFromKisUseCase` → **`SyncPortfolioFromKisMockUseCase`** + **`SyncPortfolioFromKisRealUseCase`** 두 클래스. 각자 필요한 DI 만 non-Optional 로 받음 — `RuntimeError` 런타임 검증 퇴화 제거 |
+| 공통 헬퍼 | holding upsert 루프를 `_apply_kis_holdings()` 모듈 헬퍼로 추출. `connection_type: Literal["kis_rest_mock", "kis_rest_real"]` 로 좁혀 임의 문자열 오염 방지 |
+| Router 디스패치 | `sync_from_kis` 가 `account.connection_type` 으로 분기 — 이중 account 로드는 동일 세션 내 캐시 히트 |
+| 테스트 전환 | 3개 mock 케이스는 `SyncPortfolioFromKisMockUseCase`, 2개 real 케이스는 `SyncPortfolioFromKisRealUseCase`. `test_sync_kis_rest_real_requires_real_environment` 는 의미 복원 (이전 테스트는 mock UseCase 로 real 계좌 검증해 `UnsupportedConnectionError` 가 먼저 터져 environment 검증에 도달 못함). factory + `get_decrypted` 둘 다 AssertionError 스텁으로 순서 회귀 감지 |
+
+### 리뷰 결과 (python-reviewer)
+
+**HIGH 2건 반영 완료**:
+- `_apply_kis_holdings(connection_type)` 파라미터에 Literal 적용 + UseCase 호출 시 리터럴 전달
+- 테스트에 `credential_repo.get_decrypted` monkeypatch AssertionError 추가
+
+**MEDIUM 기록만** (액션 불필요):
+- Router 이중 account 로드 — 동일 세션 내 허용 범위
+- Router `else` dead-path Literal exhaustive check 미적용 — DB 모델 `Mapped[str]` 변경 필요, 별도 PR
 
 ### 로컬 검증 결과
 - `uv run ruff check .` ✅
-- `uv run ruff format --check .` ✅ 123 files already formatted
-- `uv run mypy app` ✅ no issues in 80 source files
+- `uv run ruff format --check .` ✅ 124 files already formatted
+- `uv run mypy app` ✅ 81 source files (credential.py 신규), no issues
 - `uv run pytest -q` ✅ **295 passed, 1 deselected** — 회귀 0건
 
 ### 미처리
 
 - 커밋 + 푸시 + PR 생성 (**사용자 명시 요청 대기**)
-- CI 4/4 PASS 확인 후 squash merge
+- CI 5/5 PASS 확인 후 squash merge
+
+### 차기 후보 (HANDOFF 백로그 갱신)
+
+1. ~~#2 CI lint/type 게이트~~ ✅ 완료 (PR #22)
+2. ~~#3 Hexagonal + #4 mock/real 분리~~ 🔄 이 PR 로 해소
+3. **#1 모바일 반응형 착수** (3.5~4 man-day) — 최대 사용자 가치
+4. **#5 KisAuthError 401/5xx 분리** (1h) — observability
+5. **DB 모델 Mapped[str] → Literal 좁히기** (신규, 본 PR 리뷰에서 파생) — Router exhaustive check 가능
+6. **#6 asyncio_mode=auto 마이그레이션** (소규모)
+7. **#7 KIS sync 회고 문서** (선택적)
 
 ## Prior Session (2026-04-21, 마감)
 
