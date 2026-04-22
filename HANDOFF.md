@@ -1,58 +1,61 @@
 # Session Handoff
 
-> Last updated: 2026-04-22 (KST, 당일 세션 — **CI lint 게이트 머지 + Hexagonal/Sync 분리 PR 준비**)
-> Branch: `refactor/hexagonal-sync-split` (master 기반, uncommitted 변경 있음)
-> Latest master HEAD: `3f0061e` — chore: CI 에 ruff + mypy strict 게이트 추가 (#22)
+> Last updated: 2026-04-22 (KST, 당일 세션 — **PR #22·#23 머지 + KisAuthError 401/5xx 분리 PR 준비**)
+> Branch: `refactor/kis-auth-error-split` (master 기반, uncommitted 변경 있음)
+> Latest master HEAD: `576e9f2` — refactor: Hexagonal 경계 + SyncPortfolio mock/real 분리 (#23)
 
 ## Current Status (2026-04-22)
 
-### 머지 완료 — PR #22 (CI lint/type 게이트)
+### 진행 중 — KisAuthError 401/5xx 분리 (커밋 대기)
 
-`.github/workflows/ci.yml` 에 `backend-lint` job 신설 (ruff check + ruff format --check + mypy app strict). 전체 98 파일 ruff format 일괄 적용. signals.py union-attr 2건 해소. scripts/ SIM117 2건 autofix. **CI 5/5 PASS** (backend-lint 30s) 확인 후 squash merge, branch 삭제.
-
-### 진행 중 — Hexagonal 리팩터 + SyncUseCase 분리 PR (커밋 대기)
-
-PR 5 (#16) 이월 HIGH 2건 해소:
+PR 5 (#16) 리뷰 이월 MEDIUM 해소. credential 거부(HTTP 401/403) 와 업스트림 장애(5xx/네트워크) 를 타입으로 분리해 API 응답 상태코드 구분.
 
 | 항목 | 내용 |
 |---|---|
-| DTO 이동 | `MaskedCredentialView` → **`app/application/dto/credential.py`** (신규). Hexagonal 경계 정합 — application layer 가 DTO 소유, infra(repository)가 import 해서 반환 |
-| re-export 제거 | `portfolio_service.py` 의 `MaskedCredentialView as MaskedCredentialView` re-export 라인 제거 |
-| UseCase 분할 | `SyncPortfolioFromKisUseCase` → **`SyncPortfolioFromKisMockUseCase`** + **`SyncPortfolioFromKisRealUseCase`** 두 클래스. 각자 필요한 DI 만 non-Optional 로 받음 — `RuntimeError` 런타임 검증 퇴화 제거 |
-| 공통 헬퍼 | holding upsert 루프를 `_apply_kis_holdings()` 모듈 헬퍼로 추출. `connection_type: Literal["kis_rest_mock", "kis_rest_real"]` 로 좁혀 임의 문자열 오염 방지 |
-| Router 디스패치 | `sync_from_kis` 가 `account.connection_type` 으로 분기 — 이중 account 로드는 동일 세션 내 캐시 히트 |
-| 테스트 전환 | 3개 mock 케이스는 `SyncPortfolioFromKisMockUseCase`, 2개 real 케이스는 `SyncPortfolioFromKisRealUseCase`. `test_sync_kis_rest_real_requires_real_environment` 는 의미 복원 (이전 테스트는 mock UseCase 로 real 계좌 검증해 `UnsupportedConnectionError` 가 먼저 터져 environment 검증에 도달 못함). factory + `get_decrypted` 둘 다 AssertionError 스텁으로 순서 회귀 감지 |
-
-### 리뷰 결과 (python-reviewer)
-
-**HIGH 2건 반영 완료**:
-- `_apply_kis_holdings(connection_type)` 파라미터에 Literal 적용 + UseCase 호출 시 리터럴 전달
-- 테스트에 `credential_repo.get_decrypted` monkeypatch AssertionError 추가
-
-**MEDIUM 기록만** (액션 불필요):
-- Router 이중 account 로드 — 동일 세션 내 허용 범위
-- Router `else` dead-path Literal exhaustive check 미적용 — DB 모델 `Mapped[str]` 변경 필요, 별도 PR
+| adapter 예외 | `KisCredentialRejectedError(KisAuthError)` 신규 — 401/403 전용. 토큰 발급 + 잔고조회 두 경로 |
+| domain 예외 | `CredentialRejectedError(PortfolioError)` 신규 — UseCase 가 승격. `SyncError` 의 sibling |
+| HTTP 매핑 | `CredentialRejectedError` → **400** (사용자 Settings 재등록), `SyncError` → **502** (업스트림 장애, 기존 유지) |
+| 세 UseCase | Mock/Real Sync + TestConnection 모두 `except KisCredentialRejectedError` 먼저 잡아 도메인 예외로 변환 |
+| 보안 | 리뷰 MEDIUM #1 — exception 메시지의 `body=...` 제거 후 DEBUG 로그로 분리 (PR #20 마스킹 파이프라인 경유 → JWT/hex 스크럽) |
+| 테스트 | **+8건** (295 → 303 passed). 토큰 401/403 파라메트라이즈, 500 → base KisAuthError 단언, endpoint 400/502 분리 |
 
 ### 로컬 검증 결과
 - `uv run ruff check .` ✅
 - `uv run ruff format --check .` ✅ 124 files already formatted
-- `uv run mypy app` ✅ 81 source files (credential.py 신규), no issues
-- `uv run pytest -q` ✅ **295 passed, 1 deselected** — 회귀 0건
+- `uv run mypy app` ✅ 81 source files, no issues
+- `uv run pytest -q` ✅ **303 passed** (+8), 회귀 0건
+
+### 리뷰 결과 (python-reviewer)
+
+**CRITICAL/HIGH 0**, **MEDIUM 3**:
+- #1 (반영 완료): exception 메시지 body 노출 → DEBUG 로그로 분리
+- #2 (기록만): 계층 간 유사 이름 (`KisCredentialRejectedError` vs `CredentialRejectedError`) — follow-up 후보
+- #3 (기록만): MOCK 401 이 사용자 응답으로 노출 — 메시지에 operator 안내 포함으로 충분
 
 ### 미처리
 
-- 커밋 + 푸시 + PR 생성 (**사용자 명시 요청 대기**)
-- CI 5/5 PASS 확인 후 squash merge
+- 커밋 + 푸시 + PR 생성
 
-### 차기 후보 (HANDOFF 백로그 갱신)
+## 오늘(2026-04-22) 머지 완료
 
-1. ~~#2 CI lint/type 게이트~~ ✅ 완료 (PR #22)
-2. ~~#3 Hexagonal + #4 mock/real 분리~~ 🔄 이 PR 로 해소
-3. **#1 모바일 반응형 착수** (3.5~4 man-day) — 최대 사용자 가치
-4. **#5 KisAuthError 401/5xx 분리** (1h) — observability
-5. **DB 모델 Mapped[str] → Literal 좁히기** (신규, 본 PR 리뷰에서 파생) — Router exhaustive check 가능
-6. **#6 asyncio_mode=auto 마이그레이션** (소규모)
-7. **#7 KIS sync 회고 문서** (선택적)
+### PR #22 — chore: CI 에 ruff + mypy strict 게이트 추가 (`3f0061e`)
+
+`.github/workflows/ci.yml` 에 `backend-lint` job 신설 (ruff check + ruff format --check + mypy app strict). 전체 98 파일 ruff format 일괄 적용. signals.py union-attr 2건 해소. scripts/ SIM117 2건 autofix. **CI 5/5 PASS** (backend-lint 30s) 확인 후 squash merge, branch 삭제.
+
+### PR #23 — refactor: Hexagonal 경계 + SyncPortfolio mock/real 분리 (`576e9f2`)
+
+PR 5 이월 HIGH 2건 해소. `MaskedCredentialView` 를 `app/application/dto/credential.py` 로 이동해 application → infra 역방향 의존 제거. `SyncPortfolioFromKisUseCase` 를 Mock/Real 두 UseCase 로 분리, 공통 로직 `_apply_kis_holdings` 헬퍼 추출 (`KisConnectionType` Literal 타입), Router 디스패치. python-reviewer HIGH 2건 반영. **CI 5/5 PASS** 후 squash merge.
+
+### 차기 후보 (2026-04-22 세션 마감 후)
+
+1. ~~#2 CI lint/type 게이트~~ ✅ PR #22
+2. ~~#3 Hexagonal + #4 mock/real 분리~~ ✅ PR #23
+3. ~~#5 KisAuthError 401/5xx 분리~~ 🔄 이 PR (커밋 대기)
+4. **#1 모바일 반응형 착수** (3.5~4 man-day) — 최대 사용자 가치
+5. **DB 모델 Mapped[str] → Literal 좁히기** (신규, PR #23 리뷰 파생) — Router exhaustive check 가능
+6. **Exception 이름 중복 완화** (신규, 이 PR 리뷰 파생) — `KisCredentialRejectedError` → `KisUpstreamCredentialRejectedError` 리네이밍
+7. **#6 asyncio_mode=auto 마이그레이션** (소규모)
+8. **#7 KIS sync 회고 문서** (선택적)
 
 ## Prior Session (2026-04-21, 마감)
 

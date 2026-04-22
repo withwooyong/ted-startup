@@ -7,7 +7,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-22] refactor: Hexagonal 경계 + Sync UseCase mock/real 분리 (`refactor/hexagonal-sync-split`, PR #(예정))
+## [2026-04-22] refactor: KisAuthError 401/5xx 분리 — credential 거부 vs 업스트림 장애 (`refactor/kis-auth-error-split`, PR #(예정))
+
+**이전 상태**: PR 5 (#16) 리뷰 이월 MEDIUM. KIS 토큰 발급/잔고조회가 HTTP 401/403 (credential 거부) 이든 5xx/네트워크 (업스트림 장애) 이든 모두 `KisAuthError`/`KisClientError` → UseCase 가 `SyncError` 로 래핑 → 라우터에서 **일괄 502** 응답. 사용자가 "KIS 자격증명 틀림" 과 "KIS 서버 다운" 을 구분 못 함.
+
+### Added
+- **`KisCredentialRejectedError(KisAuthError)` 서브클래스** — HTTP 401/403 전용. 토큰 발급 + 잔고조회 두 경로 모두 raise.
+- **`CredentialRejectedError(PortfolioError)` 도메인 예외** — UseCase 가 `KisCredentialRejectedError` 를 catch 해 도메인 계층으로 승격. 4xx 매핑 대상.
+- 테스트 8건 추가:
+  - `test_kis_client.py`: 토큰 401/403 파라메트라이즈, 토큰 500 → base KisAuthError (서브클래스 아님 단언), 잔고 401/403 파라메트라이즈
+  - `test_kis_real_sync.py`: UseCase 레벨 401/403 → CredentialRejectedError, 500 → SyncError, endpoint 400/502 분리
+
+### Changed
+- `SyncPortfolioFromKisMockUseCase` / `SyncPortfolioFromKisRealUseCase` / `TestKisConnectionUseCase` 세 UseCase 의 except 순서: `except KisCredentialRejectedError` 를 `except KisClientError` **앞** 에 배치. 서브클래스가 먼저 잡혀 도메인 `CredentialRejectedError` 로 승격.
+- Router `_credential_error_to_http`: `CredentialRejectedError` → **HTTP 400** 분기 추가 (SyncError → 502 분기 앞).
+- 기존 `test_connection_token_failure_wrapped_as_sync_error` (401 → SyncError) → `test_connection_credential_reject_raises_credential_rejected` (401/403 → CredentialRejectedError) 로 교체. 기존 `test_endpoint_test_connection_token_failure_502` (401 → HTTP 502) → `_credential_rejected_400` / `_upstream_failure_502` 두 케이스로 분리.
+
+### Fixed
+- PR 5 이월 MEDIUM (4xx/5xx 분리) 해소.
+- 리뷰 MEDIUM #1 (예외 메시지의 `body=...` HTTP response detail 노출) 예방 — `body=` 제거 후 DEBUG 로그로 분리. PR #20 의 마스킹 파이프라인을 거치도록 해 JWT/hex 패턴 자동 스크럽.
+
+### Verified
+- `uv run ruff check .` ✅
+- `uv run ruff format --check .` ✅ 124 files already formatted
+- `uv run mypy app` ✅ 81 source files, no issues
+- `uv run pytest -q` ✅ **303 passed, 1 deselected** — +8 신규, 회귀 0건
+
+### Decisions
+- **HTTP 400 (401 아님)**: 서버 인증 실패가 아니라 KIS 업스트림이 credential 거부. 401 은 FE 가 "우리 admin API 인증 실패" 로 오해 유도. 422 Unprocessable Content 도 고려했으나 이 경우 request body 자체는 valid 라 422 semantics 와 안 맞음. 400 + 구체 메시지가 적절.
+- **`status_code` 속성 안 추가**: `KisCredentialRejectedError` 는 타입만으로 분기. 인스턴스에 status_code 필드를 얹지 않음 — 도메인 로직이 값 검사 안 함. 단순성 우선.
+- **CredentialRejectedError 는 SyncError 의 sibling**: 둘 다 `PortfolioError` 직속 서브클래스. Router `isinstance` 분기가 독립적으로 작동.
+- **MOCK 경로도 승격**: 흔치 않지만 고정 mock key 만료 케이스 커버. 메시지에 "서버 env 점검 필요" 문구로 operator 안내.
+- **리뷰 MEDIUM 2·3 스킵**: (2) 계층 간 유사 이름 부담 — follow-up 후보. (3) MOCK 401 을 사용자 응답으로 노출 — 메시지 텍스트로 operator 안내로 충분.
+
+---
+
+## [2026-04-22] refactor: Hexagonal 경계 + Sync UseCase mock/real 분리 (`576e9f2`, PR #23)
 
 **이전 상태**: PR 5 (#16) 리뷰에서 HIGH 2건 carry-over.
 1. `MaskedCredentialView` 가 `app/adapter/out/persistence/repositories/brokerage_credential.py` 에 정의되고 `portfolio_service` 가 re-export — application → infra 역방향 의존.

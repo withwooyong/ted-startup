@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapter.out.external import (
     KisClient,
     KisClientError,
+    KisCredentialRejectedError,
     KisCredentials,
     KisHoldingRow,
 )
@@ -99,6 +100,14 @@ class CredentialAlreadyExistsError(PortfolioError):
 
 class CredentialNotFoundError(PortfolioError):
     """해당 계좌에 credential 이 없음. PUT·GET·DELETE·sync·test-connection → 404 로 매핑."""
+
+
+class CredentialRejectedError(PortfolioError):
+    """KIS 업스트림이 자격증명을 거부(HTTP 401/403) — 사용자가 credential 재등록 필요.
+
+    `SyncError`(502) 와 달리 서버가 원인을 확정한 상태 → 4xx(400) 로 매핑해
+    사용자가 Settings 에서 재조치할 수 있음을 FE 가 구분할 수 있도록 함.
+    """
 
 
 # ---------- Type aliases ----------
@@ -685,6 +694,10 @@ class SyncPortfolioFromKisMockUseCase:
 
         try:
             rows = await self._kis.fetch_balance()
+        except KisCredentialRejectedError as exc:
+            # MOCK 환경에서 401/403 은 드물지만(고정 mock key 가 만료되는 경우 등)
+            # 의미는 동일 — 사용자가 env 재점검.
+            raise CredentialRejectedError(f"KIS MOCK 자격증명 거부 — 서버 env 점검 필요: {exc}") from exc
         except KisClientError as exc:
             raise SyncError(f"KIS 잔고 조회 실패: {exc}") from exc
 
@@ -730,6 +743,10 @@ class SyncPortfolioFromKisRealUseCase:
         try:
             async with self._real_client_factory(credentials) as client:
                 rows = await client.fetch_balance()
+        except KisCredentialRejectedError as exc:
+            raise CredentialRejectedError(
+                f"KIS 실계좌 자격증명 거부 — Settings 에서 app_key/app_secret/account_no 재확인: {exc}"
+            ) from exc
         except KisClientError as exc:
             raise SyncError(f"KIS 실계좌 잔고 조회 실패: {exc}") from exc
 
@@ -780,8 +797,13 @@ class TestKisConnectionUseCase:
         try:
             async with self._factory(credentials) as client:
                 await client.test_connection()
+        except KisCredentialRejectedError as exc:
+            # HTTP 401/403 = KIS 가 자격증명을 거부. Settings 에서 재등록 안내 → 400.
+            raise CredentialRejectedError(
+                f"KIS 실계좌 자격증명 거부 — Settings 에서 app_key/app_secret/account_no 재확인: {exc}"
+            ) from exc
         except KisClientError as exc:
-            # 토큰 발급 실패 = KIS 업스트림 오류. 라우터에서 502 로 변환.
+            # 그 외 = KIS 업스트림 장애 (5xx/네트워크/파싱). 라우터에서 502 로 변환.
             raise SyncError(f"KIS 토큰 발급 실패: {exc}") from exc
         return TestConnectionResult(account_id=account_id, environment="real", ok=True)
 
