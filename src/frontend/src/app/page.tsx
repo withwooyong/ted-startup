@@ -97,7 +97,7 @@ export default function DashboardPage() {
                 type="button"
                 aria-pressed={filter === f.key}
                 onClick={() => setFilter(f.key)}
-                className={`px-3 sm:px-4 py-1.5 rounded-lg text-[0.78rem] font-medium transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
+                className={`inline-flex items-center justify-center min-h-[44px] sm:min-h-0 px-3 sm:px-4 py-1.5 rounded-lg text-[0.78rem] font-medium transition-all whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
                   filter === f.key
                     ? 'text-white bg-[#6395FF] shadow-[0_2px_8px_rgba(99,149,255,0.3)]'
                     : 'text-[#6B7A90] hover:text-[#E8ECF1]'
@@ -117,7 +117,7 @@ export default function DashboardPage() {
             value={sort}
             onChange={e => setSort(e.target.value as 'score' | 'change')}
             aria-label="시그널 정렬 기준"
-            className="px-3 py-1.5 rounded-lg text-xs bg-[#131720] border border-white/[0.06] text-[#6B7A90] focus:outline-none focus:border-[#6395FF]/30"
+            className="min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-xs bg-[#131720] border border-white/[0.06] text-[#6B7A90] focus:outline-none focus:border-[#6395FF]/30"
           >
             <option value="score">스코어순</option>
             <option value="change">감소율순</option>

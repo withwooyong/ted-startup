@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getBacktestResults } from '@/lib/api/client';
+import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { BacktestSummary } from '@/types/signal';
 import {
@@ -35,6 +36,7 @@ export default function BacktestPage() {
   const [results, setResults] = useState<BacktestSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMobile = useMediaQuery('(max-width: 639px)');
 
   useEffect(() => {
     getBacktestResults()
@@ -195,7 +197,7 @@ export default function BacktestPage() {
             <h2 className="text-[0.78rem] font-semibold text-[#6B7A90] font-[family-name:var(--font-display)] mb-4">
               보유기간별 평균 수익률
             </h2>
-            <ResponsiveContainer width="100%" aspect={2.2}>
+            <ResponsiveContainer width="100%" aspect={isMobile ? 1.4 : 2.2}>
               <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                 <XAxis dataKey="name" tick={{ fill: '#4A5568', fontSize: 11 }} tickLine={false} />

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getStockDetail } from '@/lib/api/client';
+import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import {
   StockDetail,
@@ -38,6 +39,7 @@ export default function StockDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prevKey, setPrevKey] = useState(`${code}:${period}`);
+  const isMobile = useMediaQuery('(max-width: 639px)');
 
   // fetch 파라미터 변경 시 loading 재진입 (render 중 리셋 패턴)
   const currentKey = `${code}:${period}`;
@@ -182,7 +184,7 @@ export default function StockDetailPage() {
       <ErrorBoundary resetKeys={[period, chartData.length]}>
       <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4 mb-6">
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" aspect={2}>
+          <ResponsiveContainer width="100%" aspect={isMobile ? 1.4 : 2}>
             <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
               <XAxis dataKey="date" tick={{ fill: '#4A5568', fontSize: 10 }} tickLine={false} />
