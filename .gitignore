@@ -5,6 +5,9 @@ node_modules/
 dist/
 .next/
 
+# Lighthouse 자동 측정 결과 — scripts/lighthouse-mobile.sh 산출물 (HTML + JSON)
+lighthouse-reports/
+
 # Pipeline (팀 공유 — Compaction 방어 + 협업 목적)
 # state, artifacts, decisions 모두 커밋하여 팀원 간 파이프라인 컨텍스트 공유
 

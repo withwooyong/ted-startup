@@ -214,53 +214,38 @@ Tailwind v4 기본을 준수하되 프로젝트 컨벤션 명시화:
 | 2026-04-21 | Phase B·C·E 각 0.5일 상향 → 총 3.5~4 man-day | B3 + C4 + E1 신규 시나리오 |
 | 2026-04-22 | Phase B~D 구현 완료 (PR #29/#30/#31), Phase E1 mobile.spec.ts 작성 | ted-run 파이프라인 병행 |
 | 2026-04-22 | §10 Lighthouse 수동 검증 가이드 추가, E2 자동화 이관 | lhci 세팅은 별도 CI 워크플로 추가 필요 |
+| 2026-04-23 | `scripts/lighthouse-mobile.sh` + `docs/lighthouse-scores.md` 템플릿 추가, §10 단축 | Gate 3 증빙 인프라 완비. 실제 측정값은 사용자 로컬 기동 후 scores.md 채움 |
 
 ---
 
-## 10. Lighthouse 모바일 수동 검증 가이드 (E2)
+## 10. Lighthouse 모바일 검증 (E2)
 
-**목적**: 모바일 Performance / Accessibility / Best Practices 스코어 85 이상 확보. 자동화 전까지 수동 측정 + 스프레드시트 기록.
+**목적**: 모바일 Performance / Accessibility / Best Practices / SEO 스코어 회귀 감지. 자동화 전까지 수동 측정 + 기록.
 
-### 준비
-1. 로컬 backend + frontend 기동:
-   ```bash
-   # 터미널 1: backend
-   cd src/backend_py && uv run uvicorn src.app.main:app --host 0.0.0.0 --port 8000
-   # 터미널 2: frontend (production build 기준)
-   cd src/frontend && yarn build && yarn start
-   ```
-2. Chrome 브라우저에서 `http://localhost:3000` 접속 후 로그인 상태 확보 (seed: `e2e-manual`, `e2e-kis` 계좌)
+### 결과 기록 위치
+→ [`docs/lighthouse-scores.md`](./lighthouse-scores.md) (목표치, 측정 체크리스트, 결과 표 포함)
 
-### 측정 절차
-1. Chrome DevTools → Lighthouse 탭
-2. **Mode**: Navigation (Default) / **Device**: Mobile / **Categories**: Performance + Accessibility + Best Practices + SEO
-3. 각 페이지에서 "Analyze page load" 실행:
-   - `/` 대시보드
-   - `/portfolio`
-   - `/stocks/005930`
-   - `/reports/005930`
-   - `/portfolio/1/alignment`
-   - `/backtest`
-   - `/settings`
-4. 스코어를 `docs/lighthouse-scores.md` (신규, Phase E2 완료 시) 에 기록
+### 측정 방법 A — 자동 스크립트 (권장)
+```bash
+# 1) backend + frontend 기동 (별도 터미널)
+cd src/backend_py && uv run uvicorn src.app.main:app --host 0.0.0.0 --port 8000
+cd src/frontend && yarn build && yarn start
 
-### 기록 형식
-```markdown
-| 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 비고 |
-|---|---|---|---|---|---|---|
-| / | 2026-04-22 | 92 | 95 | 100 | 100 | Phase D 완료 직후 |
+# 2) 7 페이지 자동 측정 (npx lighthouse, 첫 실행은 ~30s 패키지 다운로드)
+./scripts/lighthouse-mobile.sh
+
+# 3) 결과
+cat lighthouse-reports/summary.md     # 4 카테고리 스코어 요약 (paste-ready)
+open lighthouse-reports/root.html     # 각 페이지 상세 리포트
 ```
 
-### 목표 스코어 & 개선 지점
-- **Performance 85+**: aurora blur 모바일 경량화(D4), 차트 aspect 축소(D3) 로 LCP/CLS 개선 기대
-- **Accessibility 90+**: `aria-label` / `aria-disabled` / `min-h-[44px]` 터치 타깃(D1) 으로 상향
-- **Best Practices 90+**: HTTPS 로컬 제외 항목은 CI/프로덕션 측정 시 확인
+스크립트는 `lighthouse-reports/` 아래 페이지별 `.html` + `.report.json` 을 생성하고 `summary.md` 에 스코어 표를 누적한다. 로그인 세션이 필요한 페이지(portfolio/settings) 는 Chrome 쿠키 공유가 없으므로 비로그인 상태에서의 쉘 렌더만 측정됨 — 정확한 수치가 필요하면 방법 B.
 
-### 자동화 이관 (별도 과제)
-`@lhci/cli` + GitHub Actions 로 PR 마다 스코어 측정하려면:
-1. `.lighthouserc.json` 추가 (assertions: `categories:performance >= 0.85` 등)
-2. `.github/workflows/lighthouse.yml` 에서 `npx @lhci/cli@0.13 autorun` 실행
-3. 측정 대상 URL 목록은 staging 환경 기준 (로컬 seed 재현 불가)
+### 측정 방법 B — Chrome DevTools (로그인 세션 보존)
+1. Chrome 에서 `http://localhost:3000` 로그인 (seed: `e2e-manual`/`e2e-kis`)
+2. DevTools → Lighthouse 탭 → Mode: Navigation / Device: **Mobile** / 4 카테고리 전체
+3. 각 페이지에서 "Analyze page load"
+4. 점수를 `docs/lighthouse-scores.md` 표에 기록
 
 ### 실기기 점검 (E3) 보조
 DevTools Responsive 모드 외에 실기기 검증은 Chrome Remote Debugging (`chrome://inspect`) 으로 USB 연결된 Android 에서 Lighthouse 실행 가능. iOS 는 Xcode Instruments 활용.
