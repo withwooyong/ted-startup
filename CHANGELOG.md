@@ -7,6 +7,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-22] feat(frontend): 모바일 반응형 Phase A — viewport 메타 + Playwright 모바일 프로필 (`0070f97`, PR #28)
+
+`docs/mobile-responsive-plan.md` Phase A (Gate 1 스코프) 구현. 3.5~4 man-day 모바일 반응형 refactor 의 첫 단계로 "설정 도입" 까지만 범위. 모바일 전용 스펙은 Phase B~E 에서 햄버거 드로어/카드 레이아웃과 함께 추가 예정.
+
+### Added
+- `src/frontend/src/app/layout.tsx` 에 Next.js 16 `export const viewport` 추가
+  - `width: "device-width"` / `initialScale: 1` / `maximumScale: 5` — 확대 접근성 유지
+  - 기존 `metadata` export 와 별개로 동작 (Next.js 14+ 권장 분리)
+- `src/frontend/playwright.config.ts` 에 모바일 프로필 2개 추가
+  - `mobile-safari` (iPhone 13, WebKit)
+  - `mobile-chrome` (Galaxy S8, Chromium)
+  - 기존 40 개 E2E 스펙이 모바일 프로필에서도 자동 수집 (42 tests × 3 projects)
+- `src/frontend/tests/e2e/mobile-viewport.spec.ts` 신규 (+2 tests)
+  - viewport meta content 정규식 검증
+  - 홈 페이지 모바일 뷰포트 가로 스크롤 없음 검증 (`scrollWidth − clientWidth <= 1`)
+
+### Fixed
+- `.github/workflows/e2e.yml` 의 `Run Playwright E2E` 스텝에 `--project=chromium` 명시
+  - 모바일 프로필 도입 후 기본 실행이 3 projects 전체로 확장되며 햄버거 드로어 미대응 데스크톱 스펙 45개가 모바일에서 timeout → CI fail. Phase A 스코프를 "설정 도입" 으로 유지하기 위해 CI 는 chromium 만 게이트하도록 고정.
+
+### Verified
+- `npm run type-check` (tsc --noEmit) ✅
+- `npm run lint` (eslint) ✅
+- `npm run build` (Next.js 16 Turbopack) ✅ 2.0s compile
+- `npx playwright test --list --project=mobile-safari` ✅ 42 tests enumerated
+- CI 6/6 green (backend-lint / frontend-lint / backend-test / frontend-build / docker-build / e2e(chromium))
+
+### Decisions
+- **Gate 1 스코프 준수**: 계획서 §8 의 "viewport + 모바일 E2E 프로필 동작 확인" 범위 외 일절 손대지 않음. Phase B (포트폴리오 테이블→카드 + RealAccountSection 3버튼) 는 별도 PR.
+- **모바일 E2E 회귀 자동화는 Phase B 이후**: 기존 스펙이 햄버거 드로어를 열지 않아 모바일에서 실패. Phase B 에서 NavHeader 드로어 오픈 로직을 spec 공통 util 로 분리한 뒤 CI 에 모바일 프로젝트 추가.
+- **접근성 우선**: `maximumScale: 5` 로 사용자 확대 허용. 계획서 §6 위험 "iOS 기존 동작 변경" 완화.
+- **단일 PR #28 의 원자성**: Phase A 구현(`6c9a995`) + CI 수정(`53a7f75`) 2 커밋을 squash merge — "mobile 프로필 추가" 와 "CI 가 그 프로필을 돌리지 않게 한다" 는 서로를 해명하므로 분리하지 않음.
+
+### Known Issues (남은 부채)
+- 모바일 프로필 E2E 가 실제로 돌지 않음 → Phase B 에서 햄버거 드로어 공통 helper 추가 후 활성화
+- 계획서 §2 item 5 (alignment chip wrap) / item 8 (터치 타깃 44px) 등 P1~P2 미착수
+- HANDOFF.md 의 "5→6 PR" 단순 문구 갱신은 Phase A 세션이 7 PR 로 마감되면서 무효화 — 이번 세션 마감 핸드오프로 overwrite
+
+---
+
 ## [2026-04-22] chore: CI 에 frontend-lint 게이트 추가 — eslint + tsc --noEmit (`5c0b305`, PR #26)
 
 모바일 반응형 refactor(3.5~4 man-day) 착수 전 안전망. 백엔드 `backend-lint` (PR #22) 와 대칭.

@@ -53,7 +53,7 @@ export default function NavHeader() {
           className="font-[family-name:var(--font-display)] text-lg font-bold bg-gradient-to-r from-[#6395FF] to-[#a78bfa] bg-clip-text text-transparent"
         >
           SIGNAL
-          <span className="text-[#3D4A5C] text-[0.65rem] font-normal ml-2 align-middle">v1.0</span>
+          <span className="hidden sm:inline text-[#3D4A5C] text-[0.65rem] font-normal ml-2 align-middle">v1.0</span>
         </Link>
 
         {/* Desktop nav */}
