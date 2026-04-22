@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # Lighthouse 모바일 자동 측정 — 모바일 반응형 Gate 3 증빙 수집용
 #
-# 사전 조건 (직접 띄워야 하는 것):
-#   1) backend — `cd src/backend_py && uv run uvicorn src.app.main:app --port 8000`
-#   2) frontend — `cd src/frontend && yarn build && yarn start`  (production 모드)
-#   3) 로그인 세션 쿠키 — portfolio/settings 같은 보호 페이지 측정 시 수동 로그인 필요
+# 사전 조건 (직접 띄워야 하는 것) — 두 가지 모드 중 택일:
+#
+#   [A] dev 모드 (Next dev server 직접):
+#       1) backend — `cd src/backend_py && uv run uvicorn src.app.main:app --port 8000`
+#       2) frontend — `cd src/frontend && yarn build && yarn start`
+#       → 기본값 `http://localhost:3000` 그대로 사용
+#
+#   [B] prod docker 스택 (caddy 경유, self-signed TLS):
+#       1) `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build`
+#       2) `LIGHTHOUSE_BASE_URL=https://localhost ./scripts/lighthouse-mobile.sh`
+#       → chrome-flags 에 `--ignore-certificate-errors` 포함되어 self-signed 통과
+#
+#   공통: 로그인 세션 쿠키 — portfolio/settings 같은 보호 페이지 측정 시 수동 로그인 필요
 #
 # 사용:
 #   ./scripts/lighthouse-mobile.sh                      # 7 페이지 전체 측정
@@ -74,7 +83,7 @@ for p in "${PATHS[@]}"; do
     --output=html \
     --output=json \
     --output-path="$OUT_DIR/$slug" \
-    --chrome-flags='--headless=new --no-sandbox' \
+    --chrome-flags='--headless=new --no-sandbox --ignore-certificate-errors' \
     || { echo "  ✗ 측정 실패: $url"; continue; }
 
   # JSON 에서 4개 카테고리 점수 추출 (0~1 → 0~100 반올림)
