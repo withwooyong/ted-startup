@@ -118,22 +118,22 @@ export default function StockDetailPage() {
             <span className="font-[family-name:var(--font-display)] text-xl font-bold">{data.stock.stock_name}</span>
             <span className="font-[family-name:var(--font-mono)] text-sm text-[#3D4A5C]">{data.stock.stock_code}</span>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <div>
-              <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">현재가</div>
-              <div className="font-[family-name:var(--font-display)] text-xl font-semibold mt-0.5">
+              <div className="text-[0.6rem] sm:text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">현재가</div>
+              <div className="font-[family-name:var(--font-display)] text-base sm:text-xl font-semibold mt-0.5 tabular-nums">
                 {latestPrice ? latestPrice.close_price.toLocaleString() : '-'}
               </div>
             </div>
             <div>
-              <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">전일비</div>
-              <div className="font-[family-name:var(--font-mono)] text-xl font-medium mt-0.5" style={{ color: changeColor }}>
+              <div className="text-[0.6rem] sm:text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">전일비</div>
+              <div className="font-[family-name:var(--font-mono)] text-base sm:text-xl font-medium mt-0.5 tabular-nums" style={{ color: changeColor }}>
                 {changeRateNum > 0 ? '+' : ''}{changeRateNum.toFixed(2)}%
               </div>
             </div>
             <div>
-              <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">거래량</div>
-              <div className="font-[family-name:var(--font-mono)] text-xl font-medium mt-0.5">
+              <div className="text-[0.6rem] sm:text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">거래량</div>
+              <div className="font-[family-name:var(--font-mono)] text-base sm:text-xl font-medium mt-0.5 tabular-nums">
                 {latestPrice ? `${(latestPrice.volume / 1000000).toFixed(1)}M` : '-'}
               </div>
             </div>
@@ -147,7 +147,7 @@ export default function StockDetailPage() {
                 <div className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-display)] uppercase">
                   {SIGNAL_TYPE_LABELS[latestSignal.signal_type]} Score
                 </div>
-                <div className="font-[family-name:var(--font-display)] text-4xl font-extrabold tracking-tighter mt-1">
+                <div className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl font-extrabold mt-1 tabular-nums">
                   {latestSignal.score}
                 </div>
               </div>
