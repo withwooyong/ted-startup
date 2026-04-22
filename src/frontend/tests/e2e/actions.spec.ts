@@ -8,6 +8,16 @@ import { PortfolioPage } from './pages/PortfolioPage';
 //     intercept 하여 deterministic 응답으로 대체.
 
 test.describe('C. 포트폴리오 액션 (쓰기 경로)', () => {
+  // 데스크톱 테이블 전제 (`portfolio.holdingsTable.toBeVisible()`). 모바일 프로필에선
+  // 카드 리스트가 대체 렌더되므로 본 스펙을 desktop 프로젝트로 제한한다.
+  // 모바일 경로의 스냅샷/sync 액션 UX 회귀는 mobile.spec.ts 에서 별도 검증.
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium',
+      '데스크톱 테이블 전제 — 모바일 경로는 mobile.spec.ts 에서 검증',
+    );
+  });
+
   test('C1: 스냅샷 생성 → 배너 "스냅샷 저장 완료: 평가금액 …"', async ({ page }) => {
     const portfolio = new PortfolioPage(page);
     await portfolio.goto();

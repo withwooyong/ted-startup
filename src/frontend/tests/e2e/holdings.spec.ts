@@ -2,7 +2,15 @@ import { test, expect } from '@playwright/test';
 import { PortfolioPage } from './pages/PortfolioPage';
 
 test.describe('B. 포트폴리오 리스트', () => {
-  test.beforeEach(async ({ page }) => {
+  // 본 스펙은 데스크톱 테이블(`<table>`, hidden sm:block)을 전제로 작성됐다.
+  // 모바일 프로필(mobile-safari/mobile-chrome)에선 테이블이 숨겨지고 카드 리스트가
+  // 대체 렌더되므로 `holdingsTable.toBeVisible()` 이 실패한다. 모바일 경로는
+  // `mobile.spec.ts` 가 `data-testid="holding-row"` 로 별도 검증한다.
+  test.beforeEach(async ({ page }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== 'chromium',
+      '데스크톱 테이블 전제 — 모바일 경로는 mobile.spec.ts 에서 검증',
+    );
     const portfolio = new PortfolioPage(page);
     await portfolio.goto();
     // 첫 API 응답 대기 (listAccounts → listHoldings → getPerformance)
