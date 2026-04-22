@@ -8,13 +8,12 @@ import httpx
 import pytest
 
 from app.adapter.out.external import (
-    KisAuthError,
     KisClient,
-    KisClientError,
     KisCredentialRejectedError,
     KisCredentials,
     KisEnvironment,
     KisNotConfiguredError,
+    KisUpstreamError,
 )
 from app.config.settings import Settings
 
@@ -162,8 +161,8 @@ async def test_raises_auth_error_when_token_endpoint_fails() -> None:
 
     transport = httpx.MockTransport(handler)
     async with KisClient(_settings(), transport=transport) as client:
-        # 서브클래스도 KisAuthError 로 잡히므로 이 테스트는 회귀 안전장치 성격으로 보존.
-        with pytest.raises(KisAuthError):
+        # 서브클래스도 KisUpstreamError 로 잡히므로 이 테스트는 회귀 안전장치 성격으로 보존.
+        with pytest.raises(KisUpstreamError):
             await client.fetch_balance()
 
 
@@ -188,7 +187,7 @@ async def test_token_401_or_403_raises_credential_rejected(status_code: int) -> 
 
 @pytest.mark.asyncio
 async def test_token_500_raises_base_auth_error_not_rejection() -> None:
-    """KIS 가 5xx 를 반환 → KisAuthError 만 해당. KisCredentialRejectedError 는 아님.
+    """KIS 가 5xx 를 반환 → KisUpstreamError 만 해당. KisCredentialRejectedError 는 아님.
 
     credential 은 유효할 수 있고 KIS 서버가 일시 장애인 상황. 라우터에서 502 로 매핑.
     """
@@ -200,7 +199,7 @@ async def test_token_500_raises_base_auth_error_not_rejection() -> None:
 
     transport = httpx.MockTransport(handler)
     async with KisClient(_settings(), transport=transport) as client:
-        with pytest.raises(KisAuthError) as exc_info:
+        with pytest.raises(KisUpstreamError) as exc_info:
             await client.fetch_balance()
         # 서브클래스가 아닌 base 타입 정확히 검증 — 의미 분리 보장.
         assert not isinstance(exc_info.value, KisCredentialRejectedError)
@@ -234,7 +233,7 @@ async def test_raises_when_rt_cd_is_not_zero() -> None:
 
     transport = httpx.MockTransport(handler)
     async with KisClient(_settings(), transport=transport) as client:
-        with pytest.raises(KisClientError):
+        with pytest.raises(KisUpstreamError):
             await client.fetch_balance()
 
 

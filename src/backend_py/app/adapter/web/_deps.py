@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hmac
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from functools import lru_cache
 
 from fastapi import Depends, Header, HTTPException, status
@@ -13,12 +13,12 @@ from app.adapter.out.ai import OpenAIProvider
 from app.adapter.out.external import (
     DartClient,
     KisClient,
-    KisCredentials,
-    KisEnvironment,
     KrxClient,
     TelegramClient,
 )
 from app.adapter.out.persistence.session import get_sessionmaker
+from app.application.dto.kis import KisCredentials, KisEnvironment
+from app.application.port.out.kis_port import KisRealFetcherFactory
 from app.application.port.out.llm_provider import LLMProvider
 from app.config.settings import Settings, get_settings
 from app.security.credential_cipher import CredentialCipher
@@ -73,8 +73,12 @@ async def get_kis_client() -> AsyncIterator[KisClient]:
         await client.close()
 
 
-def get_kis_real_client_factory() -> Callable[[KisCredentials], KisClient]:
-    """실 KIS 호출용 KisClient 팩토리 — credential 주입으로 REAL 환경 인스턴스 생성.
+def get_kis_real_client_factory() -> KisRealFetcherFactory:
+    """실 KIS 호출용 팩토리 — credential 주입으로 REAL 환경 fetcher 생성.
+
+    Port 타입 `KisRealFetcherFactory = Callable[[KisCredentials], KisHoldingsFetcher]`
+    를 반환. `KisClient` 는 structural typing 으로 Protocol 을 자동 만족 — 컴포지션 루트는
+    concrete adapter 를 주입하지만 application 은 Protocol 만 보게 된다.
 
     각 요청마다 새 클라이언트 — 계좌마다 credential 이 다르므로 토큰 캐시를 공유하지
     않는다. 반환된 factory 는 use case 내부에서 `async with factory(creds) as client:`

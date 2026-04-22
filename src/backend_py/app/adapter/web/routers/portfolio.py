@@ -11,7 +11,6 @@ from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapter.out.external import KisClient, KisCredentials
 from app.adapter.out.persistence.repositories import (
     BrokerageAccountCredentialRepository,
     BrokerageAccountRepository,
@@ -44,6 +43,8 @@ from app.adapter.web._schemas import (
     TransactionResponse,
 )
 from app.application.dto.credential import MaskedCredentialView
+from app.application.dto.kis import KisCredentials
+from app.application.port.out.kis_port import KisHoldingsFetcher
 from app.application.service.excel_import_service import (
     AccountNotFoundForImportError,
     ExcelImportError,
@@ -261,9 +262,9 @@ async def get_performance(
 async def sync_from_kis(
     account_id: int,
     session: AsyncSession = Depends(get_session),
-    kis: KisClient = Depends(get_kis_client),
+    kis: KisHoldingsFetcher = Depends(get_kis_client),
     cipher: CredentialCipher = Depends(get_credential_cipher),
-    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(get_kis_real_client_factory),
+    real_client_factory: Callable[[KisCredentials], KisHoldingsFetcher] = Depends(get_kis_real_client_factory),
 ) -> SyncResponse:
     """KIS 잔고 동기화 — mock·real 2환경 동일 엔드포인트.
 
@@ -272,9 +273,14 @@ async def sync_from_kis(
       - kis_rest_real → `SyncPortfolioFromKisRealUseCase` (credential_repo + factory 필수)
     credential 미등록 시 404, KIS 토큰 발급/잔고조회 실패 시 502.
 
-    2026-04-22: 기존 단일 UseCase Optional 파라미터 퇴화 → mock/real 전용 UseCase 2개로 분리.
+    2026-04-22:
+    - Hexagonal DIP 완성: 시그니처가 port 타입(`KisHoldingsFetcher`) 참조 — concrete
+      `KisClient` 는 composition root 인 `_deps.py` 에서만 직접 쓰임.
+    - 선로드한 `account` 를 UseCase 에 명시 전달해 DB 재조회 제거 (identity map 캐시
+      히트에 의존하지 않음).
     """
-    # connection_type 판별을 위해 account 선로드 — UseCase 내부에서도 재검증하므로 race 안전.
+    # connection_type 판별을 위해 account 선로드. 아래에서 UseCase 에 account= 로 전달해
+    # UseCase 내부 재조회 없이 동일 인스턴스로 검증.
     account = await BrokerageAccountRepository(session).get(account_id)
     if account is None:
         raise HTTPException(
@@ -284,14 +290,16 @@ async def sync_from_kis(
 
     try:
         if account.connection_type == "kis_rest_mock":
-            result = await SyncPortfolioFromKisMockUseCase(session, kis_client=kis).execute(account_id=account_id)
+            result = await SyncPortfolioFromKisMockUseCase(session, kis_client=kis).execute(
+                account_id=account_id, account=account
+            )
         elif account.connection_type == "kis_rest_real":
             credential_repo = BrokerageAccountCredentialRepository(session, cipher)
             result = await SyncPortfolioFromKisRealUseCase(
                 session,
                 credential_repo=credential_repo,
                 real_client_factory=real_client_factory,
-            ).execute(account_id=account_id)
+            ).execute(account_id=account_id, account=account)
         else:
             raise UnsupportedConnectionError(f"connection_type={account.connection_type} 는 동기화 비지원")
     except PortfolioError as exc:
@@ -416,7 +424,7 @@ async def test_kis_connection(
     account_id: int,
     session: AsyncSession = Depends(get_session),
     cipher: CredentialCipher = Depends(get_credential_cipher),
-    real_client_factory: Callable[[KisCredentials], KisClient] = Depends(get_kis_real_client_factory),
+    real_client_factory: Callable[[KisCredentials], KisHoldingsFetcher] = Depends(get_kis_real_client_factory),
 ) -> TestConnectionResponse:
     """실 KIS 자격증명으로 OAuth 토큰 발급만 시도하는 dry-run.
 
