@@ -1,7 +1,7 @@
 """PR 5 — KIS 실계정 연결 테스트 + 실 sync wire.
 
 - `TestKisConnectionUseCase` (OAuth 토큰만)
-- `SyncPortfolioFromKisUseCase` 의 kis_rest_real 분기 (credential 복호화 → REAL 클라이언트)
+- `SyncPortfolioFromKisRealUseCase` 의 REAL 분기 (credential 복호화 → REAL 클라이언트)
 - HTTP 엔드포인트 `POST /accounts/{id}/test-connection` + 기존 `/sync` 의 real 경로
 - `@pytest.mark.requires_kis_real_account` — 로컬 개발자용 실 KIS smoke (CI skip)
 
@@ -45,7 +45,7 @@ from app.application.service.portfolio_service import (
     CredentialNotFoundError,
     KisRealClientFactory,
     SyncError,
-    SyncPortfolioFromKisUseCase,
+    SyncPortfolioFromKisRealUseCase,
     TestKisConnectionUseCase,
     UnsupportedConnectionError,
 )
@@ -202,7 +202,7 @@ async def test_connection_token_failure_wrapped_as_sync_error(
 
 
 # -----------------------------------------------------------------------------
-# Use case: SyncPortfolioFromKisUseCase — real branch
+# Use case: SyncPortfolioFromKisRealUseCase
 # -----------------------------------------------------------------------------
 
 
@@ -225,7 +225,7 @@ async def test_real_sync_fetches_balance_and_creates_holdings(
     )
     factory = _make_real_factory(transport)
 
-    result = await SyncPortfolioFromKisUseCase(
+    result = await SyncPortfolioFromKisRealUseCase(
         session,
         credential_repo=credential_repo,
         real_client_factory=factory,
@@ -249,7 +249,7 @@ async def test_real_sync_balance_failure_wrapped_as_sync_error(
     factory = _make_real_factory(transport)
 
     with pytest.raises(SyncError, match="실계좌 잔고 조회 실패"):
-        await SyncPortfolioFromKisUseCase(
+        await SyncPortfolioFromKisRealUseCase(
             session,
             credential_repo=credential_repo,
             real_client_factory=factory,

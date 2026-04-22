@@ -40,7 +40,8 @@ from app.application.service.portfolio_service import (
     RecordTransactionUseCase,
     RegisterAccountUseCase,
     SignalAlignmentUseCase,
-    SyncPortfolioFromKisUseCase,
+    SyncPortfolioFromKisMockUseCase,
+    SyncPortfolioFromKisRealUseCase,
     TransactionRecord,
     UnsupportedConnectionError,
 )
@@ -507,7 +508,7 @@ async def test_sync_from_kis_creates_holdings_and_upserts_stock(
     )
 
     async with kis as client:
-        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
+        result = await SyncPortfolioFromKisMockUseCase(session, kis_client=client).execute(account_id=account.id)
 
     assert result.fetched_count == 2
     assert result.created_count == 2
@@ -551,7 +552,7 @@ async def test_sync_from_kis_updates_existing_holding(session: AsyncSession) -> 
         ]
     )
     async with kis as client:
-        result = await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
+        result = await SyncPortfolioFromKisMockUseCase(session, kis_client=client).execute(account_id=account.id)
     assert result.updated_count == 1
     assert result.created_count == 0
 
@@ -570,7 +571,7 @@ async def test_sync_rejects_manual_connection_type(session: AsyncSession) -> Non
     kis = _build_mock_kis_client([])
     async with kis as client:
         with pytest.raises(UnsupportedConnectionError):
-            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
+            await SyncPortfolioFromKisMockUseCase(session, kis_client=client).execute(account_id=account.id)
 
 
 @pytest.mark.asyncio
@@ -606,7 +607,7 @@ async def test_sync_kis_rest_real_without_credentials_raises_not_found(
         raise AssertionError("credential 미등록 상태에서 factory 가 호출됐음")
 
     with pytest.raises(CredentialNotFoundError, match="credential 미등록"):
-        await SyncPortfolioFromKisUseCase(
+        await SyncPortfolioFromKisRealUseCase(
             session,
             credential_repo=credential_repo,
             real_client_factory=_factory,
@@ -617,7 +618,19 @@ async def test_sync_kis_rest_real_without_credentials_raises_not_found(
 async def test_sync_kis_rest_real_requires_real_environment(
     session: AsyncSession,
 ) -> None:
-    """`kis_rest_real` + environment='mock' 조합 → `InvalidRealEnvironmentError`."""
+    """`kis_rest_real` + environment='mock' 조합 → `InvalidRealEnvironmentError`.
+
+    2026-04-22 리팩터: mock 경로 UseCase 가 더 이상 kis_rest_real 계좌를 받지 않으므로,
+    이 무결성 규칙은 `SyncPortfolioFromKisRealUseCase._ensure_kis_real_account` 로 일원화.
+    factory 도달 전에 environment 검증에서 중단되는지를 확인.
+    """
+    from cryptography.fernet import Fernet
+
+    from app.adapter.out.persistence.repositories import (
+        BrokerageAccountCredentialRepository,
+    )
+    from app.security.credential_cipher import CredentialCipher
+
     account = await BrokerageAccountRepository(session).add(
         BrokerageAccount(
             account_alias="kis-real-wrong-env",
@@ -626,10 +639,25 @@ async def test_sync_kis_rest_real_requires_real_environment(
             environment="mock",  # 의도적 불일치
         )
     )
-    kis = _build_mock_kis_client([])
-    async with kis as client:
-        with pytest.raises(InvalidRealEnvironmentError, match="environment='real'"):
-            await SyncPortfolioFromKisUseCase(session, kis_client=client).execute(account_id=account.id)
+    cipher = CredentialCipher(Fernet.generate_key().decode())
+    credential_repo = BrokerageAccountCredentialRepository(session, cipher)
+
+    # get_decrypted 도 도달 전 단계여야 함 — environment 검증이 먼저 실패해야 정상.
+    # monkeypatch 로 호출 시 AssertionError 를 던지게 하여 순서 보장 회귀 감지.
+    async def _fail_get_decrypted(_aid: int) -> None:
+        raise AssertionError("environment 검증 전에 get_decrypted 가 호출되면 안 됨")
+
+    credential_repo.get_decrypted = _fail_get_decrypted  # type: ignore[method-assign]
+
+    def _factory(_creds):
+        raise AssertionError("environment 검증 전에 factory 가 호출되면 안 됨")
+
+    with pytest.raises(InvalidRealEnvironmentError, match="environment='real'"):
+        await SyncPortfolioFromKisRealUseCase(
+            session,
+            credential_repo=credential_repo,
+            real_client_factory=_factory,
+        ).execute(account_id=account.id)
 
 
 @pytest.mark.asyncio

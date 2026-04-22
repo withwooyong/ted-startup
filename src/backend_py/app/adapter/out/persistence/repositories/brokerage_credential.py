@@ -1,12 +1,11 @@
 """KIS 실계정 자격증명 Repository — Fernet 암호화/복호화 경유.
 
 설계: docs/kis-real-account-sync-plan.md § 3.2.
+`MaskedCredentialView` DTO 는 Hexagonal 경계 위반 회피를 위해
+`app.application.dto.credential` 로 이동(2026-04-22).
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.engine import CursorResult
@@ -14,23 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.external import KisCredentials
 from app.adapter.out.persistence.models import BrokerageAccountCredential
+from app.application.dto.credential import MaskedCredentialView
 from app.security.credential_cipher import CredentialCipher
-
-
-@dataclass(frozen=True, slots=True)
-class MaskedCredentialView:
-    """GET 응답용 마스킹된 자격증명 뷰.
-
-    `app_secret` 은 어떤 경로로도 노출되지 않는다. `app_key`·`account_no` 는
-    마지막 4자리만 남기고 나머지는 `•` 로 치환한 문자열.
-    """
-
-    account_id: int
-    app_key_masked: str
-    account_no_masked: str
-    key_version: int
-    created_at: datetime
-    updated_at: datetime
 
 
 def _mask_tail(value: str, keep: int = 4) -> str:

@@ -380,7 +380,16 @@ Claude Code는 1M 토큰 초과 시 **대화 히스토리를 자동 요약**(Com
 
 ## 💡 이 프로젝트(ted-startup)의 실전 학습 포인트
 
-### 🆕 CI lint/type 게이트 (PR #(예정), 2026-04-22)
+### 🆕 Hexagonal + Sync UseCase mock/real 분리 (PR #(예정), 2026-04-22)
+
+| 상황 | 교훈 | 참고 |
+|------|------|------|
+| infra DTO re-export 역방향 의존 | Application layer 가 DTO 를 소유해야 Hexagonal 경계 정합. repository 가 application/dto 를 import 해서 반환하는 방향이 올바름 | `app/application/dto/credential.py` |
+| Optional 파라미터 RuntimeError 퇴화 | `kis_client \| None` + `credential_repo \| None` 묶음 → 런타임 검증 패턴은 타입 안전성 없음. 분기별 UseCase 클래스로 분리해 컴파일 타임 강제 | `SyncPortfolioFromKis(Mock\|Real)UseCase` |
+| 공통 헬퍼 파라미터 타입 좁히기 | 모듈 헬퍼가 여러 UseCase 에서 호출될 때 분기 식별자(`connection_type`) 를 `str` 로 열어두면 임의 값이 DTO 에 흘러듬. `Literal[...]` 로 좁히고 caller 가 리터럴을 명시 전달 | `KisConnectionType = Literal[...]` |
+| 테스트 의미 회귀 감지 | 단일 UseCase → 분리 시 기존 테스트가 "다른 이유로 PASS" 하는 함정. 예: `test_sync_kis_rest_real_requires_real_environment` 가 `UnsupportedConnectionError` 로 먼저 실패해 환경 검증을 실제론 테스트 안 함. 분리 후 real UseCase 로 전환하고 `get_decrypted` monkeypatch AssertionError 로 **순서** 까지 단언 | `test_portfolio.py` |
+
+### 🆕 CI lint/type 게이트 (PR #22, 2026-04-22)
 
 | 상황 | 교훈 | 참고 |
 |------|------|------|
