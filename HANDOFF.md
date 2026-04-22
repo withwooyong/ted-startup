@@ -1,12 +1,33 @@
 # Session Handoff
 
-> Last updated: 2026-04-22 (KST, 당일 세션 — **PR #22·#23·#24 머지 + /review 세션 감사 + 아키텍처 정돈 PR 준비**)
-> Branch: `refactor/kis-port-single-account-load` (master 기반, uncommitted 변경 있음)
-> Latest master HEAD: `77903d9` — refactor: KisAuthError 4xx/5xx 분리 (#24)
+> Last updated: 2026-04-22 (KST, 당일 세션 — **PR #22·#23·#24·#25 머지 + frontend-lint 게이트 PR 준비 → 모바일 진입 앞둠**)
+> Branch: `chore/frontend-lint-type-gate` (master 기반, uncommitted 변경 있음)
+> Latest master HEAD: `597d5e8` — refactor: KIS Hexagonal DIP 완성 (#25)
 
 ## Current Status (2026-04-22)
 
-### 진행 중 — KIS Hexagonal DIP 완성 + Router account 단일 로드 (커밋 대기)
+### 진행 중 — frontend-lint CI 게이트 (커밋 대기, 30분 PR)
+
+모바일 반응형 refactor(3.5~4 man-day) 착수 전 안전망. 백엔드 `backend-lint`(PR #22) 와 대칭.
+
+| 항목 | 내용 |
+|---|---|
+| CI | `.github/workflows/ci.yml` 에 `frontend-lint` job 신설 (eslint + tsc --noEmit). `frontend-build` 를 `needs: [frontend-lint]` 로 의존 |
+| package.json | `"type-check": "tsc --noEmit"` 스크립트 추가 |
+| 기존 clean | 로컬 `npm run lint` / `tsc --noEmit` 모두 silent success → 순수 게이트 추가 (백엔드 PR #22 의 98 파일 format 과 달리 fix 불필요) |
+
+### 로컬 검증 결과
+- `npm run lint` ✅
+- `npm run type-check` ✅
+- CI 는 push 후 검증
+
+### 미처리
+
+- 커밋 + 푸시 + PR 생성 → 머지 후 **모바일 반응형 Phase A 착수**
+
+### 이전 섹션 (PR #25 머지 완료로 이동)
+
+### 진행 중 — KIS Hexagonal DIP 완성 + Router account 단일 로드 (머지 완료)
 
 /review 세션 감사 리포트(`pipeline/artifacts/08-review-report/review-2026-04-22-session.md`)에서 발견된 HIGH 2건 통합 해소:
 
