@@ -37,12 +37,20 @@ export async function getLatestSignals(type?: string): Promise<LatestSignalsResu
   return fetchApi<LatestSignalsResult>(`/signals/latest${query ? `?${query}` : ''}`);
 }
 
-export async function getStockDetail(code: string, from?: string, to?: string): Promise<StockDetail> {
+export async function getStockDetail(
+  code: string,
+  from?: string,
+  to?: string,
+  options?: { signal?: AbortSignal }
+): Promise<StockDetail> {
   const params = new URLSearchParams();
   if (from) params.set('from', from);
   if (to) params.set('to', to);
   const query = params.toString();
-  return fetchApi<StockDetail>(`/stocks/${code}${query ? `?${query}` : ''}`);
+  return fetchApi<StockDetail>(
+    `/stocks/${code}${query ? `?${query}` : ''}`,
+    options?.signal ? { signal: options.signal } : undefined
+  );
 }
 
 export async function getBacktestResults(): Promise<BacktestSummary[]> {
