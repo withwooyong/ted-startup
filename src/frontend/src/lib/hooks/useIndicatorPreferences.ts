@@ -68,16 +68,33 @@ function subscribe(callback: () => void): () => void {
   };
 }
 
+// useSyncExternalStore 는 snapshot 을 Object.is 로 비교해 동일하면 재렌더를 건너뛴다.
+// JSON.parse 매번 새 객체를 반환하므로 raw 문자열을 키로 캐시해 동일 raw → 동일 객체 보장.
+// (React #185 — Maximum update depth exceeded 방지)
+let cachedRaw: string | null | undefined = undefined;
+let cachedSnapshot: IndicatorPrefs = DEFAULT_PREFS;
+
 function getSnapshot(): IndicatorPrefs {
   if (typeof window === 'undefined') return DEFAULT_PREFS;
+  let raw: string | null = null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_PREFS;
-    const parsed: unknown = JSON.parse(raw);
-    return isValidPrefs(parsed) ? parsed : DEFAULT_PREFS;
+    raw = window.localStorage.getItem(STORAGE_KEY);
   } catch {
-    return DEFAULT_PREFS;
+    return cachedSnapshot;
   }
+  if (raw === cachedRaw) return cachedSnapshot;
+  cachedRaw = raw;
+  if (!raw) {
+    cachedSnapshot = DEFAULT_PREFS;
+    return cachedSnapshot;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    cachedSnapshot = isValidPrefs(parsed) ? parsed : DEFAULT_PREFS;
+  } catch {
+    cachedSnapshot = DEFAULT_PREFS;
+  }
+  return cachedSnapshot;
 }
 
 function getServerSnapshot(): IndicatorPrefs {
