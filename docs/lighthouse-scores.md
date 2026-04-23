@@ -71,6 +71,18 @@ open lighthouse-reports/root.html     # 대시보드 상세
 > **측정 환경**: macOS · `docker compose -f docker-compose.prod.yml` 재빌드 직후 · caddy self-signed HTTPS · Chrome headless · 모바일 4G throttle 기본값 · 각 페이지 1회 측정(중앙값 아님).
 > **비로그인 주의**: `/portfolio`, `/settings`, `/portfolio/1/alignment` 는 로그인 미들웨어에서 로그인 리다이렉트 셸이 반환됐을 가능성. 실데이터 상태 스코어는 수동 절차(§측정 절차 B) 로 보완 필요.
 
+### A11y 색 대비 수정 후 — 2026-04-23 재측정 (`/stocks/005930` 단일 집중)
+
+| 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 변화 |
+|---|---|---:|---:|---:|---:|---|
+| `/stocks/005930` | 2026-04-23 14:43 | 95 → **95** | 95 → **100** | 100 | 100 | 헤더 카드 `#3D4A5C → #7A8699` 전역 교체 + 잔존 2건(중립 `#6B7A90`, active 버튼 `#FFF on #6395FF`) 스팟 수정. **color-contrast 감사 PASS**. Perf 동률, A11y +5. |
+
+> **측정 방법**: 앞선 수정 커밋(`4e660a9`) + 잔존 2건 추가 수정 후 `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build frontend` 으로 프론트엔드 이미지만 재빌드 후 caddy self-signed HTTPS 경유 측정.
+> **잔존 2건 근본 원인**: `#3D4A5C` 위반이 color-contrast 감사를 실패시키면서 같은 감사에 포함된 다른 노드(`#6B7A90` 중립값, `text-white on #6395FF`)가 감사 스코어에 이미 반영되어 있었음. `#3D4A5C` 해소 후 노출.
+> **디자인 트레이드오프**: active 기간 버튼을 `text-white` → `text-[#0B0E11]` 로 invert + `font-semibold`. 7.27:1 대비 확보 + "눌린" 상태 시각 강화.
+
+---
+
 ### TradingView 차트 전환 완료 후 — 2026-04-23 최종 측정 (recharts 완전 제거 직후)
 
 | 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 차트 전환 효과 |

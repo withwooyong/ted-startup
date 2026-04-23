@@ -7,6 +7,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] fix(frontend): /stocks/005930 색 대비 잔존 2건 수정 — **A11y 100 달성**
+
+직전 커밋(`4e660a9`)으로 `#3D4A5C` 위반을 해소한 뒤 Lighthouse 재측정에서 같은 color-contrast 감사에 묶여있던 2건이 추가로 드러남. 스팟 수정으로 `/stocks/005930` A11y 95 → **100** 달성.
+
+### Changed
+- `src/frontend/src/app/stocks/[code]/page.tsx:135` — 전일비 중립값 색 `'#6B7A90'` → `'#7A8699'` (4.1:1 → 4.86:1)
+- `src/frontend/src/app/stocks/[code]/page.tsx:207` — 기간 선택 active 버튼 `text-white` → `text-[#0B0E11] font-semibold` (2.88:1 → 7.27:1)
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과
+- prod docker 스택 (caddy self-signed HTTPS) 재빌드 후 Lighthouse 재측정:
+  - `/stocks/005930` — Perf **95** · A11y **100** · BP **100** · SEO **100**
+
+### Scope Kept
+- 글로벌 accent `#6395FF` 및 secondary `#6B7A90` 토큰은 건드리지 않음 — 다른 페이지 영향 0
+- 스팟 수정 1개 파일 2 라인
+
+---
+
 ## [2026-04-23] fix(frontend): WCAG AA 색 대비 — muted 토큰 `#3D4A5C → #7A8699` 전역 교체
 
 Lighthouse A11y 감사에서 `/stocks/005930` 헤더 카드의 `#3D4A5C` on `#131720` 색 대비가 **1.99:1** (WCAG AA 기준 4.5:1 미달) 로 측정되어 A11y 96 → 95 감점. 해당 색상이 frontend 전역에 하드코딩되어 있어 디자인 토큰 수준으로 일괄 교체.

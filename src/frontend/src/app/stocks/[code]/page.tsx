@@ -132,7 +132,7 @@ export default function StockDetailPage() {
   // 백엔드는 prices[] 배열을 trading_date 오름차순으로 반환 — 마지막이 최신.
   const latestPrice = data.prices[data.prices.length - 1];
   const changeRateNum = latestPrice?.change_rate ? Number(latestPrice.change_rate) : 0;
-  const changeColor = changeRateNum > 0 ? '#FF4D6A' : changeRateNum < 0 ? '#6395FF' : '#6B7A90';
+  const changeColor = changeRateNum > 0 ? '#FF4D6A' : changeRateNum < 0 ? '#6395FF' : '#7A8699';
 
   return (
     <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 min-h-[calc(100dvh-8rem)]">
@@ -204,7 +204,7 @@ export default function StockDetailPage() {
             onClick={() => setPeriod(p.months)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
               period === p.months
-                ? 'text-white bg-[#6395FF]'
+                ? 'text-[#0B0E11] bg-[#6395FF] font-semibold'
                 : 'text-[#6B7A90] hover:text-[#E8ECF1]'
             }`}
           >
