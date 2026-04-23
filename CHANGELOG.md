@@ -7,6 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] chore(scripts): docker 빌드/정리 자동화 스크립트 추가 (세션 마감 커밋 예정)
+
+docker compose 재빌드를 반복할 때 누적되는 dangling 이미지/BuildKit 캐시를 **매번 자동 회수**하는 스크립트 한 쌍 추가. 볼륨(DB/Caddy 인증서)은 의도적으로 건드리지 않음.
+
+### Added
+- `scripts/docker-rebuild.sh` (0755) — compose up 래퍼. [1] down (볼륨 보존) → [2] build → [3] dangling 이미지 제거 + BuildKit 캐시 `KEEP_CACHE_GB`(기본 5GB) 상한 유지 → [4] up -d. `dev`/`prod` 모드 + 특정 서비스 인자 지원.
+- `scripts/docker-clean.sh` (0755) — 주기적 수동 정리. 기본 안전 모드(dangling 만), `--deep` 시 참조 없는 모든 이미지까지 제거 (인터랙티브 확인).
+
+### Verified
+- dev 테스트: `./scripts/docker-rebuild.sh dev` → 4단계 모두 성공. `signal-db` healthy, `pg_isready` OK, `ted-startup_signal-data` 볼륨 보존 확인.
+- 디스크 회수 실측: **Build Cache 11.73GB → 6.31GB (−5.42GB)**, dangling 이미지 8개 제거.
+- `bash -n` 문법 검증 ✅
+
+### Decisions
+- **`--volumes` 플래그 의도적 제외**: DB 데이터 / Caddy 인증서 보호. `docker-clean.sh` 도 동일 원칙.
+- **BuildKit 캐시는 `prune` 이 아닌 `--keep-storage` 로 관리**: 캐시 재사용 이득을 잃지 않으면서 상한만 유지. `KEEP_CACHE_GB` 환경변수로 조절.
+- **dev/prod compose 파일 인자로 분리**: `docker-compose.yml`(로컬 DB 단일)과 `docker-compose.prod.yml`(4 서비스 스택) 경계 명확.
+
+---
+
 ## [2026-04-23] chore(frontend): recharts 의존성 제거 + Gate 3 최종 재측정 (`507bd54`, PR #41, 머지 완료)
 
 TradingView 전환 3-PR 시리즈의 **마지막**. PR #39/#40 로 recharts 사용처가 0 이 된 상태에서 의존성 자체를 완전 제거 + dead code 정리 + Gate 3 전 페이지 최종 재측정으로 7/7 확정.
