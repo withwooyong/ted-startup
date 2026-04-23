@@ -49,20 +49,27 @@ export default function StockDetailPage() {
   }
 
   useEffect(() => {
+    // 기간 버튼 빠른 전환 시 stale response 가 최신 state 를 덮어쓰는 것을 막기 위해
+    // AbortController 로 이전 요청을 실제 네트워크 레벨에서 취소한다.
+    const controller = new AbortController();
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
     fromDate.setMonth(fromDate.getMonth() - period);
     const from = fromDate.toISOString().split('T')[0];
 
-    getStockDetail(code, from, to)
+    getStockDetail(code, from, to, { signal: controller.signal })
       .then((d: StockDetail) => {
         setData(d);
         setLoading(false);
       })
-      .catch(err => {
-        setError(err.message);
+      .catch((err: unknown) => {
+        // abort 된 요청은 정상적인 cleanup — state 를 건드리지 않음.
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : String(err));
         setLoading(false);
       });
+
+    return () => controller.abort();
   }, [code, period]);
 
   // lightweight-charts 는 'YYYY-MM-DD' 풀 포맷 요구 (slice 금지).
