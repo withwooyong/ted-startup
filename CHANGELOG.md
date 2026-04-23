@@ -7,7 +7,82 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-04-23] fix(frontend): /stocks/005930 CLS 0.36→0.12 · Perf 80→92 — footer shift 제거 + 차트 aspect CSS 이관 (`5efff74`, PR #36, 오픈)
+## [2026-04-23] chore(frontend): recharts 의존성 제거 + Gate 3 최종 재측정 (`507bd54`, PR #41, 머지 완료)
+
+TradingView 전환 3-PR 시리즈의 **마지막**. PR #39/#40 로 recharts 사용처가 0 이 된 상태에서 의존성 자체를 완전 제거 + dead code 정리 + Gate 3 전 페이지 최종 재측정으로 7/7 확정.
+
+### Removed
+- `recharts@^3.8.1` 의존성 — `npm uninstall recharts`. package.json + package-lock.json 에서 recharts + 간접 deps 전부 삭제 (-385 줄).
+- `src/frontend/src/lib/hooks/useMediaQuery.ts` — Phase D 에서 차트 aspect 분기용으로 도입됐으나 CSS aspect-ratio 로 대체돼 사용처 0.
+
+### Changed
+- `docs/lighthouse-scores.md` — "TradingView 차트 전환 완료 후" 최종 7페이지 표 섹션 + PR #39/#40/#41 해결 이력 3건 + 변경 이력 3행 추가.
+
+### Verified
+- `grep -rn recharts src tests` → 매칭 0 · `grep -rn useMediaQuery src tests` → 매칭 0
+- `npm run lint` ✅ / `npm run type-check` ✅
+- docker 재빌드 + healthcheck 통과
+- Lighthouse 전 7페이지: /:99/96/100/100, /portfolio:94/97/100/100, /stocks/005930:**95**/95/100/100, /reports/005930:99/96/100/100, /portfolio/1/alignment:100/100/100/100, /backtest:**99**/100/100/100, /settings:99/96/100/100 — **7/7 통과**
+
+### Decisions
+- **번들 감소 추정 ~150KB gzipped**: recharts 제거(~200KB gzipped) − lightweight-charts 추가(~50KB gzipped). pure SVG GroupedBarChart 는 의존성 순증 0.
+- **useMediaQuery 삭제**: React 19 `useSyncExternalStore` 기반 SSR-safe 훅이었으나 CSS aspect-ratio 로 충분. `react-hooks/refs` 규칙 우려도 함께 해소.
+
+---
+
+## [2026-04-23] feat(frontend): /backtest 차트 recharts → pure SVG GroupedBarChart (`0ff61f7`, PR #40, 머지 완료)
+
+TradingView 전환 시리즈 2/3. `/backtest` 는 카테고리형 그룹 막대 차트라 lightweight-charts(시계열 전용) 로 매핑 불가 → pure SVG + Tailwind 로 자작해 외부 의존성 순증 0.
+
+### Added
+- `src/frontend/src/components/charts/GroupedBarChart.tsx` — pure SVG 그룹 막대 차트 (~275 줄). `ResizeObserver` 로 부모 픽셀 측정 → 정확한 viewBox 렌더링. `niceStep` + `buildTicks` 자동 y축 눈금. Legend 는 라벨 길이 기반 간격. hover 시 값 라벨 표시 (경계 clamp). **sr-only `<table>` 백업** 으로 스크린리더 접근성 보장 (SVG 는 `aria-hidden="true"`).
+
+### Changed
+- `src/frontend/src/app/backtest/page.tsx` — recharts 전체 제거 (BarChart/Bar/XAxis/YAxis/CartesianGrid/Tooltip/Legend/ResponsiveContainer). `useMediaQuery` 제거 후 `aspect-[1.4/1] sm:aspect-[2.2/1]` CSS 로 대체. chartData → `CategoryRow[]` 구조 재구성 + useMemo. `RETURN_SERIES` 상수 + `returnFormatter` 분리.
+
+### Verified
+- `npm run lint` ✅ / `npm run type-check` ✅
+- Lighthouse 재측정 (`/backtest`): Perf 97 → **99**, A11y **100**, BP 100, SEO 100, LCP 1899ms (Good), TBT 38ms (Good), CLS 0.058 (Good), Console errors 0
+
+### Decisions
+- **B3 (pure SVG 자작) 채택**: 입력 규모 작음 (전략 3 × 5/10/20일 = 9 막대). chart.js ~230KB 순증 불필요. SVG 150줄 내 마무리 가능.
+- **sr-only 테이블 백업**: SVG `<title>` 요소는 VoiceOver/NVDA 호환성 불일치 → 시각 SVG 와 의미 `<table>` 분리, SVG 는 `aria-hidden`.
+- **호버 라벨 경계 clamp**: 가장자리 bar 의 값 라벨이 차트 영역 밖으로 흘러나가지 않도록 `Math.min/max` 로 plot 경계 제한.
+
+---
+
+## [2026-04-23] feat(frontend): /stocks/[code] 차트 recharts → TradingView Lightweight Charts v5 전환 (`6957e00`, PR #39, 머지 완료)
+
+모바일 반응형 마감 후속 — recharts 를 TradingView Lightweight Charts v5 (Apache-2.0) 로 전환하는 3-PR 시리즈의 첫 번째.
+
+### Added
+- `src/frontend/src/components/charts/PriceAreaChart.tsx` (~140 줄) — 공통 Area 차트 컴포넌트. lightweight-charts v5 신 API (`createChart` + `chart.addSeries(AreaSeries, ...)` + `createSeriesMarkers(series, ...)` plugin). 다크 테마 프리셋 (#6395FF line + rgba(99,149,255,0.2) area fill). ResizeObserver 반응형. 입력 date 포맷 사전 검증 (`toTime()` 헬퍼). `clientHeight=0` 방어 fallback.
+- `lightweight-charts@^5.1.0` 의존성 (npm install, Apache-2.0, TradingView Inc.).
+
+### Changed
+- `src/frontend/src/app/stocks/[code]/page.tsx`
+  - recharts 전체 제거 (ComposedChart/Area/ReferenceDot/ResponsiveContainer/XAxis/YAxis/Tooltip/Legend/CartesianGrid).
+  - `dynamic(() => import('@/components/charts/PriceAreaChart'), { ssr: false })` 로 SSR 제외 (Next 16 Client Component 내부 규칙 준수).
+  - `chartData` 에서 `trading_date.slice(5)` 제거 → 'YYYY-MM-DD' 유지.
+  - `signalMarkers` useMemo 신설 — signal_date ↔ close_price 매핑, price 누락 skip.
+  - `useMemo` 호출을 early return 앞으로 이동 → rules-of-hooks 준수.
+
+### Verified
+- `npm run lint` / `npm run type-check` ✅
+- Lighthouse 재측정 (`/stocks/005930`): Perf 92 → **95**, LCP 2557 → **1902ms** (Good 구간), TBT 119 → **44ms** (−63%), Speed Index 1128 → 964ms, CLS 0.123 유지, Console errors 0. A11y 96 → 95 는 기존 헤더 카드 color-contrast 이슈 (별건).
+
+### Decisions
+- **v5 신 API 채택**: `addSeries` + `createSeriesMarkers` plugin. v4 `addAreaSeries` / `series.setMarkers` 는 deprecated.
+- **SSR 제외 필수**: lightweight-charts 는 `window`/`canvas` 의존. Next 16 은 Client Component 내부에서만 `{ ssr: false }` 허용 (확인).
+- **Setup + update effect 분리**: Strict Mode remount 시 update effect 가 deps 보존으로 재실행돼 새 chart 에 데이터 재주입. 별도 ref 동기화 불필요.
+- **입력 date 런타임 검증**: `/^\d{4}-\d{2}-\d{2}$/` 사전 검증 → 백엔드 계약 이탈 시 조용한 실패 대신 명시적 throw.
+- **TradingView 로고 자동 표시**: 우측 하단 배지 유지 (Apache-2.0 + TradingView 상표 정책).
+
+---
+
+## [2026-04-23] fix(frontend): /stocks/005930 CLS 0.36→0.12 · Perf 80→92 — footer shift 제거 + 차트 aspect CSS 이관 (`037f675`, PR #38, 머지 완료)
+
+> **PR 번호 정정**: 원 PR #36 은 base 브랜치 삭제로 auto-closed 되어 동일 내용을 master 기반으로 재생성 — **PR #38** 로 머지됨 (`037f675`).
 
 Gate 3 1차 측정(PR #35)에서 유일하게 목표 미달(Perf 80 < 85)이던 `/stocks/005930` 의 실제 원인 진단 + 수정.
 
@@ -31,7 +106,7 @@ Gate 3 1차 측정(PR #35)에서 유일하게 목표 미달(Perf 80 < 85)이던 
 
 ---
 
-## [2026-04-23] docs(mobile): Gate 3 Lighthouse 1차 측정 — 7페이지 중 6통과 · /stocks/005930 Perf 80 미달 (`9815608`, PR #35, 오픈)
+## [2026-04-23] docs(mobile): Gate 3 Lighthouse 1차 측정 — 7페이지 중 6통과 · /stocks/005930 Perf 80 미달 (`b9a8ec7`, PR #35, 머지 완료)
 
 PR #34 의 Gate 3 증빙 인프라를 이용해 **실제 측정 수행**. prod docker 스택(`docker compose -f docker-compose.prod.yml`) 을 master 최신으로 재빌드 후 caddy self-signed HTTPS 를 통해 7 페이지 측정.
 
