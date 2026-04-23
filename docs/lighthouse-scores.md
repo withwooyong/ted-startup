@@ -71,6 +71,19 @@ open lighthouse-reports/root.html     # 대시보드 상세
 > **측정 환경**: macOS · `docker compose -f docker-compose.prod.yml` 재빌드 직후 · caddy self-signed HTTPS · Chrome headless · 모바일 4G throttle 기본값 · 각 페이지 1회 측정(중앙값 아님).
 > **비로그인 주의**: `/portfolio`, `/settings`, `/portfolio/1/alignment` 는 로그인 미들웨어에서 로그인 리다이렉트 셸이 반환됐을 가능성. 실데이터 상태 스코어는 수동 절차(§측정 절차 B) 로 보완 필요.
 
+### v1.1 Sprint B 완료 후 — 2026-04-23 최종 측정 (`/stocks/005930` 단일 집중)
+
+| 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 변화 |
+|---|---|---:|---:|---:|---:|---|
+| `/stocks/005930` | 2026-04-23 18:08 | 95 → **80** ↓15 | 100 → **100** | 100 | 100 | Sprint B 전체 (B0~B10 + 마커 grade 색) 투입. **A11y/BP/SEO 는 완전 무회귀**, Perf 는 aurora blob CLS 오검출로 회귀. |
+
+> **⚠️ Perf 회귀 원인**: `div.aurora > div.blob-4` transform 애니메이션이 Chrome Lighthouse 에서 CLS culprit 으로 계상되어 CLS **0.393** (단일 소스). Sprint B 기능과 직접 관련 없음 (체크포인트 1~3 단계에서는 Perf 95→96 유지).
+> **완화 시도 3 회 효과 미미**: (1) `.aurora .blob { contain: layout paint }`, (2) `.aurora { contain: layout paint }`, (3) keyframes 에서 `scale()` 제거 → 결과: 80 → 81.
+> **후속 계획**: 실기기 체감 확인 후 aurora 애니메이션 정적화 여부 **별도 디자인 PR** 로 추적.
+> **추가 버그픽스**: `669d9e8` — `useIndicatorPreferences.getSnapshot` 이 매 호출마다 새 객체를 반환해 React #185 무한 루프. snapshot 캐싱으로 해소 (성능 측정 이후 반영).
+
+---
+
 ### v1.1 Sprint A 완료 후 — 2026-04-23 재측정 (`/stocks/005930` 단일 집중)
 
 | 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 변화 |

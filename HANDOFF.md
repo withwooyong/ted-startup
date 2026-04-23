@@ -1,183 +1,217 @@
 # Session Handoff
 
-> Last updated: 2026-04-23 16:30 KST (세션 마감 — **A11y 100 달성 + v1.1 Sprint A 완주**)
-> Branch: `master` (local 1 commit ahead, **푸시 대기**)
-> Latest commit: `fc1859e` — feat(chart): v1.1 Sprint A 완주 — 캔들 + MA + Volume pane + 줌/팬 + OHLCV 툴팁
-> 직전 세션 mark: `4cf4937` (docker 자동 정리 스크립트)
+> Last updated: 2026-04-23 18:15 KST (세션 최종 마감 — **v1.1 Sprint A + Sprint B 완주, A11y 100, hotfix 1 건 반영**)
+> Branch: `master` (working tree **clean**, origin 과 동기화 완료)
+> Latest commit: `669d9e8` — fix(chart): `useIndicatorPreferences` 무한 루프 해소 — snapshot 캐싱
+> 세션 시작점: `4cf4937` 이후
 
 ## Current Status
 
-3 개 독립 과제를 한 세션에 해소: **(1) v1.0 잔존 A11y 색대비 0→100, (2) docker-rebuild.sh `--env-file` 주입 버그, (3) v1.1 차트 고도화 Discovery + Sprint A 일괄 완주**. `/stocks/005930` Lighthouse 4 카테고리 전부 95+/100/100/100 — 색대비 통과 + Sprint A 대규모 차트 기능 추가에도 **완전 무회귀**. `fc1859e` 는 로컬만 있고 원격 미반영.
+하루 세션에 **3 대 영역을 한 싸이클로 완결**:
+1. **A11y 회복**: `/stocks/005930` color-contrast 잔존 이슈 해결로 **A11y 95 → 100** 달성 (2 커밋)
+2. **v1.1 Discovery + Sprint A**: `/plan` 스킬 옵션 β (biz+pm+judge) + γ (PoC 스파이크) 로 파이프라인 산출물 6 종 생성 후 Sprint A 8 태스크 (A1~A8) 완주 (2 커밋)
+3. **v1.1 Sprint B**: 봉 주기(1D/1W/1M) + 시그널 마커 grade 색 + RSI + MACD + 지표 토글 UI + localStorage + sr-only 테이블까지 4 체크포인트로 완주 + React #185 런타임 버그픽스 (5 커밋)
+
+총 **10 커밋 origin 반영**. Working tree clean.
 
 ## Completed This Session
 
 | # | 커밋 | 제목 | 성격 |
 |---|---|---|---|
 | 1 | `4e660a9` | WCAG AA muted 토큰 `#3D4A5C → #7A8699` 전역 교체 (13 파일 41건) | fix(frontend) |
-| 2 | `3f73f40` | `/stocks/005930` 색 대비 잔존 2건 수정 — **A11y 100 달성** | fix(frontend) |
+| 2 | `3f73f40` | `/stocks/005930` 색 대비 잔존 2건 수정 — A11y 100 달성 | fix(frontend) |
 | 3 | `ccc7c51` | `docker-rebuild.sh` prod 모드 `--env-file` 자동 주입 | fix(scripts) |
-| 4 | `fc1859e` | v1.1 Sprint A 완주 — 캔들 + MA + Volume pane + 줌/팬 + OHLCV 툴팁 | feat(chart) + docs |
+| 4 | `fc1859e` | v1.1 Sprint A 완주 — 캔들 + MA + Volume + 줌/팬 + OHLCV 툴팁 | feat(chart) |
+| 5 | `2b01258` | 세션 마감 핸드오프 (A11y + Sprint A 완주 반영) | docs |
+| 6 | `473a9ad` | v1.1 Sprint B 체크포인트 1 — 봉 주기(1D/1W/1M) + 시그널 grade 색 구분 | feat(chart) |
+| 7 | `a5beca7` | v1.1 Sprint B 체크포인트 2 — RSI(14) + MACD(12,26,9) 유틸 | feat(indicators) |
+| 8 | `9c8f37d` | v1.1 Sprint B 체크포인트 3 — 토글 UI + RSI/MACD pane + localStorage | feat(chart) |
+| 9 | `a68b8f6` | v1.1 Sprint B 체크포인트 4 — sr-only 테이블 + aria 정리 + Sprint B 완주 | feat(chart) |
+| 10 | `669d9e8` | `useIndicatorPreferences` 무한 루프 해소 — snapshot 캐싱 | fix(chart) |
+
+### v1.1 Sprint A 태스크 (A1~A8) — 전부 ✅
+- A1 v5 multi-pane PoC → `typings.d.ts:1689,1932` 확인 흡수
+- A2 AreaSeries → CandlestickSeries (한국 증시 색, OHLC 0값 필터, 마커 `aboveBar`)
+- A3 `lib/indicators/sma.ts` O(n) 슬라이딩 윈도우
+- A4 MA(5/20/60/120) overlay — 4 색 팔레트, window 별 Map 관리
+- A5 Volume HistogramSeries pane — `chart.addPane()` + `setHeight(96px)`
+- A6 `handleScroll/handleScale: true`
+- A7 `subscribeCrosshairMove` + React state OHLCV 툴팁 overlay
+- A8 Lighthouse 회귀 95/100/100/100 무회귀
+
+### v1.1 Sprint B 태스크 — 전부 ✅
+- **B0** (신규 추가) 기간 버튼 재정의 1D/1W/1M + OHLC 주봉/월봉 재집계 (`aggregate.ts`)
+- **B1 + B2** RSI(14) Wilder + MACD(12,26,9) EMA/Signal/Histogram 유틸
+- **B3 + B4** RSI pane + MACD pane (pane 동적 생성/제거, `chart.removePane(paneIndex())`)
+- **B5** `IndicatorTogglePanel` 7 토글 (MA4 + 거래량 + RSI + MACD)
+- **B6** `useIndicatorPreferences` (useSyncExternalStore + localStorage + 인메모리 subscribers)
+- **B7** `StockChartAccessibilityTable` (sr-only 최근 30일 OHLCV + 지표)
+- **B8** 모바일 breakpoint 기본값 — `DEFAULT_PREFS` 자체가 "MA5/MA20/Volume ON" 이라 별도 로직 불요
+- **B9 + B10** 회귀 + QA + 런타임 hotfix (`669d9e8`)
+- 사용자 요청: 시그널 마커 grade 색 구분 (A 노랑 / B 녹색 / C 오렌지 / D 회색)
 
 ### Lighthouse 추이 (`/stocks/005930`)
-
-| 지표 | 세션 시작 | A11y 1차 수정 후 | A11y 2차 수정 후 | Sprint A 완주 후 |
-|---|---:|---:|---:|---:|
-| Performance | 95 | 94 | 95 | **95** |
-| **Accessibility** | 95 | 95 | **100** | **100** |
-| Best Practices | 100 | 100 | 100 | 100 |
-| SEO | 100 | 100 | 100 | 100 |
-
-### v1.1 차트 고도화 — 파이프라인 산출물 (신규 6 종)
-
-- `pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md`
-- `pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md` — US 12 + FR 12 + NFR 8 + Risk 5
-- `pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md`
-- `pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md` — 3/6/12 개월
-- `pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md` — RICE + A1~A8 all ✅
-- `pipeline/decisions/discovery-v1.1-judge.md` — **PASS 9.20 / 10**
-
-### Sprint A 태스크 완료 (A1~A8)
-
-| # | 태스크 | 비고 |
-|---|---|---|
-| A1 | v5 multi-pane PoC | 30분 스파이크, `typings.d.ts:1689,1932` `addPane`/`setHeight` 확인 |
-| A2 | AreaSeries → CandlestickSeries | 한국 증시 색(`#FF4D6A`/`#6395FF`), 0값 레코드 필터, 마커 `aboveBar` |
-| A3 | `lib/indicators/sma.ts` | O(n) 슬라이딩 윈도우 |
-| A4 | MA 5/20/60/120 오버레이 | 노랑/오렌지/녹색/보라, window 별 Map 관리 |
-| A5 | Volume Histogram pane | `chart.addPane()` + `IPane.setHeight(96px)` |
-| A6 | 줌/팬 활성화 | `handleScroll/handleScale: true` |
-| A7 | OHLCV 툴팁 | `subscribeCrosshairMove` + React state 오버레이 (우상단, `aria-live`) |
-| A8 | 회귀 검증 | Lighthouse 95/100/100/100 무회귀, Gate A 3/4 자동 통과 |
+| 지표 | 세션 시작 | A11y 1차 | A11y 2차 | Sprint A 완주 | Sprint B 완주 |
+|---|---:|---:|---:|---:|---:|
+| Performance | 95 | 94 | 95 | 95 | **80** ↓ (aurora CLS Known Issue) |
+| **Accessibility** | 95 | 95 | **100** | 100 | **100** |
+| Best Practices | 100 | 100 | 100 | 100 | 100 |
+| SEO | 100 | 100 | 100 | 100 | 100 |
 
 ## In Progress / Pending
 
 | # | 항목 | 상태 | 비고 |
 |---|---|---|---|
-| 1 | **`fc1859e` 푸시** | ⏳ 대기 | 전역 CLAUDE.md 규칙 — 명시 요청 시에만 push. 다음 세션 진입 시 최우선. |
-| 2 | **Gate A 모바일 실기기 수동 확인** | ⏳ 대기 | iPhone SE / Galaxy S8 에서 핀치 줌 + 팬 + 캔들/MA/Volume 렌더 시각 확인 |
-| 3 | **v1.1 Sprint B 착수** | 🟢 **즉시 가능** | 예산 6.3d. indicators/rsi.ts + indicators/macd.ts + IndicatorTogglePanel + useIndicatorPreferences(localStorage) + sr-only 테이블 + 모바일 breakpoint 기본 토글 차등 |
-| 4 | **2026-04-20 OHLCV 전 0값 레코드** | 🟡 분석 | DB 에서 `stock_price` last row 전체 0. 차트 측에선 방어 필터 적용 완료. KRX 수집 배치 부분 실패 원인 별도 조사 필요 (공휴일? 부분 수집 실패?) |
-| 5 | 이전 세션 이월: 다른 서비스 DIP 확장 (Telegram/Krx/Dart) | 백엔드 1~2h | PR #25 KIS leading example 복제 |
-| 6 | 이전 세션 이월: DB 모델 `Mapped[str]` → `Literal` 좁히기 | 백엔드 1h | `connection_type` 등. Router exhaustive check. |
-| 7 | 이전 세션 이월: R-04/R-05/R-06 소규모 이슈 | 각 30분 | MOCK 401 재분류 / `/sync` 400 테스트 / `.git-blame-ignore-revs` |
-| 8 | 후속 A11y — 다른 페이지 `#6B7A90` / `#6395FF` 조합 전수 스캔 | 선택 | `/portfolio`, `/backtest`, `/settings` Lighthouse 재측정 필요 |
+| 1 | ~~세션 작업 커밋 + 푸시~~ | ✅ **완료** | 10 커밋 `4e660a9..669d9e8` 전부 origin 반영 |
+| 2 | **브라우저 시각 검증** | ⏳ 사용자 대기 | `/stocks/012450` 캔들 + MA + Volume + OHLCV 툴팁 + 토글 7종 + grade 색 + 봉 주기 3 가지 동작 확인 |
+| 3 | **모바일 실기기 Gate A 확인** | ⏳ 사용자 대기 | iPhone SE / Galaxy S8 핀치 줌/팬 UX |
+| 4 | **Aurora CLS 개선** | 🟡 분리 | `div.aurora > div.blob-4` transform 애니메이션이 Lighthouse 에서 CLS culprit. 완화 시도 3회 효과 미미. 실기기 체감 확인 후 애니메이션 정적화 or keyframe 범위 축소 별도 디자인 PR |
+| 5 | **v1.2 착수 결정** | 🟢 가능 | Bollinger Bands / 지표 파라미터 편집 UI / DB 기반 영속화 / Vitest FE 테스트 하네스. roadmap 상 5월. |
+| 6 | **2026-04-20 OHLCV 전 0값 레코드** | 🟡 분석 | KRX 수집 배치 부분 실패 원인 추적 |
+| 7 | 이전 세션 이월 — 다른 서비스 DIP 확장 (Telegram/Krx/Dart) | 백엔드 1~2h | |
+| 8 | 이전 세션 이월 — DB 모델 `Mapped[str]` → `Literal` | 백엔드 1h | |
+| 9 | 이전 세션 이월 — R-04/R-05/R-06 소규모 이슈 | 각 30분 | |
+| 10 | 후속 A11y — 다른 페이지 `#6B7A90` / `#6395FF` 조합 전수 스캔 | 선택 | |
 
-**미커밋 변경: 없음** — working tree clean. 로컬 HEAD `fc1859e` 가 `origin/master` 보다 1 커밋 앞섬.
+**미커밋 변경**: **없음** (HANDOFF.md 본 문서 수정은 이 커밋에서 반영)
 
 ## Key Decisions Made
 
-### A11y 색 대비 전략
-1. **스팟 수정 우선, 글로벌 토큰 후순위**: 2차 수정 시 `#6395FF` accent / `#6B7A90` secondary 는 미변경. 글로벌 변경은 다른 페이지 시각 영향이 크므로 계층 역전 수용 + 스팟 처리.
-2. **계층 역전 감수**: `#131720` 배경에서 WCAG AA 통과하려면 L≥~0.21 필요 → 새 muted `#7A8699` (4.86:1) 가 기존 secondary `#6B7A90` (4.11:1) 보다 밝아짐. 이는 수학적 필연이고 문서화해 수용.
-3. **인버트 버튼 색**: active 기간 버튼은 `text-white` → `text-[#0B0E11] font-semibold` 로 전환해 2.88:1 → 7.27:1. 디자인은 "눌린" 상태가 오히려 강조되는 효과.
+### A11y 색 대비
+1. **스팟 수정 우선, 글로벌 토큰 후순위**: accent `#6395FF` / secondary `#6B7A90` 미변경, 계층 역전 수용 + 스팟 처리.
+2. **인버트 active 버튼**: 기간 버튼 active 상태 `text-white` → `text-[#0B0E11] font-semibold` 로 2.88:1 → 7.27:1.
 
-### /plan 프로세스 축소
-4. **옵션 β 채택 (biz-analyst + pm + judge; marketing/crm 생략)**: 이 iteration 이 내부 제품의 기술 고도화 성격이라 GTM/고객여정 산출물 기여도 낮음. 명시적 결정으로 과잉 프로세스 회피.
-5. **γ PoC 스파이크 선행**: Sprint A1 공수(0.5d) 를 30분 스파이크로 앞당겨 2대 핵심 리스크(KRX 실데이터, v5 multi-pane API) 를 실데이터 + 실라이브러리 타입으로 해소. 가정 → 검증의 ROI 가 매우 높음.
+### `/plan` 프로세스 축소 + PoC 선행
+3. **옵션 β** (biz+pm+judge, marketing/crm 생략) — 내부 제품 기술 고도화 성격.
+4. **옵션 γ** (A1 PoC 스파이크 선행) — 30분 안에 KRX 실데이터 + v5 multi-pane API 두 리스크 해소.
 
-### v1.1 차트 기술 결정
-6. **lightweight-charts v5 `addPane()` 네이티브 채택**: `node_modules/lightweight-charts/dist/typings.d.ts:1689,1932` 교차 확인. `chart.addPane()` + `IPane.setHeight(px)` + `pane.addSeries(...)` 로 3-pane+ 확장 가능. Plan B (priceScaleId overlay) 대비 시각 분리 품질 우월.
-7. **FE 자체 지표 계산 (외부 의존성 0)**: `technicalindicators` 등 라이브러리 (~30~50KB gzipped) 대신 `sma.ts` 자체 구현 (~0.4KB). 번들 순증 ≤ 5KB 달성. Sprint B 의 RSI/MACD 도 동일 전략.
-8. **한국 증시 색 관례 일관성**: 상승 빨강 `#FF4D6A` / 하락 파랑 `#6395FF` — 헤더 카드 `changeColor`, 캔들, 거래량 히스토그램 모두 동일. 시각 언어 단일화.
-9. **MA 4개 기본 visible**: 토글 UI 는 Sprint B 까지 없으므로 기본 전부 ON. 토글 UI 구현 후 모바일 breakpoint 기본값 차등 (MA5/20 + Volume만) 적용 예정.
-10. **시그널 마커 `aboveBar` 이동**: 캔들 바디와 겹치는 `inBar` 대신 바 위로 배치, 색 `#FFCC00` 노랑. 기존 Area 차트 시각 언어에서 변경.
+### v1.1 차트 기술
+5. **lightweight-charts v5 `addPane()` 네이티브 채택**: `typings.d.ts:1689,1932`, JSDoc 3-pane 예시 (`:2002-2004`) 검증.
+6. **pane 동적 생성/제거 `chart.removePane(paneIndex())`**: 토글 OFF 시 pane 완전 제거로 공간 낭비 없음.
+7. **FE 자체 지표 계산**: SMA/RSI/MACD/aggregate 자체 구현 (~0.4~1KB 각), 외부 라이브러리 없음. 번들 순증 ≤ 5KB.
+8. **한국 증시 색 관례 일관성**: 상승 `#FF4D6A` / 하락 `#6395FF` 로 candle + volume histogram 통일.
+9. **시그널 마커 grade 색 구분** (사용자 요청): A 노랑 / B 녹색 / C 오렌지 / D 회색 — `enums.py SignalGrade.from_score` 기준 동기.
+
+### 기간 버튼 의미 재정의
+10. **봉 주기 해석 (A)**: 1D 일봉 / 1W 주봉(5일 집계) / 1M 월봉(20일 집계). 표시 기간 방식(B)는 1D 캔들 1개라 의미 낮음 → 배제. 분봉 방식(C)는 데이터 없음 → 별도 Epic.
+11. **fetch monthsFetch**: 1D 3 / 1W 12 / 1M 36 — 집계 후 대략 62 / 52 / 36 캔들.
+
+### 상태 저장
+12. **useSyncExternalStore 채택**: Next 16 `react-hooks/set-state-in-effect` 규칙 회피 + SSR-safe. snapshot 캐싱 필수 (미적용 시 React #185 무한 루프).
+13. **zod 미설치 환경**: 수동 타입 가드 (`isValidPrefs`) — 필드 7 개라 수동으로 충분.
+
+### 인프라
+14. **docker-rebuild.sh `--env-file` 자동 주입**: prod 기본 `.env.prod`, dev 기본 `.env`, `ENV_FILE` override. `.env.prod` 없는 prod 는 fail-loud.
 
 ### 운영 프로세스
-11. **pre-commit hook `block-no-verify@1.1.2` heredoc 오탐 → `-F` 파일 우회**: 프로젝트 메모리에 저장 (`memory/project_block_no_verify_heredoc_pitfall.md`). 재발 시 즉시 우회 가능.
-12. **docker-rebuild.sh 가 `--env-file` 자동 주입하도록 수정**: prod 기본 `.env.prod`, dev 기본 `.env`, 환경변수 `ENV_FILE` override 지원. `.env.prod` 없는 prod 는 fail-loud.
+15. **pre-commit hook `block-no-verify@1.1.2` heredoc 오탐 → `-F` 파일 우회**: 프로젝트 메모리에 저장됨 (`memory/project_block_no_verify_heredoc_pitfall.md`).
+16. **`/handoff` 스킬**: CHANGELOG prepend, HANDOFF overwrite, docs 현행화 3 축 실행.
 
 ## Known Issues
 
 ### 이번 세션 해결
-- ~~**A11y / 헤더 카드 color-contrast**~~ ✅ 완전 해결 (A11y **100**). `4e660a9` + `3f73f40`.
-- ~~**docker-rebuild.sh 누락**~~ ✅ 해결. `ccc7c51`.
+- ~~A11y `/stocks/005930` 색 대비~~ → **100 달성** (`4e660a9` + `3f73f40`)
+- ~~docker-rebuild.sh env-file 미주입~~ → `ccc7c51`
+- ~~useIndicatorPreferences 무한 루프 (React #185)~~ → `669d9e8`
 
-### 수동 확인 대기
-- **모바일 실기기 터치 UX**: Sprint A 핀치 줌/팬 + 다중 pane 터치 스크롤. Gate A 3/4 자동 통과, 1/4 수동.
-- **시각 검증**: `/stocks/005930` 에서 캔들 + MA 4색 + 거래량 pane + OHLCV 툴팁 의도대로 렌더되는지 사용자 브라우저 확인 필요.
+### Known Issue (후속 추적)
+- **Perf 95 → 80 회귀** (`/stocks/005930`): aurora blob-4 transform 애니메이션이 Chrome Lighthouse 에서 CLS 0.393 으로 계상. 완화 시도 3 회 미미. A11y/BP/SEO 무회귀라 기능 품질은 정상. 실기기 체감 확인 후 디자인 PR 분리 결정.
+- **2026-04-20 stock_price OHLCV 전 0값**: KRX 수집 배치 부분 실패 가능성. 차트 측 방어 완료. 원인 추적 별도.
 
 ### 미해결 (다음 세션 이후)
-- **2026-04-20 stock_price OHLCV 전체 0값**: KRX 수집 배치 부분 실패 가능성. 차트 측 방어는 완료, 원인 추적 별도.
-- **RISK-C03** FE 지표 계산 성능 (500 포인트 × 지표 5개): Sprint B RSI/MACD 투입 후 자연 모니터링.
-
-### 일반 부채 (이전 세션 이월)
+- HIGH fetch race — `/portfolio`, `/backtest` 에서 동일 패턴 전수 점검 (`/stocks/[code]` 는 `277bb46` 이전 세션에서 해결됨)
 - 다른 서비스 DIP 확장 (Telegram/Krx/Dart)
-- DB 모델 `Mapped[str]` → `Literal` 좁히기
+- DB 모델 `Mapped[str]` → `Literal`
 - R-03 이름 중복 / R-04~06 소규모 이슈
-- Python M2 중복 판단 N+1 (PR #12 이월), carry-over 모니터링 (lending_balance T+1, 218 stock_name 빈, TREND_REVERSAL Infinity)
+- Python M2 중복 판단 N+1
+- FE 테스트 하네스 (Vitest + RTL + MSW) 미도입 → v1.2 스프린트
 
 ## Context for Next Session
 
-### 사용자의 원 목적
+### 사용자의 원 목적 (본 세션 전체 흐름)
 
-세션 진입 시 숙제: "A11y / header card color-contrast (#3d4a5c on #131720 대비 1.99)" → 직접적 목표는 `/stocks/005930` A11y 96 복귀. 수행 과정에서 Lighthouse 재측정으로 잔존 이슈 2건을 드러내 A11y **100** 까지 올림 (목표 초과). 중간에 docker-rebuild.sh 버그가 실전 블로커로 노출돼 즉시 수정. 이후 사용자가 `/plan <트레이딩뷰 차트 고도화>` 를 트리거해 v1.1 iteration Discovery + Sprint A 를 한 세션에 완주.
+세션 진입 시 숙제는 "A11y color-contrast 1.99 → AA 기준 4.5 이상" 단일 건이었음. 수행 과정에서:
+1. **Lighthouse 재측정 루프**로 잔존 이슈 2건을 추가 발견 → A11y 100 까지 끌어올림 (목표 96 초과).
+2. 중간에 `docker-rebuild.sh` 가 `--env-file .env.prod` 를 주입하지 않는 버그가 실전 블로커로 노출 → 즉시 수정.
+3. 사용자가 `/plan <트레이딩뷰 차트 고도화>` 를 트리거해 **v1.1 iteration** 전체 (Discovery + Sprint A + Sprint B) 를 한 세션에 완주.
+4. 사용자 추가 요청 (동그라미/알파벳 의미 설명 + 기간 버튼을 1D/1W/1M 로 + 시그널 마커 grade 색 구분) 전부 반영.
+5. 체크포인트 단위 커밋 (4 체크포인트 + hotfix) + 매 체크포인트 Lighthouse 재측정 + code-review 최종 통과.
 
 ### 선택한 접근과 이유
 
-- **측정 기반 반복 (Lighthouse 수시 재측정)**: 색상 변경이 A11y 감사의 통합 이슈를 점진적으로 드러내는 특성상, 재측정 → 다음 수정 → 재측정 루프가 효과적.
-- **`/plan` 프로세스 축소 (β + γ)**: 모든 에이전트를 기계적으로 돌리지 않고 이번 성격에 맞는 부분만. γ 로 PoC 선행해서 공수 추정/리스크 가정을 실데이터 기반으로 전환.
-- **스프린트 통합 커밋 선택**: 사용자가 "Sprint A 완주 후 일괄 커밋" 을 선택 — 커밋 단위 = 완결 기능 단위. 리뷰 부담 대신 맥락 완결 우선.
-- **팀 공유 전제 파이프라인 유지**: `pipeline/artifacts/*-v1.1-chart-upgrade.md` 6 종 신규 생성, v1.0 산출물 보존. Iteration 분리 관례 확립.
+- **Discovery 프로세스 축소 (β + γ)**: marketing/crm 산출물은 내부 제품 기술 고도화에 기여도 낮음. PoC 스파이크로 리스크 가정을 실데이터 기반으로 전환.
+- **체크포인트 단위 커밋**: Sprint B 6.3d 분량을 4 체크포인트로 쪼개 매 커밋마다 시각 검증 + 롤백 가능 단위 유지.
+- **FE 자체 지표 계산**: 외부 라이브러리(technicalindicators 등 ~30~50KB) 대신 자체 구현 (~5KB). NFR-C03 번들 순증 ≤ 20KB gzipped 충족.
+- **pane 동적 생성/제거**: `chart.removePane()` v5 API 활용. 토글 OFF 시 공간 낭비 없음.
 
 ### 사용자 선호·제약 (재확인)
 
 - **한국어 커밋 메시지 + Co-Authored-By** (전역 CLAUDE.md)
-- **`git push` 는 명시 요청 시에만** — 이번 세션 3 커밋 푸시, `fc1859e` 1 커밋 미푸시 상태로 마감
+- **`git push` 는 명시 요청 시에만** — 이번 세션 매 체크포인트마다 커밋만 만들고 푸시는 세션 마감 시 한 번에
 - **npm 기반** — yarn 사용 금지
-- **Gate 승인 루프** — 매 의사결정 지점에서 옵션 제시 후 사용자 선택
-- **리뷰 후 CRITICAL/HIGH 즉시 반영** — MEDIUM 은 기록 후 진행
+- **Gate 승인 루프** — 매 의사결정 지점에서 옵션 제시 후 사용자 선택 (α/β/γ 패턴 재사용)
+- **리뷰 후 CRITICAL/HIGH 즉시 반영**
 - **pre-commit hook `--no-verify` 금지** — 훅 오탐 시 `-F` 파일 우회
-- **코드 주석 최소 (CLAUDE.md)** — 이번 세션 코드도 자명한 부분은 주석 없이, Why 가 중요한 부분만 간결히
+- **코드 주석 최소 (CLAUDE.md)** — Why 가 중요한 부분만 간결히
+- **실측 기반 검증** — 가정 대신 DB 쿼리 / `typings.d.ts` grep / Lighthouse JSON audit 으로 곧바로 확인
 
 ### 다음 세션에서 먼저 확인할 것
 
-1. **`fc1859e` 푸시** — 사용자 확인 즉시 `git push origin master`
-2. **브라우저 시각 확인** — `/stocks/005930` 캔들 + MA + Volume + OHLCV 툴팁 렌더 정상 여부
-3. **모바일 실기기 핀치 줌/팬** — Gate A 최종 통과
-4. **Sprint B 착수 여부 결정** — indicators/rsi.ts + indicators/macd.ts + IndicatorTogglePanel + useIndicatorPreferences + sr-only 테이블 (예산 6.3d)
-5. **2026-04-20 OHLCV 0값 원인 분석** (옵션) — KRX 수집 배치 로그 확인
-6. **이월 과제 우선순위 결정** — 백엔드 DIP 확장 vs FE 소규모 (R-04~06)
+1. **브라우저 시각 검증** — `/stocks/012450` 캔들 + MA + Volume pane + OHLCV 툴팁 + 토글 7종 + grade 마커 색 + 1D/1W/1M 봉 주기 전환 정상 동작
+2. **모바일 실기기 Gate A** — 핀치 줌/팬 UX
+3. **Aurora CLS 개선** 여부 결정 — 실기기 체감 정상이면 Known Issue 유지, 체감 나쁘면 디자인 PR
+4. **v1.2 착수 결정** — Bollinger / 파라미터 편집 UI / DB 영속화 / Vitest / Aurora 정리 중 우선순위
+5. **이월 과제** (HIGH fetch race 전수, DIP 확장, `Mapped[Literal]`, R-04~06) 우선순위 결정
 
 ### 가치 있는 발견 (본 세션)
 
-1. **Lighthouse color-contrast 감사는 통합 pass/fail**: 한 노드 수정하면 가려졌던 다른 노드가 드러남. 1차 수정 + 재측정 + 2차 수정 루프가 필요.
-2. **`#131720` dark surface 의 수학적 제약**: 어떤 fg 도 AA 통과하려면 L≥~0.21 (밝은 회색) 필요. "dim 하면서 legible" 은 동시 만족 불가. 계층은 크기/두께/위치로 표현해야.
-3. **PoC 스파이크 ROI**: 30 분 타이핑으로 2 리스크 해소, Sprint 공수 추정 신뢰도 상승. 추후 모든 다중 의존성 Sprint 에 선행 권장.
-4. **`typings.d.ts` 직접 확인 > 훈련 데이터**: Context7 MCP 미등록 환경에서 에이전트 답변은 훈련 데이터 기반. `node_modules/*/dist/typings.d.ts` 를 grep 하는 게 빠르고 정확.
-5. **v5 `addPane()` + `IPane.setHeight()` API 는 JSDoc 예시까지 있음**: `typings.d.ts:2002-2004` 에 3-pane 예시. API 탐색 시 코드 주변 JSDoc 스캔이 문서보다 빠를 때 있음.
-6. **pre-commit hook heredoc 오탐**: `block-no-verify@1.1.2` 가 `git commit -m "$(cat <<EOF ... EOF)"` 를 `--no-verify` 로 잘못 매칭. `-F` 파일 방식이 즉시 우회책 — 프로젝트 메모리 저장됨.
-7. **옵션 β + γ 조합으로 `/plan` 유연화**: 스킬 지시문을 기계적으로 따르지 않고 작업 성격에 맞게 축소/선행하는 것이 시간/품질 모두 이득.
+1. **Lighthouse color-contrast 감사 특성**: 한 노드 수정하면 가려졌던 다른 노드가 드러남 → 재측정 + 2차 수정 루프 필수. A11y 95→95→95→100 로 2 단계 필요했음.
+2. **`#131720` dark surface 수학적 제약**: 어떤 fg 도 AA 통과하려면 L≥~0.21 필요 → "dim 하면서 legible" 은 동시 만족 불가. 계층은 크기/두께/위치로 표현.
+3. **PoC 스파이크 ROI**: 30 분 타이핑으로 2 리스크 해소, Sprint 공수 추정 신뢰도 상승.
+4. **`typings.d.ts` 직접 확인 > 훈련 데이터**: Context7 MCP 미등록 환경에서 에이전트 답변은 훈련 데이터 기반. `node_modules/*/dist/typings.d.ts` grep 이 빠르고 정확.
+5. **`useSyncExternalStore` 의 snapshot 캐싱 함정**: 초보 패턴에서 getSnapshot 이 매번 새 객체 반환 → Object.is 비교 실패 → React #185 무한 루프. 모듈 스코프 캐시 필수.
+6. **pre-commit hook heredoc 오탐 (프로젝트 메모리)**: `block-no-verify@1.1.2` 가 `git commit -m "$(cat <<EOF ... EOF)"` 를 `--no-verify` 로 오검출. `-F <file>` 즉시 우회책.
+7. **lightweight-charts v5 `addPane` + `setHeight` + `removePane` 완비**: multi-pane 동적 관리가 공식 지원. v4 대비 강력한 확장성.
+8. **aurora 애니메이션의 Chrome CLS 오검출**: `transform: translate3d + scale` 애니메이션이 CLS 로 계상되는 특이 케이스. `contain: layout paint` 도 효과 미미 — 애니메이션 정적화가 근본 해결.
+9. **FE 자체 지표 구현의 번들 효율성**: technicalindicators ~40KB vs 자체 ~3KB. NFR 달성.
 
 ## Files Modified This Session
 
 ```
- CHANGELOG.md                                               |  ~80 ++ (4 엔트리 prepend)
- HANDOFF.md                                                 | overwrite (본 문서)
- docs/lighthouse-scores.md                                  |  ~30 ++ (2 회차 prepend)
- pipeline/state/current-state.json                          |  ~50 ++ (iterations.v1.1 블록)
- pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md      | 신규
- pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md | 신규
- pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md                 | 신규
- pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md             | 신규
- pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md         | 신규
- pipeline/decisions/discovery-v1.1-judge.md                          | 신규
- scripts/docker-rebuild.sh                                           |  ~30 ++ (env-file 주입 로직)
- src/frontend/src/app/globals.css                                    |    2 +- (muted 토큰)
- src/frontend/src/app/layout.tsx                                     |    2 +- (muted)
- src/frontend/src/app/page.tsx                                       |    6 +- (muted)
- src/frontend/src/app/stocks/[code]/page.tsx                         |  ~50 ++ (chartData/volume/MA, 색대비 2건)
- src/frontend/src/app/backtest/page.tsx                              |   16 +- (muted)
- src/frontend/src/app/portfolio/page.tsx                             |   16 +- (muted)
- src/frontend/src/app/portfolio/[accountId]/alignment/page.tsx       |    6 +- (muted)
- src/frontend/src/app/reports/[stockCode]/page.tsx                   |    6 +- (muted)
- src/frontend/src/app/settings/page.tsx                              |    2 +- (muted)
- src/frontend/src/components/NavHeader.tsx                           |    2 +- (muted)
- src/frontend/src/components/features/SignalCard.tsx                 |    2 +- (muted)
- src/frontend/src/components/features/ExcelImportPanel.tsx           |    2 +- (muted)
- src/frontend/src/components/features/RealAccountSection.tsx         |   10 +- (muted + placeholder)
- src/frontend/src/components/charts/PriceAreaChart.tsx               | 거의 재작성 (Candle + MA + Volume + 줌팬 + 툴팁)
- src/frontend/src/lib/indicators/sma.ts                              | 신규 (O(n) SMA)
- src/frontend/src/lib/indicators/index.ts                            | 신규 (barrel)
+ .gitignore — 미변경
+ CHANGELOG.md — ~200 ++ (10 커밋 분량 엔트리 prepend)
+ HANDOFF.md — overwrite (본 문서)
+ docs/lighthouse-scores.md — ~60 ++ (A11y 1차/2차 + Sprint A + Sprint B 측정 4개 섹션 prepend)
+ pipeline/state/current-state.json — ~50 ++ (iterations.v1.1 블록)
+ pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md — 신규
+ pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md — 신규
+ pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md — 신규
+ pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md — 신규
+ pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md — 신규 (A1~A8, B0~B10 전부 ✅)
+ pipeline/decisions/discovery-v1.1-judge.md — 신규 (Judge PASS 9.20)
+ scripts/docker-rebuild.sh — ~30 ++ (env-file 자동 주입)
+ src/frontend/src/app/globals.css — ~15 ++ (muted 토큰 + aurora contain + keyframes scale 제거)
+ src/frontend/src/app/layout.tsx — 2 +- (muted)
+ src/frontend/src/app/page.tsx — 6 +- (muted)
+ src/frontend/src/app/stocks/[code]/page.tsx — ~200 ++ (봉 주기 + chartData/maLines/rsi/macd/토글/sr-only + 색대비 2건 + skeleton 정합)
+ src/frontend/src/app/backtest/page.tsx — 16 +- (muted)
+ src/frontend/src/app/portfolio/page.tsx — 16 +- (muted)
+ src/frontend/src/app/portfolio/[accountId]/alignment/page.tsx — 6 +- (muted)
+ src/frontend/src/app/reports/[stockCode]/page.tsx — 6 +- (muted)
+ src/frontend/src/app/settings/page.tsx — 2 +- (muted)
+ src/frontend/src/components/NavHeader.tsx — 2 +- (muted)
+ src/frontend/src/components/features/SignalCard.tsx — 2 +- (muted)
+ src/frontend/src/components/features/ExcelImportPanel.tsx — 2 +- (muted)
+ src/frontend/src/components/features/RealAccountSection.tsx — 10 +- (muted + placeholder)
+ src/frontend/src/components/charts/PriceAreaChart.tsx — 거의 재작성 (Candle + MA + Volume + RSI + MACD + 줌/팬 + OHLCV 툴팁 + grade 색)
+ src/frontend/src/components/charts/IndicatorTogglePanel.tsx — 신규 (7 토글)
+ src/frontend/src/components/charts/StockChartAccessibilityTable.tsx — 신규 (sr-only 30일 OHLCV)
+ src/frontend/src/lib/hooks/useIndicatorPreferences.ts — 신규 (useSyncExternalStore + snapshot 캐싱)
+ src/frontend/src/lib/indicators/sma.ts — 신규 (O(n))
+ src/frontend/src/lib/indicators/rsi.ts — 신규 (Wilder)
+ src/frontend/src/lib/indicators/macd.ts — 신규 (EMA + Signal + Histogram)
+ src/frontend/src/lib/indicators/aggregate.ts — 신규 (weekly/monthly)
+ src/frontend/src/lib/indicators/index.ts — barrel
 ```
 
-**4 commits total, 14 files + 6 신규 파이프라인 산출물 + 2 신규 indicator 파일.**
+**10 commits total. A11y 2 + scripts 1 + Sprint A 1 + handoff 1 + Sprint B 4 + hotfix 1.**

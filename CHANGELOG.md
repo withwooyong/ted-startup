@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] fix(chart): `useIndicatorPreferences` 무한 루프 해소 — snapshot 캐싱 (`669d9e8`)
+
+### Fixed
+- `useSyncExternalStore` 의 `getSnapshot()` 이 매 호출마다 `JSON.parse` 로 새 객체를 반환 → `Object.is` 비교가 항상 실패 → **React #185 Maximum update depth exceeded** 무한 루프
+- 모듈 스코프 `cachedRaw` / `cachedSnapshot` 을 두고 localStorage raw 문자열이 동일하면 이전 스냅샷 객체를 그대로 반환하는 표준 패턴 적용
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과
+- docker compose up -d --build frontend 로 컨테이너 recreate (image sha `a489402037b6...`)
+- 브라우저 hard reload 후 런타임 에러 없음 확인
+
+---
+
 ## [2026-04-23] feat(chart): v1.1 Sprint B 체크포인트 4 — sr-only 테이블 + aria 정리 + Sprint B 완주
 
 ### Added
