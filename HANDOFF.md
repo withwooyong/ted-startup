@@ -1,170 +1,183 @@
 # Session Handoff
 
-> Last updated: 2026-04-23 16:00 (추가 세션 — **v1.1 Sprint A 완주: 캔들 + MA 4개 + Volume pane + 줌/팬 + OHLCV 툴팁, Lighthouse 무회귀**)
-> Current branch: `master`
-> Latest commit (본 작업 예정): feat(chart): v1.1 Sprint A — 캔들 + MA + Volume + 줌/팬 + OHLCV 툴팁
-> 직전 커밋: `ccc7c51` — fix(scripts): docker-rebuild.sh prod 모드 env-file 자동 주입
+> Last updated: 2026-04-23 16:30 KST (세션 마감 — **A11y 100 달성 + v1.1 Sprint A 완주**)
+> Branch: `master` (local 1 commit ahead, **푸시 대기**)
+> Latest commit: `fc1859e` — feat(chart): v1.1 Sprint A 완주 — 캔들 + MA + Volume pane + 줌/팬 + OHLCV 툴팁
+> 직전 세션 mark: `4cf4937` (docker 자동 정리 스크립트)
 
 ## Current Status
 
-하루 세션에 **8 PR 무회귀 연속 머지** (#34~#41, 중간 #36 재생성으로 실제 넘버는 #34/#35/#37/#38/#39/#40/#41). Gate 3 증빙 인프라 → 실제 측정 → 미달 수정 → TradingView 전환 3-PR 시리즈까지 **한 사이클 완결**. 백엔드 변경 無, 프론트엔드는 recharts 의존성 완전 소멸 + 차트 2곳 교체. CI 각 PR 6/6 green.
+3 개 독립 과제를 한 세션에 해소: **(1) v1.0 잔존 A11y 색대비 0→100, (2) docker-rebuild.sh `--env-file` 주입 버그, (3) v1.1 차트 고도화 Discovery + Sprint A 일괄 완주**. `/stocks/005930` Lighthouse 4 카테고리 전부 95+/100/100/100 — 색대비 통과 + Sprint A 대규모 차트 기능 추가에도 **완전 무회귀**. `fc1859e` 는 로컬만 있고 원격 미반영.
 
-## Completed This Session (2026-04-23 연속)
+## Completed This Session
 
-| 순서 | PR | 커밋 | 제목 | 성격 |
-|---|---|---|---|---|
-| 1 | #34 | `62a7361` | Gate 3 Lighthouse 증빙 인프라 | docs (scripts + 템플릿) |
-| 2 | #35 | `b9a8ec7` | Gate 3 1차 측정 — 7페이지 중 6통과 | docs (측정 결과) |
-| 3 | #37 | `238153f` | 세션 마감 핸드오프 1차 (Gate 3 측정/수정 완결) | docs |
-| 4 | #38 | `037f675` | /stocks/005930 CLS 0.36→0.12 · Perf 80→92 (원 PR #36 재생성) | fix |
-| 5 | #39 | `6957e00` | TradingView PR 1/3 — /stocks/[code] 차트 전환 | feature |
-| 6 | #40 | `0ff61f7` | TradingView PR 2/3 — /backtest pure SVG 자작 | feature |
-| 7 | #41 | `507bd54` | TradingView PR 3/3 — recharts 제거 + Gate 3 최종 | chore |
-| 8 | (master) | `d6d7012` | 세션 마감 핸드오프 — TradingView 시리즈 완결 (CHANGELOG + HANDOFF) | docs |
-| 9 | (master) | `4cf4937` | docker 빌드/정리 자동화 스크립트 2종 + 핸드오프 보강 | chore |
+| # | 커밋 | 제목 | 성격 |
+|---|---|---|---|
+| 1 | `4e660a9` | WCAG AA muted 토큰 `#3D4A5C → #7A8699` 전역 교체 (13 파일 41건) | fix(frontend) |
+| 2 | `3f73f40` | `/stocks/005930` 색 대비 잔존 2건 수정 — **A11y 100 달성** | fix(frontend) |
+| 3 | `ccc7c51` | `docker-rebuild.sh` prod 모드 `--env-file` 자동 주입 | fix(scripts) |
+| 4 | `fc1859e` | v1.1 Sprint A 완주 — 캔들 + MA + Volume pane + 줌/팬 + OHLCV 툴팁 | feat(chart) + docs |
 
-### 누적 성과 지표
+### Lighthouse 추이 (`/stocks/005930`)
 
-| 지표 | 시작 (세션 진입) | 최종 (현재 master) |
+| 지표 | 세션 시작 | A11y 1차 수정 후 | A11y 2차 수정 후 | Sprint A 완주 후 |
+|---|---:|---:|---:|---:|
+| Performance | 95 | 94 | 95 | **95** |
+| **Accessibility** | 95 | 95 | **100** | **100** |
+| Best Practices | 100 | 100 | 100 | 100 |
+| SEO | 100 | 100 | 100 | 100 |
+
+### v1.1 차트 고도화 — 파이프라인 산출물 (신규 6 종)
+
+- `pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md`
+- `pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md` — US 12 + FR 12 + NFR 8 + Risk 5
+- `pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md`
+- `pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md` — 3/6/12 개월
+- `pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md` — RICE + A1~A8 all ✅
+- `pipeline/decisions/discovery-v1.1-judge.md` — **PASS 9.20 / 10**
+
+### Sprint A 태스크 완료 (A1~A8)
+
+| # | 태스크 | 비고 |
 |---|---|---|
-| Gate 3 판정 | 미측정 | **7/7 통과** |
-| `/stocks/005930` Perf | 80 (미달) | **95** |
-| `/stocks/005930` CLS | 0.362 (Poor) | 0.123 (Needs Improvement) |
-| `/stocks/005930` LCP | 2557ms (경계) | **1902ms (Good)** |
-| `/stocks/005930` TBT | 119ms | **44ms (Good)** |
-| `/backtest` Perf | 97 | **99** |
-| 차트 라이브러리 | recharts@^3.8.1 | **lightweight-charts@^5.1.0** + pure SVG |
-| 번들 감소 (추정) | — | **~150KB gzipped** (first-load JS) |
+| A1 | v5 multi-pane PoC | 30분 스파이크, `typings.d.ts:1689,1932` `addPane`/`setHeight` 확인 |
+| A2 | AreaSeries → CandlestickSeries | 한국 증시 색(`#FF4D6A`/`#6395FF`), 0값 레코드 필터, 마커 `aboveBar` |
+| A3 | `lib/indicators/sma.ts` | O(n) 슬라이딩 윈도우 |
+| A4 | MA 5/20/60/120 오버레이 | 노랑/오렌지/녹색/보라, window 별 Map 관리 |
+| A5 | Volume Histogram pane | `chart.addPane()` + `IPane.setHeight(96px)` |
+| A6 | 줌/팬 활성화 | `handleScroll/handleScale: true` |
+| A7 | OHLCV 툴팁 | `subscribeCrosshairMove` + React state 오버레이 (우상단, `aria-live`) |
+| A8 | 회귀 검증 | Lighthouse 95/100/100/100 무회귀, Gate A 3/4 자동 통과 |
 
 ## In Progress / Pending
 
 | # | 항목 | 상태 | 비고 |
 |---|---|---|---|
-| 1 | ~~본 세션 마감 핸드오프 커밋~~ | ✅ **완료 + push** | `d6d7012` (handoff) + `4cf4937` (docker scripts) 2커밋 origin 반영. |
-| 2 | **HIGH / fetch race condition** | 기술 부채 | `getStockDetail` 호출 시 `AbortController` 없음 → 기간 버튼 빠른 전환 시 stale response. `/stocks/[code]` 외 다른 페이지도 동일 패턴일 가능성. 독립 PR 1~2h. |
-| 3 | ~~**A11y / header card color-contrast**~~ | ✅ **완전 해결 — A11y 100 달성** | 2커밋 진행: (1) `#3D4A5C → #7A8699` 전역 교체 (13 파일 41건), (2) 재측정 시 드러난 잔존 2건(중립 `#6B7A90` 4.1:1, active 버튼 `#FFF on #6395FF` 2.88:1) 스팟 수정. 최종: `/stocks/005930` Perf 95 / **A11y 100** / BP 100 / SEO 100. |
-| 4 | **로그인 세션 기반 실데이터 재측정** | 선택 | `/portfolio`, `/settings`, `/portfolio/1/alignment` 는 현재 비로그인 셸 기준 점수. 실데이터 측정은 DevTools 수동 절차 (scores.md §B). |
-| 5 | **실기기 점검 (Phase E3)** | 선택 | iPhone SE/13, Galaxy S8, iPad mini. |
-| 6 | **lhci 자동화** | 별도 스프린트 | staging 환경 + 로그인 세션 시드 준비 후. |
-| 7 | 이전 세션 이월: 다른 서비스 DIP 확장 (Telegram/Krx/Dart) | 백엔드, 1~2h | PR #25 KIS leading example 복제. |
-| 8 | 이전 세션 이월: DB 모델 `Mapped[str]` → `Literal` 좁히기 | 백엔드, 1h | `connection_type` 등. Router exhaustive check. |
-| 9 | 이전 세션 이월: R-04/R-05/R-06 소규모 이슈 | 각 30분 | MOCK 401 재분류 / `/sync` 400 테스트 / `.git-blame-ignore-revs`. |
+| 1 | **`fc1859e` 푸시** | ⏳ 대기 | 전역 CLAUDE.md 규칙 — 명시 요청 시에만 push. 다음 세션 진입 시 최우선. |
+| 2 | **Gate A 모바일 실기기 수동 확인** | ⏳ 대기 | iPhone SE / Galaxy S8 에서 핀치 줌 + 팬 + 캔들/MA/Volume 렌더 시각 확인 |
+| 3 | **v1.1 Sprint B 착수** | 🟢 **즉시 가능** | 예산 6.3d. indicators/rsi.ts + indicators/macd.ts + IndicatorTogglePanel + useIndicatorPreferences(localStorage) + sr-only 테이블 + 모바일 breakpoint 기본 토글 차등 |
+| 4 | **2026-04-20 OHLCV 전 0값 레코드** | 🟡 분석 | DB 에서 `stock_price` last row 전체 0. 차트 측에선 방어 필터 적용 완료. KRX 수집 배치 부분 실패 원인 별도 조사 필요 (공휴일? 부분 수집 실패?) |
+| 5 | 이전 세션 이월: 다른 서비스 DIP 확장 (Telegram/Krx/Dart) | 백엔드 1~2h | PR #25 KIS leading example 복제 |
+| 6 | 이전 세션 이월: DB 모델 `Mapped[str]` → `Literal` 좁히기 | 백엔드 1h | `connection_type` 등. Router exhaustive check. |
+| 7 | 이전 세션 이월: R-04/R-05/R-06 소규모 이슈 | 각 30분 | MOCK 401 재분류 / `/sync` 400 테스트 / `.git-blame-ignore-revs` |
+| 8 | 후속 A11y — 다른 페이지 `#6B7A90` / `#6395FF` 조합 전수 스캔 | 선택 | `/portfolio`, `/backtest`, `/settings` Lighthouse 재측정 필요 |
 
-미커밋 변경: **없음** — working tree clean, `origin/master` 와 로컬 HEAD `4cf4937` 동기화 완료.
-
-### 복구 노트 (2026-04-23 12:30~12:40)
-
-PC 멈춤으로 리부팅 후 두 개 세션이 동시 복구 작업을 진행:
-- **세션 A (이 문서 작성 세션)**: `/handoff` 스킬로 CHANGELOG/HANDOFF 편집 후 `d6d7012` 커밋.
-- **세션 B**: docker 자동화 스크립트 작성·테스트 후 HANDOFF 보강하여 `4cf4937` 커밋.
-- 사용자 검토 후 `git push origin master` 로 2커밋 일괄 반영. 충돌 없음.
+**미커밋 변경: 없음** — working tree clean. 로컬 HEAD `fc1859e` 가 `origin/master` 보다 1 커밋 앞섬.
 
 ## Key Decisions Made
 
-### Lighthouse 측정 방법론
+### A11y 색 대비 전략
+1. **스팟 수정 우선, 글로벌 토큰 후순위**: 2차 수정 시 `#6395FF` accent / `#6B7A90` secondary 는 미변경. 글로벌 변경은 다른 페이지 시각 영향이 크므로 계층 역전 수용 + 스팟 처리.
+2. **계층 역전 감수**: `#131720` 배경에서 WCAG AA 통과하려면 L≥~0.21 필요 → 새 muted `#7A8699` (4.86:1) 가 기존 secondary `#6B7A90` (4.11:1) 보다 밝아짐. 이는 수학적 필연이고 문서화해 수용.
+3. **인버트 버튼 색**: active 기간 버튼은 `text-white` → `text-[#0B0E11] font-semibold` 로 전환해 2.88:1 → 7.27:1. 디자인은 "눌린" 상태가 오히려 강조되는 효과.
 
-1. **prod docker 스택 경유 측정 표준화**: caddy self-signed HTTPS + `--ignore-certificate-errors` chrome-flag. dev 서버(uvicorn + yarn) 대비 실제 배포 구성이 반영돼 점수 신뢰도 ↑.
-2. **"JSON audit 먼저 읽고 수정 방향 결정"**: `/stocks/005930` Perf 80 미달 초기 가설(recharts dynamic import for TBT) 은 TBT 48ms("Good") 로 반증 → 실제 병목은 CLS 0.362 (footer shift). 세션 최대 교훈.
+### /plan 프로세스 축소
+4. **옵션 β 채택 (biz-analyst + pm + judge; marketing/crm 생략)**: 이 iteration 이 내부 제품의 기술 고도화 성격이라 GTM/고객여정 산출물 기여도 낮음. 명시적 결정으로 과잉 프로세스 회피.
+5. **γ PoC 스파이크 선행**: Sprint A1 공수(0.5d) 를 30분 스파이크로 앞당겨 2대 핵심 리스크(KRX 실데이터, v5 multi-pane API) 를 실데이터 + 실라이브러리 타입으로 해소. 가정 → 검증의 ROI 가 매우 높음.
 
-### 차트 라이브러리 전환 전략
+### v1.1 차트 기술 결정
+6. **lightweight-charts v5 `addPane()` 네이티브 채택**: `node_modules/lightweight-charts/dist/typings.d.ts:1689,1932` 교차 확인. `chart.addPane()` + `IPane.setHeight(px)` + `pane.addSeries(...)` 로 3-pane+ 확장 가능. Plan B (priceScaleId overlay) 대비 시각 분리 품질 우월.
+7. **FE 자체 지표 계산 (외부 의존성 0)**: `technicalindicators` 등 라이브러리 (~30~50KB gzipped) 대신 `sma.ts` 자체 구현 (~0.4KB). 번들 순증 ≤ 5KB 달성. Sprint B 의 RSI/MACD 도 동일 전략.
+8. **한국 증시 색 관례 일관성**: 상승 빨강 `#FF4D6A` / 하락 파랑 `#6395FF` — 헤더 카드 `changeColor`, 캔들, 거래량 히스토그램 모두 동일. 시각 언어 단일화.
+9. **MA 4개 기본 visible**: 토글 UI 는 Sprint B 까지 없으므로 기본 전부 ON. 토글 UI 구현 후 모바일 breakpoint 기본값 차등 (MA5/20 + Volume만) 적용 예정.
+10. **시그널 마커 `aboveBar` 이동**: 캔들 바디와 겹치는 `inBar` 대신 바 위로 배치, 색 `#FFCC00` 노랑. 기존 Area 차트 시각 언어에서 변경.
 
-3. **TradingView Lightweight Charts v5 (Apache-2.0) 채택**: canvas 기반 금융 시계열 차트. `/stocks/[code]` 의 라인+마커 조합에 최적. 상표 로고 자동 표시는 허용.
-4. **/backtest 만 pure SVG 자작 (B3)**: lightweight-charts 는 시계열 전용이라 카테고리형 그룹 막대 지원 불가. chart.js (~230KB) 도입 대신 ~180줄 SVG 자작으로 의존성 순증 0.
-5. **3-PR 분할**: 범위·리뷰 부담·롤백 단위 최소화. (1) /stocks 전환 → (2) /backtest 자작 → (3) recharts 제거 + 최종 재측정.
-
-### PR 체인 관리
-
-6. **`--delete-branch` base 소실 복구 패턴 재적용**: PR #36 이 base 브랜치 삭제로 자동 closed → 로컬 rebase master + `git push --force-with-lease` + 새 PR 생성 (#38). 이전 세션 Phase C 때와 동일 우회.
-
-### React 19 + Next 16 패턴
-
-7. **`next/dynamic({ ssr: false })` 는 Client Component 내부에서만 합법**: 대상 페이지들이 이미 `'use client'` 라 호환. `node_modules/next/dist/docs/` 확인 후 적용.
-8. **Setup + update useEffect 분리 (lightweight-charts)**: Strict Mode remount 시 update effect 가 deps 보존으로 재실행돼 새 chart 에 데이터 재주입. 별도 ref 동기화 불필요.
-9. **SVG 차트 접근성: sr-only `<table>` 백업**: `<title>` 요소는 VoiceOver/NVDA 호환성 불일치 → SVG 는 `aria-hidden`, 테이블로 SR 데이터 전달.
-
-### 패키지 매니저
-
-10. **npm 표준 준수 (yarn 사용 금지)**: CI 가 `npm ci` + `package-lock.json` 을 쓰므로 `yarn add` 는 `yarn.lock` 을 생성해 lock 분기 유발. 본 세션에서 한 번 실수 → `yarn.lock` 삭제 + `npm install` 로 복구. **규칙**: 이 저장소 프론트엔드는 **npm 만 사용**.
+### 운영 프로세스
+11. **pre-commit hook `block-no-verify@1.1.2` heredoc 오탐 → `-F` 파일 우회**: 프로젝트 메모리에 저장 (`memory/project_block_no_verify_heredoc_pitfall.md`). 재발 시 즉시 우회 가능.
+12. **docker-rebuild.sh 가 `--env-file` 자동 주입하도록 수정**: prod 기본 `.env.prod`, dev 기본 `.env`, 환경변수 `ENV_FILE` override 지원. `.env.prod` 없는 prod 는 fail-loud.
 
 ## Known Issues
 
-### 이번 세션 중 발견 (기존 코드 이슈)
+### 이번 세션 해결
+- ~~**A11y / 헤더 카드 color-contrast**~~ ✅ 완전 해결 (A11y **100**). `4e660a9` + `3f73f40`.
+- ~~**docker-rebuild.sh 누락**~~ ✅ 해결. `ccc7c51`.
 
-- **HIGH / `getStockDetail` fetch race**: `/stocks/[code]/page.tsx` 의 useEffect fetch 가 `AbortController` 미사용. 기간 버튼(1M/3M/6M/1Y) 빠른 전환 시 stale response 가능. 이번 PR 범위 외로 독립 PR 예정. 동일 패턴이 다른 페이지(`/backtest`, `/portfolio`) 에도 있을 가능성 → 전수 점검 권장.
-- ~~**A11y / 헤더 카드 color-contrast**~~: ✅ 완전 해결 — 2커밋으로 `/stocks/005930` A11y **100** 달성. (1) `#3D4A5C → #7A8699` 전역 교체, (2) 중립 changeColor `#6B7A90 → #7A8699` + active 기간 버튼 `text-white → text-[#0B0E11] font-semibold`. 글로벌 accent `#6395FF` / secondary `#6B7A90` 토큰은 미변경.
+### 수동 확인 대기
+- **모바일 실기기 터치 UX**: Sprint A 핀치 줌/팬 + 다중 pane 터치 스크롤. Gate A 3/4 자동 통과, 1/4 수동.
+- **시각 검증**: `/stocks/005930` 에서 캔들 + MA 4색 + 거래량 pane + OHLCV 툴팁 의도대로 렌더되는지 사용자 브라우저 확인 필요.
 
-### 당일 이전 세션 이월 (미해소)
+### 미해결 (다음 세션 이후)
+- **2026-04-20 stock_price OHLCV 전체 0값**: KRX 수집 배치 부분 실패 가능성. 차트 측 방어는 완료, 원인 추적 별도.
+- **RISK-C03** FE 지표 계산 성능 (500 포인트 × 지표 5개): Sprint B RSI/MACD 투입 후 자연 모니터링.
 
-- **다른 서비스 DIP 확장 미완**: Telegram/Krx/Dart 는 여전히 `from app.adapter.out.external import ...` (1~2h)
-- **DB 모델 `Mapped[str]` → `Literal`**: Router exhaustive check 불가 (1h)
-- **R-04** MOCK 401 경로 재분류 / **R-05** `/sync` endpoint 400 직접 테스트 부재 / **R-06** `.git-blame-ignore-revs` 미생성 (각 30분)
-- **R-03 이름 중복 완화**: port `KisCredentialRejectedError` vs domain `CredentialRejectedError` (30분)
-
-### 일반 부채 (세션 이전 잔존)
-
-- Python M2 중복 판단 N+1 (엑셀 import, PR #12 리뷰 이월)
-- MEDIUM `setattr` mypy 우회 (`BacktestResult.hit_rate_{n}d`)
-- 실 KIS 엑셀 샘플 부재
-- carry-over 모니터링: lending_balance T+1 지연, 218 stock_name 빈, TREND_REVERSAL Infinity
+### 일반 부채 (이전 세션 이월)
+- 다른 서비스 DIP 확장 (Telegram/Krx/Dart)
+- DB 모델 `Mapped[str]` → `Literal` 좁히기
+- R-03 이름 중복 / R-04~06 소규모 이슈
+- Python M2 중복 판단 N+1 (PR #12 이월), carry-over 모니터링 (lending_balance T+1, 218 stock_name 빈, TREND_REVERSAL Infinity)
 
 ## Context for Next Session
 
-### 사용자의 원 목적 (본 세션 전체 흐름)
+### 사용자의 원 목적
 
-Gate 3 증빙 마무리 → 결과 기반 즉시 개선 → 사용자가 추가로 제안한 TradingView Lightweight Charts 전환까지 **파이프라인 하나로 통합**. 각 단계마다 `/ted-run` 스킬로 구현→리뷰→빌드→커밋/푸시 1사이클 + PR 오픈 + CI 대기 + 머지 승인 요청을 반복.
+세션 진입 시 숙제: "A11y / header card color-contrast (#3d4a5c on #131720 대비 1.99)" → 직접적 목표는 `/stocks/005930` A11y 96 복귀. 수행 과정에서 Lighthouse 재측정으로 잔존 이슈 2건을 드러내 A11y **100** 까지 올림 (목표 초과). 중간에 docker-rebuild.sh 버그가 실전 블로커로 노출돼 즉시 수정. 이후 사용자가 `/plan <트레이딩뷰 차트 고도화>` 를 트리거해 v1.1 iteration Discovery + Sprint A 를 한 세션에 완주.
 
 ### 선택한 접근과 이유
 
-- **"JSON 먼저 읽고 가설 검증"**: /stocks Perf 80 미달 원인이 recharts TBT 라는 초기 가설을 JSON audit 으로 즉시 반증 (TBT 48ms 이미 Good). 진범 CLS 0.362 (footer shift) 를 CSS-only 수정으로 해결. 가설만 좇았으면 시간 허비였음.
-- **TradingView 로 "진짜 차트" 이관**: CLS 수정은 증상 수정이었고, 근본적으로 recharts 의 SVG + React 재조정이 모바일 저사양에 무거웠음. canvas 기반 lightweight-charts 로 LCP/TBT 가 대폭 개선 (−25%/−63%).
-- **3-PR 분할로 리뷰/롤백 단위 최소화**: ted-run 파이프라인이 PR 단위로 녹아 들어가서 리뷰 부담 경감 + 문제 발생 시 특정 PR 만 revert 가능.
+- **측정 기반 반복 (Lighthouse 수시 재측정)**: 색상 변경이 A11y 감사의 통합 이슈를 점진적으로 드러내는 특성상, 재측정 → 다음 수정 → 재측정 루프가 효과적.
+- **`/plan` 프로세스 축소 (β + γ)**: 모든 에이전트를 기계적으로 돌리지 않고 이번 성격에 맞는 부분만. γ 로 PoC 선행해서 공수 추정/리스크 가정을 실데이터 기반으로 전환.
+- **스프린트 통합 커밋 선택**: 사용자가 "Sprint A 완주 후 일괄 커밋" 을 선택 — 커밋 단위 = 완결 기능 단위. 리뷰 부담 대신 맥락 완결 우선.
+- **팀 공유 전제 파이프라인 유지**: `pipeline/artifacts/*-v1.1-chart-upgrade.md` 6 종 신규 생성, v1.0 산출물 보존. Iteration 분리 관례 확립.
 
 ### 사용자 선호·제약 (재확인)
 
-- **한국어 커밋 메시지 + Co-Authored-By** 유지 (글로벌 CLAUDE.md).
-- **`git push` 는 명시 요청 시에만** — 본 세션도 매 PR 머지 승인을 명시적으로 받음.
-- **npm 기반 프로젝트** — yarn 사용 금지 (본 세션에서 yarn.lock 생성 실수 → 즉시 복구).
-- **Gate 승인 원칙** 유지 — 각 PR 머지 전 CI 전체 green 확인.
-- **설계 승인 루프** — TradingView 전환 전 4가지 (범위/라이선스/SSR/recharts 거취) 파라미터 사용자 합의 후 착수.
-- **리뷰 후 HIGH/MED 즉시 반영** — ted-run 파이프라인 Step 2 규칙 준수 (HIGH-2 fetch race 는 기존 코드라 분리).
+- **한국어 커밋 메시지 + Co-Authored-By** (전역 CLAUDE.md)
+- **`git push` 는 명시 요청 시에만** — 이번 세션 3 커밋 푸시, `fc1859e` 1 커밋 미푸시 상태로 마감
+- **npm 기반** — yarn 사용 금지
+- **Gate 승인 루프** — 매 의사결정 지점에서 옵션 제시 후 사용자 선택
+- **리뷰 후 CRITICAL/HIGH 즉시 반영** — MEDIUM 은 기록 후 진행
+- **pre-commit hook `--no-verify` 금지** — 훅 오탐 시 `-F` 파일 우회
+- **코드 주석 최소 (CLAUDE.md)** — 이번 세션 코드도 자명한 부분은 주석 없이, Why 가 중요한 부분만 간결히
 
 ### 다음 세션에서 먼저 확인할 것
 
-1. **핸드오프 커밋** (`CHANGELOG.md` prepend + `HANDOFF.md` overwrite) 머지.
-2. **HIGH / fetch race AbortController** — 소규모 PR 로 시작해 워밍업 가능. `/stocks/[code]`, `/backtest`, `/portfolio` 에서 동일 패턴 있는지 전수 점검 후 일괄 수정.
-3. ~~**A11y / color-contrast**~~ — ✅ 완전 해결. `/stocks/005930` A11y **100**. 후속 고려: 다른 페이지에서도 secondary `#6B7A90` / accent `#6395FF` 조합이 노출될 수 있음 → 전수 스캔 별도 티켓.
-4. **이월 과제** 중 백엔드 (DIP 확장, `Mapped[Literal]`) vs 프론트 소규모 (R-04~06) 우선순위 결정.
+1. **`fc1859e` 푸시** — 사용자 확인 즉시 `git push origin master`
+2. **브라우저 시각 확인** — `/stocks/005930` 캔들 + MA + Volume + OHLCV 툴팁 렌더 정상 여부
+3. **모바일 실기기 핀치 줌/팬** — Gate A 최종 통과
+4. **Sprint B 착수 여부 결정** — indicators/rsi.ts + indicators/macd.ts + IndicatorTogglePanel + useIndicatorPreferences + sr-only 테이블 (예산 6.3d)
+5. **2026-04-20 OHLCV 0값 원인 분석** (옵션) — KRX 수집 배치 로그 확인
+6. **이월 과제 우선순위 결정** — 백엔드 DIP 확장 vs FE 소규모 (R-04~06)
 
 ### 가치 있는 발견 (본 세션)
 
-1. **Lighthouse 최적화는 JSON audit 이 먼저**: 가설은 쉽게 틀림. 측정 데이터(specifically `metrics` audit + `layout-shifts`/`bootup-time`) 가 병목을 곧바로 가리킴. 세션 내 반복된 원칙.
-2. **TradingView Lightweight Charts v5 는 Apache-2.0 + canvas**: 금융 시계열에서 recharts 대비 TBT 절반 이하. API 는 `addSeries(AreaSeries, ...)` + `createSeriesMarkers` plugin 분리 (v4 deprecated).
-3. **pure SVG 가 "적당한" 차트의 최적 선택일 수 있다**: backtest 처럼 입력 규모 작으면 150~200줄 SVG 자작이 외부 의존성 도입보다 싸다. 단, 접근성 책임도 떠안으므로 sr-only 테이블 백업이 필수.
-4. **`--delete-branch` 체인 끊김은 반복 발생**: squash merge 기본 컨벤션 + 체인 PR 조합에서 base 소실 → 자동 close. 로컬 rebase + 새 PR 로 복구 패턴 확립. 이전 세션 Phase C 에 이어 본 세션 PR #36 에서도 재발.
-5. **Next 16 `react-hooks/refs` 규칙**: 렌더 중 ref 쓰기 금지 (`refMyRef.current = value`). 해결책은 setup effect 내부에서 모든 ref 초기화 + update effect 는 React Strict Mode 재실행에 의존.
-6. **yarn vs npm lock 파일 혼용 위험**: `yarn add` 가 `yarn.lock` 생성 → CI `npm ci` 실패 가능성. 이 저장소는 npm 전용이므로 `.gitignore` 에 `yarn.lock` 추가 검토 가치 있음 (이번 세션은 삭제로 대응).
+1. **Lighthouse color-contrast 감사는 통합 pass/fail**: 한 노드 수정하면 가려졌던 다른 노드가 드러남. 1차 수정 + 재측정 + 2차 수정 루프가 필요.
+2. **`#131720` dark surface 의 수학적 제약**: 어떤 fg 도 AA 통과하려면 L≥~0.21 (밝은 회색) 필요. "dim 하면서 legible" 은 동시 만족 불가. 계층은 크기/두께/위치로 표현해야.
+3. **PoC 스파이크 ROI**: 30 분 타이핑으로 2 리스크 해소, Sprint 공수 추정 신뢰도 상승. 추후 모든 다중 의존성 Sprint 에 선행 권장.
+4. **`typings.d.ts` 직접 확인 > 훈련 데이터**: Context7 MCP 미등록 환경에서 에이전트 답변은 훈련 데이터 기반. `node_modules/*/dist/typings.d.ts` 를 grep 하는 게 빠르고 정확.
+5. **v5 `addPane()` + `IPane.setHeight()` API 는 JSDoc 예시까지 있음**: `typings.d.ts:2002-2004` 에 3-pane 예시. API 탐색 시 코드 주변 JSDoc 스캔이 문서보다 빠를 때 있음.
+6. **pre-commit hook heredoc 오탐**: `block-no-verify@1.1.2` 가 `git commit -m "$(cat <<EOF ... EOF)"` 를 `--no-verify` 로 잘못 매칭. `-F` 파일 방식이 즉시 우회책 — 프로젝트 메모리 저장됨.
+7. **옵션 β + γ 조합으로 `/plan` 유연화**: 스킬 지시문을 기계적으로 따르지 않고 작업 성격에 맞게 축소/선행하는 것이 시간/품질 모두 이득.
 
-## Files Modified This Session (master 기준 누적, 세션 시작점 `be6a5f8` 기준)
+## Files Modified This Session
 
 ```
- .gitignore                                                  |   3 +
- CHANGELOG.md                                                | (prepend 이번 세션 엔트리 다수)
- HANDOFF.md                                                  | (overwrite)
- docs/lighthouse-scores.md                                   | 176 ++++++ (신규+갱신)
- docs/mobile-responsive-plan.md                              |  51 ++-
- scripts/lighthouse-mobile.sh                                | 105 ++++ (신규, 0755)
- scripts/docker-rebuild.sh                                   |  82 ++++ (신규, 0755, compose up 자동 정리 래퍼)
- scripts/docker-clean.sh                                     |  41 ++++ (신규, 0755, 주기적 수동 정리)
- src/frontend/package.json                                   |   4 +-  (−recharts, +lightweight-charts)
- src/frontend/package-lock.json                              | 419 +--  (−recharts deps, +lightweight-charts + fancy-canvas)
- src/frontend/src/app/backtest/page.tsx                      |  83 ++-
- src/frontend/src/app/stocks/[code]/page.tsx                 | 133 ++-
- src/frontend/src/components/charts/GroupedBarChart.tsx      | 276 ++++ (신규, pure SVG)
- src/frontend/src/components/charts/PriceAreaChart.tsx       | 140 ++++ (신규, lightweight-charts)
- src/frontend/src/lib/hooks/useMediaQuery.ts                 |  23 -- (삭제, 사용처 0)
- src/frontend/tests/e2e/actions.spec.ts                      |  10 +
- src/frontend/tests/e2e/holdings.spec.ts                     |  10 +-
- src/frontend/tests/e2e/mobile.spec.ts                       | 171 ++++ (신규, Phase E1)
- src/frontend/tests/e2e/pages/PortfolioPage.ts               |  17 +-
- + Phase B~D 에서 수정된 9 파일 (NavHeader, alignment, globals.css, portfolio 등)
+ CHANGELOG.md                                               |  ~80 ++ (4 엔트리 prepend)
+ HANDOFF.md                                                 | overwrite (본 문서)
+ docs/lighthouse-scores.md                                  |  ~30 ++ (2 회차 prepend)
+ pipeline/state/current-state.json                          |  ~50 ++ (iterations.v1.1 블록)
+ pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md      | 신규
+ pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md | 신규
+ pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md                 | 신규
+ pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md             | 신규
+ pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md         | 신규
+ pipeline/decisions/discovery-v1.1-judge.md                          | 신규
+ scripts/docker-rebuild.sh                                           |  ~30 ++ (env-file 주입 로직)
+ src/frontend/src/app/globals.css                                    |    2 +- (muted 토큰)
+ src/frontend/src/app/layout.tsx                                     |    2 +- (muted)
+ src/frontend/src/app/page.tsx                                       |    6 +- (muted)
+ src/frontend/src/app/stocks/[code]/page.tsx                         |  ~50 ++ (chartData/volume/MA, 색대비 2건)
+ src/frontend/src/app/backtest/page.tsx                              |   16 +- (muted)
+ src/frontend/src/app/portfolio/page.tsx                             |   16 +- (muted)
+ src/frontend/src/app/portfolio/[accountId]/alignment/page.tsx       |    6 +- (muted)
+ src/frontend/src/app/reports/[stockCode]/page.tsx                   |    6 +- (muted)
+ src/frontend/src/app/settings/page.tsx                              |    2 +- (muted)
+ src/frontend/src/components/NavHeader.tsx                           |    2 +- (muted)
+ src/frontend/src/components/features/SignalCard.tsx                 |    2 +- (muted)
+ src/frontend/src/components/features/ExcelImportPanel.tsx           |    2 +- (muted)
+ src/frontend/src/components/features/RealAccountSection.tsx         |   10 +- (muted + placeholder)
+ src/frontend/src/components/charts/PriceAreaChart.tsx               | 거의 재작성 (Candle + MA + Volume + 줌팬 + 툴팁)
+ src/frontend/src/lib/indicators/sma.ts                              | 신규 (O(n) SMA)
+ src/frontend/src/lib/indicators/index.ts                            | 신규 (barrel)
 ```
+
+**4 commits total, 14 files + 6 신규 파이프라인 산출물 + 2 신규 indicator 파일.**
