@@ -7,6 +7,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] feat(indicators): v1.1 Sprint B 체크포인트 2 — RSI(14) + MACD(12,26,9) 유틸
+
+### Added
+- `src/lib/indicators/rsi.ts` — Wilder's RSI
+  - 초기 period 구간 SMA seed → 이후 `(prev*(p-1) + curr)/p` 스무딩
+  - `avgLoss === 0` 구간은 RSI = 100
+- `src/lib/indicators/macd.ts` — MACD line + Signal line + Histogram
+  - `emaSeriesSmaSeed` helper (SMA seed → EMA 전개)
+  - 파라미터 기본: fast=12, slow=26, signal=9
+
+> 차트 pane/UI wiring 은 체크포인트 3 (토글 UI + localStorage 영속화) 에서 함께 처리.
+> 지금은 순수 유틸 모듈만 추가 → 번들 영향 ~0 (미사용).
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과
+
+---
+
 ## [2026-04-23] feat(chart): v1.1 Sprint B 체크포인트 1 — 봉 주기(1D/1W/1M) + 시그널 grade 색 구분
 
 ### Changed
