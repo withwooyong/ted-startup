@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] fix(scripts): `docker-rebuild.sh` prod 모드 `--env-file` 자동 주입
+
+A11y 재측정을 위해 `./scripts/docker-rebuild.sh prod` 실행 시 compose 변수 interpolation 이 안 되어 POSTGRES/ADMIN 등이 blank 로 기동되고 backend 가 unhealthy 로 실패하던 버그 수정.
+
+- prod 모드 기본값 `ENV_FILE=.env.prod` 도입 (override: `ENV_FILE=<path>` 환경변수)
+- `.env.prod` 미존재 시 prod 에서는 치명 에러로 fail-loud
+- dev 모드는 `.env` 가 있으면 사용, 없으면 compose 파일 내부 `env_file` 지시어에 위임
+- `docker compose` 호출 4곳(down / build / build service / up) 모두 `--env-file` 자동 전달
+
+`bash -n` 문법 OK. 실제 검증은 직전 수동 명령(동일 로직) 성공으로 대체.
+
+---
+
 ## [2026-04-23] fix(frontend): /stocks/005930 색 대비 잔존 2건 수정 — **A11y 100 달성**
 
 직전 커밋(`4e660a9`)으로 `#3D4A5C` 위반을 해소한 뒤 Lighthouse 재측정에서 같은 color-contrast 감사에 묶여있던 2건이 추가로 드러남. 스팟 수정으로 `/stocks/005930` A11y 95 → **100** 달성.
