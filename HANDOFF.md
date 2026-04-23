@@ -1,9 +1,9 @@
 # Session Handoff
 
-> Last updated: 2026-04-23 12:30 KST (오전~오후 연속 세션 마감 — **Gate 3 7/7 통과 + TradingView 전환 시리즈 완결 + docker 자동 정리 스크립트 추가**)
-> Current branch: `master` (working tree clean 예정 — 본 핸드오프 커밋 후)
-> Latest commit: `507bd54` — chore(frontend): recharts 의존성 제거 + Gate 3 최종 재측정 (PR 3/3) (#41)
-> 본 커밋에 포함: 이전 세션 TradingView 핸드오프(미커밋 상태였음) + docker 자동 정리 스크립트 2종 + CHANGELOG 3건 + 본 파일
+> Last updated: 2026-04-23 12:40 KST (세션 최종 마감 — **Gate 3 7/7 통과 + TradingView 전환 시리즈 완결 + docker 자동 정리 스크립트 + 로컬 핸드오프 2커밋 origin push 완료**)
+> Current branch: `master` (working tree **clean**, origin 과 동기화 완료)
+> Latest commit: `4cf4937` — chore(scripts): docker 빌드/정리 자동화 스크립트 추가 + 세션 마감 핸드오프
+> 직전 커밋: `d6d7012` — docs: 세션 마감 핸드오프 — 2026-04-23 TradingView 전환 시리즈 완결
 
 ## Current Status
 
@@ -20,7 +20,8 @@
 | 5 | #39 | `6957e00` | TradingView PR 1/3 — /stocks/[code] 차트 전환 | feature |
 | 6 | #40 | `0ff61f7` | TradingView PR 2/3 — /backtest pure SVG 자작 | feature |
 | 7 | #41 | `507bd54` | TradingView PR 3/3 — recharts 제거 + Gate 3 최종 | chore |
-| 8 | (로컬) | (미커밋) | docker 빌드/정리 자동화 스크립트 2종 (본 커밋에 포함) | chore |
+| 8 | (master) | `d6d7012` | 세션 마감 핸드오프 — TradingView 시리즈 완결 (CHANGELOG + HANDOFF) | docs |
+| 9 | (master) | `4cf4937` | docker 빌드/정리 자동화 스크립트 2종 + 핸드오프 보강 | chore |
 
 ### 누적 성과 지표
 
@@ -39,7 +40,7 @@
 
 | # | 항목 | 상태 | 비고 |
 |---|---|---|---|
-| 1 | **본 세션 마감 핸드오프 커밋** | 커밋 중 | CHANGELOG prepend 4건 (#39/#40/#41 + docker 스크립트) + HANDOFF 갱신 + `scripts/docker-{rebuild,clean}.sh` 신규. |
+| 1 | ~~본 세션 마감 핸드오프 커밋~~ | ✅ **완료 + push** | `d6d7012` (handoff) + `4cf4937` (docker scripts) 2커밋 origin 반영. |
 | 2 | **HIGH / fetch race condition** | 기술 부채 | `getStockDetail` 호출 시 `AbortController` 없음 → 기간 버튼 빠른 전환 시 stale response. `/stocks/[code]` 외 다른 페이지도 동일 패턴일 가능성. 독립 PR 1~2h. |
 | 3 | **A11y / header card color-contrast** | 디자인 부채 | `#3d4a5c` on `#131720` 대비 **1.99 < WCAG AA 4.5**. `/stocks/005930` 에서 A11y 96→95 감점 원인. 디자인 토큰 재검토 (30m~1h). |
 | 4 | **로그인 세션 기반 실데이터 재측정** | 선택 | `/portfolio`, `/settings`, `/portfolio/1/alignment` 는 현재 비로그인 셸 기준 점수. 실데이터 측정은 DevTools 수동 절차 (scores.md §B). |
@@ -49,7 +50,14 @@
 | 8 | 이전 세션 이월: DB 모델 `Mapped[str]` → `Literal` 좁히기 | 백엔드, 1h | `connection_type` 등. Router exhaustive check. |
 | 9 | 이전 세션 이월: R-04/R-05/R-06 소규모 이슈 | 각 30분 | MOCK 401 재분류 / `/sync` 400 테스트 / `.git-blame-ignore-revs`. |
 
-미커밋 변경: **있음** (`CHANGELOG.md` + `HANDOFF.md`). 세션 마감 시 `docs: 세션 마감 핸드오프 — 2026-04-23 TradingView 전환 시리즈 완결` 로 커밋 예정.
+미커밋 변경: **없음** — working tree clean, `origin/master` 와 로컬 HEAD `4cf4937` 동기화 완료.
+
+### 복구 노트 (2026-04-23 12:30~12:40)
+
+PC 멈춤으로 리부팅 후 두 개 세션이 동시 복구 작업을 진행:
+- **세션 A (이 문서 작성 세션)**: `/handoff` 스킬로 CHANGELOG/HANDOFF 편집 후 `d6d7012` 커밋.
+- **세션 B**: docker 자동화 스크립트 작성·테스트 후 HANDOFF 보강하여 `4cf4937` 커밋.
+- 사용자 검토 후 `git push origin master` 로 2커밋 일괄 반영. 충돌 없음.
 
 ## Key Decisions Made
 
