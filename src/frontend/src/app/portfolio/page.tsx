@@ -204,7 +204,7 @@ export default function PortfolioPage() {
         ) : accounts.length === 0 ? (
           <div className="bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] p-6 text-center">
             <p className="text-[#6B7A90] text-sm">등록된 계좌가 없습니다.</p>
-            <p className="text-[#3D4A5C] text-xs mt-1">
+            <p className="text-[#7A8699] text-xs mt-1">
               관리자 API 로 <code>POST /api/portfolio/accounts</code> 호출 후 새로고침하세요.
             </p>
           </div>
@@ -338,7 +338,7 @@ export default function PortfolioPage() {
                 <div className="hidden sm:block bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-white/[0.02]">
-                      <tr className="text-left text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider">
+                      <tr className="text-left text-[0.7rem] text-[#7A8699] uppercase tracking-wider">
                         <th className="px-4 py-2.5 font-[family-name:var(--font-display)] font-medium">
                           종목
                         </th>
@@ -372,7 +372,7 @@ export default function PortfolioPage() {
                               >
                                 {h.stock_name ?? '(이름 없음)'}
                               </Link>
-                              <span className="ml-2 text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
+                              <span className="ml-2 text-[0.7rem] text-[#7A8699] font-[family-name:var(--font-mono)]">
                                 {h.stock_code ?? ''}
                               </span>
                             </td>
@@ -420,7 +420,7 @@ export default function PortfolioPage() {
                             >
                               {h.stock_name ?? '(이름 없음)'}
                             </Link>
-                            <span className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
+                            <span className="text-[0.7rem] text-[#7A8699] font-[family-name:var(--font-mono)]">
                               {h.stock_code ?? ''}
                             </span>
                           </div>
@@ -435,7 +435,7 @@ export default function PortfolioPage() {
                         </div>
                         <dl className="grid grid-cols-3 gap-2 text-[0.75rem]">
                           <div>
-                            <dt className="text-[0.65rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
+                            <dt className="text-[0.65rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
                               수량
                             </dt>
                             <dd className="font-[family-name:var(--font-mono)] tabular-nums text-[#E8ECF1]">
@@ -443,7 +443,7 @@ export default function PortfolioPage() {
                             </dd>
                           </div>
                           <div>
-                            <dt className="text-[0.65rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
+                            <dt className="text-[0.65rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
                               평단가
                             </dt>
                             <dd className="font-[family-name:var(--font-mono)] tabular-nums text-[#6B7A90]">
@@ -451,7 +451,7 @@ export default function PortfolioPage() {
                             </dd>
                           </div>
                           <div>
-                            <dt className="text-[0.65rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
+                            <dt className="text-[0.65rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-0.5">
                               매입원가
                             </dt>
                             <dd className="font-[family-name:var(--font-mono)] tabular-nums text-[#E8ECF1]">
@@ -487,7 +487,7 @@ function Metric({
 }) {
   return (
     <div className="bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] p-4">
-      <div className="text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-2">
+      <div className="text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-2">
         {label}
       </div>
       <div

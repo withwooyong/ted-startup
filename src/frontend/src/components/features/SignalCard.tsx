@@ -42,7 +42,7 @@ export default function SignalCard({ signal }: { signal: SignalResult }) {
         <div>
           <div className="flex items-center gap-2">
             <span className="font-semibold">{stockName}</span>
-            <span className="font-[family-name:var(--font-mono)] text-[0.72rem] text-[#3D4A5C]">
+            <span className="font-[family-name:var(--font-mono)] text-[0.72rem] text-[#7A8699]">
               {stockCode}
             </span>
           </div>

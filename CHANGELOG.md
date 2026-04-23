@@ -7,6 +7,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] fix(frontend): WCAG AA 색 대비 — muted 토큰 `#3D4A5C → #7A8699` 전역 교체
+
+Lighthouse A11y 감사에서 `/stocks/005930` 헤더 카드의 `#3D4A5C` on `#131720` 색 대비가 **1.99:1** (WCAG AA 기준 4.5:1 미달) 로 측정되어 A11y 96 → 95 감점. 해당 색상이 frontend 전역에 하드코딩되어 있어 디자인 토큰 수준으로 일괄 교체.
+
+### Changed
+- `src/frontend/src/app/globals.css` — `--color-text-muted: #3D4A5C` → `#7A8699`
+- TSX 12개 파일의 `text-[#3D4A5C]` / `placeholder-[#3D4A5C]` → `text-[#7A8699]` / `placeholder-[#7A8699]` 일괄 치환 (총 41건)
+  - `app/page.tsx`, `app/layout.tsx`, `app/stocks/[code]/page.tsx`, `app/backtest/page.tsx`, `app/portfolio/page.tsx`, `app/portfolio/[accountId]/alignment/page.tsx`, `app/reports/[stockCode]/page.tsx`, `app/settings/page.tsx`, `components/NavHeader.tsx`, `components/features/SignalCard.tsx`, `components/features/ExcelImportPanel.tsx`, `components/features/RealAccountSection.tsx`
+
+### Kept (의도적 유지)
+- `app/settings/page.tsx:164` — `bg-[#3D4A5C]` 토글 OFF 상태 배경 (텍스트 아님)
+- `components/charts/PriceAreaChart.tsx:90-91` — TradingView 차트 크로스헤어 gridline (장식)
+
+### Contrast
+- 이전: `#3D4A5C` on `#131720` = **1.99:1** (AA 4.5:1 ✗)
+- 이후: `#7A8699` on `#131720` = **4.86:1** (AA 4.5:1 ✓, 여유 ~0.36)
+- Hue 유지 (블루-그레이 HSL ~215°)
+
+### Verified
+- `yarn tsc --noEmit` 통과
+- `yarn lint` 통과
+- typescript-reviewer 에이전트 리뷰 CRITICAL/HIGH 0건
+
+### Known Trade-off
+- 계층 역전: 새 muted `#7A8699`가 기존 secondary `#6B7A90` 보다 밝음. `#131720` 배경에서 WCAG AA 통과하려면 L≥~0.21 필요 → muted 가 secondary 보다 밝은 구조 불가피. secondary 는 현재 4.11:1 로 경계선 미달이지만 본 PR 범위 외 (별도 디자인 결정 필요).
+
+### Pending
+- Lighthouse 재측정으로 `/stocks/005930` A11y 95 → **96** 복귀 확인 필요 (`./scripts/lighthouse-mobile.sh`).
+
+---
+
 ## [2026-04-23] chore(scripts): docker 빌드/정리 자동화 스크립트 추가 (세션 마감 커밋 예정)
 
 docker compose 재빌드를 반복할 때 누적되는 dangling 이미지/BuildKit 캐시를 **매번 자동 회수**하는 스크립트 한 쌍 추가. 볼륨(DB/Caddy 인증서)은 의도적으로 건드리지 않음.

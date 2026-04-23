@@ -60,7 +60,7 @@ export default function DashboardPage() {
         <span className="font-[family-name:var(--font-display)] text-sm text-[#6B7A90]" aria-hidden="true">
           오늘의 시그널
         </span>
-        <span className="font-[family-name:var(--font-mono)] text-xs text-[#3D4A5C]">
+        <span className="font-[family-name:var(--font-mono)] text-xs text-[#7A8699]">
           {signalDate ?? new Date().toISOString().split('T')[0]}
         </span>
       </div>
@@ -74,7 +74,7 @@ export default function DashboardPage() {
           { label: 'Short Squeeze', value: counts.SHORT_SQUEEZE, color: 'text-[#FF8B3E]' },
         ].map(m => (
           <div key={m.label} className="bg-[#131720]/85 backdrop-blur border border-white/[0.06] rounded-[14px] p-4 hover:border-[#6395FF]/30 transition-colors">
-            <div className="text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-2">
+            <div className="text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-medium mb-2">
               {m.label}
             </div>
             <div className={`font-[family-name:var(--font-display)] text-3xl font-bold tracking-tight ${m.color}`}>
@@ -150,7 +150,7 @@ export default function DashboardPage() {
         <div className="text-center py-16">
           <div className="text-4xl mb-4 opacity-30">📊</div>
           <p className="text-[#6B7A90]">오늘은 탐지된 시그널이 없어요</p>
-          <p className="text-[#3D4A5C] text-sm mt-1">내일 다시 확인해 보세요</p>
+          <p className="text-[#7A8699] text-sm mt-1">내일 다시 확인해 보세요</p>
         </div>
       )}
 

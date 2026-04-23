@@ -388,7 +388,7 @@ export function RealAccountSection(): React.JSX.Element {
               onChange={e => setAlias(e.target.value)}
               maxLength={50}
               placeholder="예: KIS 실계좌"
-              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#3D4A5C] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
+              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#7A8699] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
               autoComplete="off"
               required
             />
@@ -400,7 +400,7 @@ export function RealAccountSection(): React.JSX.Element {
               value={appKey}
               onChange={e => setAppKey(e.target.value)}
               placeholder="KIS에서 발급받은 App Key"
-              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#3D4A5C] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 font-[family-name:var(--font-mono)]"
+              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#7A8699] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 font-[family-name:var(--font-mono)]"
               autoComplete="off"
               required
             />
@@ -412,7 +412,7 @@ export function RealAccountSection(): React.JSX.Element {
               value={appSecret}
               onChange={e => setAppSecret(e.target.value)}
               placeholder="KIS에서 발급받은 App Secret"
-              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#3D4A5C] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 font-[family-name:var(--font-mono)]"
+              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#7A8699] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 font-[family-name:var(--font-mono)]"
               autoComplete="off"
               required
             />
@@ -425,7 +425,7 @@ export function RealAccountSection(): React.JSX.Element {
               onChange={e => setAccountNo(e.target.value)}
               placeholder="12345678-01"
               pattern="^\d{8}-\d{2}$"
-              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#3D4A5C] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 font-[family-name:var(--font-mono)]"
+              className="w-full px-3 py-2 rounded-lg bg-[#0A0D13] border border-white/10 text-sm text-[#E8ECF1] placeholder-[#7A8699] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 font-[family-name:var(--font-mono)]"
               autoComplete="off"
               required
             />
@@ -480,7 +480,7 @@ function Field({
     <label htmlFor={htmlFor} className="block">
       <span className="block text-xs text-[#6B7A90] mb-1">
         {label}
-        {hint && <span className="ml-2 text-[#3D4A5C]">{hint}</span>}
+        {hint && <span className="ml-2 text-[#7A8699]">{hint}</span>}
       </span>
       {children}
     </label>

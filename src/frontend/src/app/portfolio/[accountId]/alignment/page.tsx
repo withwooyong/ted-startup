@@ -158,7 +158,7 @@ export default function AlignmentPage({
                         >
                           {item.stock_name}
                         </Link>
-                        <span className="text-[0.7rem] text-[#3D4A5C] font-[family-name:var(--font-mono)]">
+                        <span className="text-[0.7rem] text-[#7A8699] font-[family-name:var(--font-mono)]">
                           {item.stock_code}
                         </span>
                       </div>
@@ -174,7 +174,7 @@ export default function AlignmentPage({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider">
+                      <div className="text-[0.7rem] text-[#7A8699] uppercase tracking-wider">
                         Max Score
                       </div>
                       <div className="font-[family-name:var(--font-display)] text-2xl font-bold">
@@ -204,7 +204,7 @@ export default function AlignmentPage({
                         <span>
                           {SIGNAL_TYPE_LABELS[s.signal_type] ?? s.signal_type}
                         </span>
-                        <span className="text-[#3D4A5C] font-[family-name:var(--font-mono)]">
+                        <span className="text-[#7A8699] font-[family-name:var(--font-mono)]">
                           {s.signal_date}
                         </span>
                         <span className="font-[family-name:var(--font-mono)] text-[#6B7A90]">

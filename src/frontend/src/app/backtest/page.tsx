@@ -74,7 +74,7 @@ export default function BacktestPage() {
         </h1>
       </div>
       {periodStr && (
-        <p className="font-[family-name:var(--font-mono)] text-xs text-[#3D4A5C] mb-6">
+        <p className="font-[family-name:var(--font-mono)] text-xs text-[#7A8699] mb-6">
           {periodStr}
         </p>
       )}
@@ -102,7 +102,7 @@ export default function BacktestPage() {
         <div className="text-center py-16">
           <div className="text-4xl mb-4 opacity-30">📈</div>
           <p className="text-[#6B7A90]">백테스팅을 아직 실행하지 않았어요</p>
-          <p className="text-[#3D4A5C] text-sm mt-1">데이터 수집 후 자동으로 실행됩니다</p>
+          <p className="text-[#7A8699] text-sm mt-1">데이터 수집 후 자동으로 실행됩니다</p>
         </div>
       )}
 
@@ -114,12 +114,12 @@ export default function BacktestPage() {
               <caption className="sr-only">시그널 타입별 백테스팅 결과</caption>
               <thead>
                 <tr className="bg-[#0B0E11] text-left">
-                  <th className="px-4 py-3 text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">시그널</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">발생</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(5d)</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(10d)</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(20d)</th>
-                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#3D4A5C] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">수익률(5d)</th>
+                  <th className="px-4 py-3 text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">시그널</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">발생</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(5d)</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(10d)</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">적중률(20d)</th>
+                  <th className="px-4 py-3 text-right text-[0.7rem] text-[#7A8699] uppercase tracking-wider font-[family-name:var(--font-display)] font-semibold" scope="col">수익률(5d)</th>
                 </tr>
               </thead>
               <tbody>

@@ -53,7 +53,7 @@ export function ExcelImportPanel({ accountId, onSuccess }: Props): React.JSX.Ele
         >
           거래내역 엑셀 가져오기
         </h2>
-        <span className="text-xs text-[#3D4A5C]">KIS 체결내역 .xlsx</span>
+        <span className="text-xs text-[#7A8699]">KIS 체결내역 .xlsx</span>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center">

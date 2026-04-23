@@ -40,7 +40,7 @@ export default function RootLayout({
           {children}
           <footer className="border-t border-white/5 bg-[#0B0E11]/90 backdrop-blur">
             <div className="max-w-6xl mx-auto px-5 py-3">
-              <p className="text-xs text-[#3D4A5C] leading-relaxed">
+              <p className="text-xs text-[#7A8699] leading-relaxed">
                 <span className="text-yellow-500 mr-1">&#9888;</span>
                 본 시스템은 투자 자문이 아닌 정보 제공 목적의 참고 도구입니다.
                 모든 투자 판단과 그에 따른 결과의 책임은 투자자 본인에게 있습니다.

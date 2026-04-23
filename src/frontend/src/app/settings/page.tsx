@@ -242,7 +242,7 @@ export default function SettingsPage() {
 
           {/* 저장 + 메타 */}
           <div className="flex items-center justify-between gap-3 pt-4 border-t border-white/[0.06]">
-            <span className="text-xs text-[#3D4A5C]">
+            <span className="text-xs text-[#7A8699]">
               {updatedAt
                 ? `최근 업데이트: ${new Date(updatedAt).toLocaleString('ko-KR')}`
                 : '—'}

@@ -216,7 +216,7 @@ function ReportBody({ report }: { report: AnalysisReportResponse }) {
       )}
 
       {/* Disclaimer + meta */}
-      <footer className="text-xs text-[#3D4A5C] space-y-1">
+      <footer className="text-xs text-[#7A8699] space-y-1">
         <p>{c.disclaimer}</p>
         <p className="font-[family-name:var(--font-mono)]">
           {report.provider} / {report.model_id}
@@ -314,14 +314,14 @@ function SourceRow({ source }: { source: ReportSourceItem }) {
             {SOURCE_TYPE_LABELS[source.type] ?? source.type}
           </span>
           {source.published_at && (
-            <span className="text-[0.65rem] text-[#3D4A5C] font-[family-name:var(--font-mono)] shrink-0">
+            <span className="text-[0.65rem] text-[#7A8699] font-[family-name:var(--font-mono)] shrink-0">
               {source.published_at}
             </span>
           )}
         </div>
       </div>
       <span
-        className="shrink-0 text-[0.7rem] text-[#3D4A5C] group-hover:text-[#6395FF] transition-colors"
+        className="shrink-0 text-[0.7rem] text-[#7A8699] group-hover:text-[#6395FF] transition-colors"
         aria-hidden="true"
       >
         ↗
