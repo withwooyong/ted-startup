@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import { getStockDetail } from '@/lib/api/client';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -9,17 +10,17 @@ import {
   SIGNAL_TYPE_LABELS,
   GRADE_COLORS,
 } from '@/types/signal';
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Legend,
-  ReferenceDot,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import type { SignalMarker } from '@/components/charts/PriceAreaChart';
+
+const PriceAreaChart = dynamic(
+  () => import('@/components/charts/PriceAreaChart'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full w-full bg-[#131720]/60 rounded animate-pulse" />
+    ),
+  }
+);
 
 const PERIODS = [
   { label: '1M', months: 1 },
@@ -64,6 +65,25 @@ export default function StockDetailPage() {
       });
   }, [code, period]);
 
+  // lightweight-charts 는 'YYYY-MM-DD' 풀 포맷 요구 (slice 금지).
+  // Rules-of-Hooks: early return 앞에서 호출되도록 위치 고정.
+  const chartData = useMemo(
+    () =>
+      data?.prices.map(p => ({ date: p.trading_date, price: p.close_price })) ??
+      [],
+    [data?.prices]
+  );
+  const signalMarkers = useMemo<SignalMarker[]>(() => {
+    if (!data) return [];
+    const priceByDate = new Map(
+      data.prices.map(p => [p.trading_date, p.close_price])
+    );
+    return data.signals.flatMap(s => {
+      const price = priceByDate.get(s.signal_date);
+      return price != null ? [{ date: s.signal_date, price, label: s.grade }] : [];
+    });
+  }, [data]);
+
   if (loading) {
     return (
       <main
@@ -106,11 +126,6 @@ export default function StockDetailPage() {
   const latestPrice = data.prices[data.prices.length - 1];
   const changeRateNum = latestPrice?.change_rate ? Number(latestPrice.change_rate) : 0;
   const changeColor = changeRateNum > 0 ? '#FF4D6A' : changeRateNum < 0 ? '#6395FF' : '#6B7A90';
-
-  const chartData = data.prices.map(p => ({
-    date: p.trading_date.slice(5),
-    price: p.close_price,
-  }));
 
   return (
     <main className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 min-h-[calc(100dvh-8rem)]">
@@ -196,48 +211,7 @@ export default function StockDetailPage() {
       <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4 mb-6">
         {chartData.length > 0 ? (
           <div className="aspect-[1.4/1] sm:aspect-[2/1]">
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="date" tick={{ fill: '#4A5568', fontSize: 10 }} tickLine={false} />
-              <YAxis
-                yAxisId="price"
-                tick={{ fill: '#4A5568', fontSize: 10 }}
-                tickFormatter={v => `${(v / 1000).toFixed(0)}K`}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                contentStyle={{ background: '#1A1F28', border: 'none', borderRadius: 10, color: '#E8ECF1' }}
-                labelStyle={{ color: '#6B7A90' }}
-              />
-              <Legend iconType="line" wrapperStyle={{ fontSize: 11, color: '#6B7A90' }} />
-              <Area
-                yAxisId="price"
-                type="monotone"
-                dataKey="price"
-                name="주가"
-                stroke="#6395FF"
-                fill="rgba(99,149,255,0.06)"
-                strokeWidth={2}
-              />
-              {data.signals.map((s, i) => {
-                const point = chartData.find(c => c.date === s.signal_date.slice(5));
-                if (!point) return null;
-                return (
-                  <ReferenceDot
-                    key={s.id ?? i}
-                    x={point.date}
-                    y={point.price}
-                    yAxisId="price"
-                    r={6}
-                    fill="#FF4D6A"
-                    stroke="none"
-                  />
-                );
-              })}
-            </ComposedChart>
-          </ResponsiveContainer>
+            <PriceAreaChart data={chartData} markers={signalMarkers} />
           </div>
         ) : (
           <div className="text-center py-16 text-[#6B7A90]">차트 데이터가 없어요</div>
