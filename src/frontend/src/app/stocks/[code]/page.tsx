@@ -12,16 +12,22 @@ import {
 } from '@/types/signal';
 import type {
   CandlePoint,
+  MACDSeriesProp,
   MALine,
+  RSISeriesProp,
   SignalMarker,
   VolumePoint,
 } from '@/components/charts/PriceAreaChart';
+import IndicatorTogglePanel from '@/components/charts/IndicatorTogglePanel';
 import {
   aggregateMonthly,
   aggregateWeekly,
+  macd as calcMacd,
+  rsi as calcRsi,
   sma,
   type DailyCandle,
 } from '@/lib/indicators';
+import { useIndicatorPreferences } from '@/lib/hooks/useIndicatorPreferences';
 
 const PriceAreaChart = dynamic(
   () => import('@/components/charts/PriceAreaChart'),
@@ -57,6 +63,7 @@ export default function StockDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prevKey, setPrevKey] = useState(`${code}:${period}`);
+  const { prefs, setPref } = useIndicatorPreferences();
 
   // fetch 파라미터 변경 시 loading 재진입 (render 중 리셋 패턴)
   const currentKey = `${code}:${period}`;
@@ -149,17 +156,52 @@ export default function StockDetailPage() {
     [aggregated]
   );
 
-  // MA(5/20/60/120) — 현재 period 의 closes 를 기반으로 FE 계산. NaN 구간은 차트에서 자동 생략.
+  // 현재 period 의 closes — MA/RSI/MACD 공통 입력.
+  const closes = useMemo(() => chartData.map(c => c.close), [chartData]);
+
+  // MA(5/20/60/120) visible 은 사용자 토글 상태.
   const maLines = useMemo<MALine[]>(() => {
-    if (chartData.length === 0) return [];
-    const closes = chartData.map(c => c.close);
+    if (closes.length === 0) return [];
     return [
-      { window: 5, values: sma(closes, 5), color: '#FFCC00', visible: true },
-      { window: 20, values: sma(closes, 20), color: '#FF8B3E', visible: true },
-      { window: 60, values: sma(closes, 60), color: '#00D68F', visible: true },
-      { window: 120, values: sma(closes, 120), color: '#A78BFA', visible: true },
+      { window: 5, values: sma(closes, 5), color: '#FFCC00', visible: prefs.ma5 },
+      { window: 20, values: sma(closes, 20), color: '#FF8B3E', visible: prefs.ma20 },
+      { window: 60, values: sma(closes, 60), color: '#00D68F', visible: prefs.ma60 },
+      { window: 120, values: sma(closes, 120), color: '#A78BFA', visible: prefs.ma120 },
     ];
-  }, [chartData]);
+  }, [closes, prefs.ma5, prefs.ma20, prefs.ma60, prefs.ma120]);
+
+  // RSI(14) + MACD(12,26,9) — 표시 여부는 PriceAreaChart 에서 prefs.rsi/macd 로 제어.
+  const rsiSeries = useMemo<RSISeriesProp>(
+    () => ({
+      values: closes.length > 0 ? calcRsi(closes, 14) : [],
+      color: '#00BCFF',
+      visible: prefs.rsi,
+    }),
+    [closes, prefs.rsi],
+  );
+
+  const macdSeries = useMemo<MACDSeriesProp>(() => {
+    if (closes.length === 0) {
+      return {
+        macd: [],
+        signal: [],
+        histogram: [],
+        visible: prefs.macd,
+        colors: { macd: '#00BCFF', signal: '#FF80EC', up: '#FF4D6A', down: '#6395FF' },
+      };
+    }
+    const r = calcMacd(closes, 12, 26, 9);
+    return {
+      macd: r.macd,
+      signal: r.signal,
+      histogram: r.histogram,
+      visible: prefs.macd,
+      colors: { macd: '#00BCFF', signal: '#FF80EC', up: '#FF4D6A', down: '#6395FF' },
+    };
+  }, [closes, prefs.macd]);
+
+  // Volume 토글 OFF 시 PriceAreaChart 에 아예 전달하지 않아 pane 제거.
+  const volumeProp = prefs.volume ? volumeData : undefined;
   const signalMarkers = useMemo<SignalMarker[]>(() => {
     if (!data) return [];
     const priceByDate = new Map(
@@ -275,7 +317,7 @@ export default function StockDetailPage() {
       </div>
 
       {/* Period selector — v1.1 B0: 봉 주기 (일봉/주봉/월봉) */}
-      <div className="flex gap-1 mb-4" role="group" aria-label="차트 봉 주기 선택">
+      <div className="flex gap-1 mb-3" role="group" aria-label="차트 봉 주기 선택">
         {PERIODS.map(p => (
           <button
             key={p.key}
@@ -293,6 +335,9 @@ export default function StockDetailPage() {
         ))}
       </div>
 
+      {/* Indicator toggles — v1.1 체크포인트 3 */}
+      <IndicatorTogglePanel prefs={prefs} onToggle={setPref} />
+
       {/* Chart */}
       <ErrorBoundary resetKeys={[period, chartData.length]}>
       <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4 mb-6">
@@ -302,7 +347,9 @@ export default function StockDetailPage() {
               data={chartData}
               markers={signalMarkers}
               maLines={maLines}
-              volume={volumeData}
+              volume={volumeProp}
+              rsi={rsiSeries}
+              macd={macdSeries}
             />
           </div>
         ) : (

@@ -17,11 +17,11 @@ import {
   type Time,
 } from 'lightweight-charts';
 
-// v1.1: 파일명은 PriceAreaChart 유지(리네임은 별도 PR) — 내부는 CandlestickSeries + MA overlay + Volume pane + OHLCV 툴팁 + 줌/팬.
+// v1.1 Sprint B: CandlestickSeries + MA overlay + Volume/RSI/MACD pane + 토글 visible + OHLCV 툴팁.
 // 0 값 / null OHLC 레코드는 상위(page.tsx)에서 사전 제거한다.
 
 export interface CandlePoint {
-  date: string; // YYYY-MM-DD
+  date: string;
   open: number;
   high: number;
   low: number;
@@ -36,7 +36,7 @@ export interface SignalMarker {
 
 export interface MALine {
   window: number;
-  values: ReadonlyArray<number>; // length == data.length, NaN 허용
+  values: ReadonlyArray<number>;
   color: string;
   visible: boolean;
 }
@@ -47,11 +47,27 @@ export interface VolumePoint {
   isUp: boolean;
 }
 
+export interface RSISeriesProp {
+  values: ReadonlyArray<number>; // length == data.length, NaN 허용
+  color: string;
+  visible: boolean;
+}
+
+export interface MACDSeriesProp {
+  macd: ReadonlyArray<number>;
+  signal: ReadonlyArray<number>;
+  histogram: ReadonlyArray<number>;
+  visible: boolean;
+  colors: { macd: string; signal: string; up: string; down: string };
+}
+
 interface Props {
   data: CandlePoint[];
   markers?: SignalMarker[];
   maLines?: ReadonlyArray<MALine>;
-  volume?: ReadonlyArray<VolumePoint>;
+  volume?: ReadonlyArray<VolumePoint>; // 전달 시 pane 표시, null/빈 배열 시 pane 제거
+  rsi?: RSISeriesProp;
+  macd?: MACDSeriesProp;
 }
 
 interface HoverTooltip {
@@ -67,7 +83,18 @@ interface HoverTooltip {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const VOLUME_UP_COLOR = 'rgba(255,77,106,0.6)';
 const VOLUME_DOWN_COLOR = 'rgba(99,149,255,0.6)';
-const VOLUME_PANE_HEIGHT_PX = 96;
+const VOLUME_PANE_HEIGHT_PX = 80;
+const RSI_PANE_HEIGHT_PX = 80;
+const MACD_PANE_HEIGHT_PX = 80;
+const RSI_GUIDE_COLOR = 'rgba(255,255,255,0.15)';
+
+// v1.1 Sprint B: 시그널 grade(A/B/C/D) 별 색 구분. enums.py SignalGrade.from_score 기준 동기.
+const GRADE_COLOR: Record<string, string> = {
+  A: '#FFCC00',
+  B: '#00D68F',
+  C: '#FF8B3E',
+  D: '#6B7A90',
+};
 
 function toTime(date: string): Time {
   if (!ISO_DATE.test(date)) {
@@ -79,15 +106,6 @@ function toTime(date: string): Time {
 function mapCandle(p: CandlePoint) {
   return { time: toTime(p.date), open: p.open, high: p.high, low: p.low, close: p.close };
 }
-
-// v1.1 Sprint B: 시그널 grade(A/B/C/D) 별 색 구분. 점수 구간은 enums.py SignalGrade.from_score 와 동기.
-// A(≥80) 노랑/하이라이트 → B(60~79) 녹색 → C(40~59) 오렌지 → D(<40) 회색 (거의 무의미하므로 부각 낮춤).
-const GRADE_COLOR: Record<string, string> = {
-  A: '#FFCC00',
-  B: '#00D68F',
-  C: '#FF8B3E',
-  D: '#6B7A90',
-};
 
 function mapMarker(m: SignalMarker): SeriesMarker<Time> {
   const color = (m.label && GRADE_COLOR[m.label]) || '#FFCC00';
@@ -108,19 +126,48 @@ function formatVolume(v: number): string {
   return v.toLocaleString();
 }
 
+/** NaN 을 whitespace 로 걸러 `{time, value}` 포인트만 남긴다. */
+function toLinePoints(
+  data: ReadonlyArray<CandlePoint>,
+  values: ReadonlyArray<number>,
+): Array<{ time: Time; value: number }> {
+  const out: Array<{ time: Time; value: number }> = [];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (!Number.isFinite(v)) continue;
+    const dp = data[i];
+    if (!dp) continue;
+    out.push({ time: toTime(dp.date), value: v });
+  }
+  return out;
+}
+
 export default function PriceAreaChart({
   data,
   markers = [],
   maLines = [],
   volume,
+  rsi,
+  macd,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const maSeriesMapRef = useRef<Map<number, ISeriesApi<'Line'>>>(new Map());
+
   const volumePaneRef = useRef<IPaneApi<Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+
+  const rsiPaneRef = useRef<IPaneApi<Time> | null>(null);
+  const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const rsiOverboughtRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const rsiOversoldRef = useRef<ISeriesApi<'Line'> | null>(null);
+
+  const macdPaneRef = useRef<IPaneApi<Time> | null>(null);
+  const macdLineRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const macdSignalRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const macdHistRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
   const [tooltip, setTooltip] = useState<HoverTooltip | null>(null);
 
@@ -128,7 +175,6 @@ export default function PriceAreaChart({
     const container = containerRef.current;
     if (!container) return;
 
-    // cleanup 에서 .clear() 호출용 — effect 시점의 Map 을 로컬 변수에 고정.
     const maSeriesMap = maSeriesMapRef.current;
 
     const initialWidth = container.clientWidth || 300;
@@ -156,7 +202,6 @@ export default function PriceAreaChart({
         vertLine: { color: '#3D4A5C', labelBackgroundColor: '#1A1F28' },
         horzLine: { color: '#3D4A5C', labelBackgroundColor: '#1A1F28' },
       },
-      // A6: 줌/팬 활성화 — 모바일 핀치 줌은 라이브러리가 자동 처리.
       handleScroll: true,
       handleScale: true,
       width: initialWidth,
@@ -177,7 +222,6 @@ export default function PriceAreaChart({
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series);
 
-    // A7: OHLCV 툴팁 — CrosshairMove 구독 후 React state 로 오버레이 렌더.
     const crosshairHandler = (param: MouseEventParams) => {
       const cs = seriesRef.current;
       if (!param.time || !param.point || !cs) {
@@ -230,6 +274,14 @@ export default function PriceAreaChart({
       maSeriesMap.clear();
       volumePaneRef.current = null;
       volumeSeriesRef.current = null;
+      rsiPaneRef.current = null;
+      rsiSeriesRef.current = null;
+      rsiOverboughtRef.current = null;
+      rsiOversoldRef.current = null;
+      macdPaneRef.current = null;
+      macdLineRef.current = null;
+      macdSignalRef.current = null;
+      macdHistRef.current = null;
       setTooltip(null);
     };
   }, []);
@@ -243,7 +295,7 @@ export default function PriceAreaChart({
     markersRef.current?.setMarkers(markers.map(mapMarker));
   }, [markers]);
 
-  // MA overlay — window 별 LineSeries 를 Map 으로 유지. 입력 변경 시 생성/삭제/업데이트.
+  // MA overlay — window 별 LineSeries 를 Map 으로 유지. visible=false 는 applyOptions 로 숨김(오버레이라 pane 제거 불필요).
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -270,26 +322,26 @@ export default function PriceAreaChart({
         map.set(ma.window, lineSeries);
       }
       lineSeries.applyOptions({ color: ma.color, visible: ma.visible });
-
-      const points: Array<{ time: Time; value: number }> = [];
-      for (let i = 0; i < ma.values.length; i++) {
-        const v = ma.values[i];
-        if (v == null || !Number.isFinite(v)) continue;
-        const dp = data[i];
-        if (!dp) continue;
-        points.push({ time: toTime(dp.date), value: v });
-      }
-      lineSeries.setData(points);
+      lineSeries.setData(toLinePoints(data, ma.values));
     }
   }, [maLines, data]);
 
-  // Volume pane — 전달 시 pane + HistogramSeries 생성, 데이터 없을 때 시리즈만 비움.
+  // Volume pane — 토글 OFF(volume undefined/빈배열) 시 pane 제거, ON 시 생성·갱신.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
 
-    if (volume == null || volume.length === 0) {
-      volumeSeriesRef.current?.setData([]);
+    const shouldShow = volume != null && volume.length > 0;
+
+    if (!shouldShow) {
+      if (volumeSeriesRef.current) {
+        chart.removeSeries(volumeSeriesRef.current);
+        volumeSeriesRef.current = null;
+      }
+      if (volumePaneRef.current) {
+        chart.removePane(volumePaneRef.current.paneIndex());
+        volumePaneRef.current = null;
+      }
       return;
     }
 
@@ -306,14 +358,159 @@ export default function PriceAreaChart({
       });
     }
 
-    volumeSeriesRef.current?.setData(
-      volume.map(v => ({
+    volumeSeriesRef.current!.setData(
+      volume!.map(v => ({
         time: toTime(v.date),
         value: v.value,
         color: v.isUp ? VOLUME_UP_COLOR : VOLUME_DOWN_COLOR,
       })),
     );
   }, [volume]);
+
+  // RSI pane — visible 토글에 따라 pane 생성/제거. 70/30 과매수/과매도 가이드 포함.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const shouldShow = rsi != null && rsi.visible && rsi.values.length > 0;
+
+    if (!shouldShow) {
+      for (const ref of [rsiSeriesRef, rsiOverboughtRef, rsiOversoldRef]) {
+        if (ref.current) {
+          chart.removeSeries(ref.current);
+          ref.current = null;
+        }
+      }
+      if (rsiPaneRef.current) {
+        chart.removePane(rsiPaneRef.current.paneIndex());
+        rsiPaneRef.current = null;
+      }
+      return;
+    }
+
+    if (!rsiPaneRef.current) {
+      const pane = chart.addPane();
+      pane.setHeight(RSI_PANE_HEIGHT_PX);
+      rsiPaneRef.current = pane;
+    }
+    const pane = rsiPaneRef.current;
+    if (!pane) return;
+
+    if (!rsiSeriesRef.current) {
+      rsiSeriesRef.current = pane.addSeries(LineSeries, {
+        color: rsi!.color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+    if (!rsiOverboughtRef.current) {
+      rsiOverboughtRef.current = pane.addSeries(LineSeries, {
+        color: RSI_GUIDE_COLOR,
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+    if (!rsiOversoldRef.current) {
+      rsiOversoldRef.current = pane.addSeries(LineSeries, {
+        color: RSI_GUIDE_COLOR,
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+
+    rsiSeriesRef.current!.applyOptions({ color: rsi!.color });
+    rsiSeriesRef.current!.setData(toLinePoints(data, rsi!.values));
+
+    // 가이드 라인: 데이터 전 구간 x 위에 y=70 / y=30 평행선.
+    const guideOverbought = data.map(d => ({ time: toTime(d.date), value: 70 }));
+    const guideOversold = data.map(d => ({ time: toTime(d.date), value: 30 }));
+    rsiOverboughtRef.current!.setData(guideOverbought);
+    rsiOversoldRef.current!.setData(guideOversold);
+  }, [rsi, data]);
+
+  // MACD pane — MACD/Signal 라인 + Histogram (양/음 색 분리).
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const shouldShow =
+      macd != null && macd.visible && macd.macd.length > 0;
+
+    if (!shouldShow) {
+      for (const ref of [macdLineRef, macdSignalRef, macdHistRef]) {
+        if (ref.current) {
+          chart.removeSeries(ref.current);
+          ref.current = null;
+        }
+      }
+      if (macdPaneRef.current) {
+        chart.removePane(macdPaneRef.current.paneIndex());
+        macdPaneRef.current = null;
+      }
+      return;
+    }
+
+    if (!macdPaneRef.current) {
+      const pane = chart.addPane();
+      pane.setHeight(MACD_PANE_HEIGHT_PX);
+      macdPaneRef.current = pane;
+    }
+    const pane = macdPaneRef.current;
+    if (!pane) return;
+
+    if (!macdHistRef.current) {
+      macdHistRef.current = pane.addSeries(HistogramSeries, {
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+    }
+    if (!macdLineRef.current) {
+      macdLineRef.current = pane.addSeries(LineSeries, {
+        color: macd!.colors.macd,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+    if (!macdSignalRef.current) {
+      macdSignalRef.current = pane.addSeries(LineSeries, {
+        color: macd!.colors.signal,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+
+    macdLineRef.current!.applyOptions({ color: macd!.colors.macd });
+    macdSignalRef.current!.applyOptions({ color: macd!.colors.signal });
+    macdLineRef.current!.setData(toLinePoints(data, macd!.macd));
+    macdSignalRef.current!.setData(toLinePoints(data, macd!.signal));
+
+    // Histogram 은 포인트별로 양/음 색 분리.
+    const histPoints: Array<{ time: Time; value: number; color: string }> = [];
+    for (let i = 0; i < macd!.histogram.length; i++) {
+      const v = macd!.histogram[i];
+      if (!Number.isFinite(v)) continue;
+      const dp = data[i];
+      if (!dp) continue;
+      histPoints.push({
+        time: toTime(dp.date),
+        value: v,
+        color: v >= 0 ? macd!.colors.up : macd!.colors.down,
+      });
+    }
+    macdHistRef.current!.setData(histPoints);
+  }, [macd, data]);
 
   return (
     <div className="relative h-full w-full">

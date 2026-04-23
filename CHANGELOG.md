@@ -7,6 +7,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] feat(chart): v1.1 Sprint B 체크포인트 3 — 토글 UI + RSI/MACD pane + localStorage
+
+### Added
+- `src/lib/hooks/useIndicatorPreferences.ts` — SSR-safe 로컬 저장 훅
+  - `useSyncExternalStore` 기반 (Next 16 `react-hooks/set-state-in-effect` 규칙 회피)
+  - 인메모리 subscribers 로 같은 탭 내 변경 즉시 반영
+  - 수동 타입 가드 (`isValidPrefs`) — zod 의존성 없음
+  - 기본값: MA5/MA20/Volume ON, MA60/MA120/RSI/MACD OFF
+- `src/components/charts/IndicatorTogglePanel.tsx` — 7 개 토글 (MA4 + 거래량 + RSI + MACD)
+  - `aria-pressed` + `focus-visible:ring` + 색칩 + 키보드 접근
+
+### Changed
+- `PriceAreaChart.tsx` — RSI/MACD pane 동적 생성·제거 로직
+  - `chart.removePane(paneIndex())` 로 토글 OFF 시 pane 완전 제거 (공간 차지 없음)
+  - Volume pane 도 동일 패턴으로 통일 (기존 `setData([])` → `removePane`)
+  - RSI: 과매수 70 / 과매도 30 가이드 라인 점선
+  - MACD: MACD 라인 + Signal 라인 + Histogram (양/음 색 분리)
+  - 마커 grade 색 테이블 (체크포인트 1 에서 추가) 유지
+- `page.tsx` — `useIndicatorPreferences` wire, `IndicatorTogglePanel` 삽입, `rsiSeries` / `macdSeries` props 전달
+  - `closes` 별도 useMemo 로 MA/RSI/MACD 공통 입력 공유
+  - `volumeProp` 은 `prefs.volume` 에 따라 전달/미전달
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과
+- `/stocks/005930` Lighthouse Perf **96** (↑1) / A11y 100 / BP 100 / SEO 100
+  - 기본 prefs 에서 MA60/120/RSI/MACD OFF → 초기 시리즈 감소로 Perf 개선
+
+### Next (Sprint B 잔여)
+- 체크포인트 4 — sr-only 대체 테이블 + 모바일 breakpoint 토글 기본 차등 + 최종 회귀 + HANDOFF 업데이트
+
+---
+
 ## [2026-04-23] feat(indicators): v1.1 Sprint B 체크포인트 2 — RSI(14) + MACD(12,26,9) 유틸
 
 ### Added
