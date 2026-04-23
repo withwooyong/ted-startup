@@ -1,9 +1,9 @@
 # Session Handoff
 
-> Last updated: 2026-04-23 14:43 (추가 세션 — **/stocks/005930 A11y 95 → 100 달성**, color-contrast 감사 완전 통과)
+> Last updated: 2026-04-23 16:00 (추가 세션 — **v1.1 Sprint A 완주: 캔들 + MA 4개 + Volume pane + 줌/팬 + OHLCV 툴팁, Lighthouse 무회귀**)
 > Current branch: `master`
-> Latest commit (본 작업): fix(frontend): /stocks/005930 색 대비 잔존 2건 스팟 수정 + 문서 갱신
-> 직전 커밋: `4e660a9` — fix(frontend): WCAG AA 색 대비 muted `#3D4A5C → #7A8699` 전역 교체
+> Latest commit (본 작업 예정): feat(chart): v1.1 Sprint A — 캔들 + MA + Volume + 줌/팬 + OHLCV 툴팁
+> 직전 커밋: `ccc7c51` — fix(scripts): docker-rebuild.sh prod 모드 env-file 자동 주입
 
 ## Current Status
 

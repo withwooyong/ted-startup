@@ -154,5 +154,57 @@
     {"id": "self-invocation-transactional", "resolved_in": "(Verify)", "severity": "HIGH", "note": "B-H1 — MarketDataPersistService 신규 빈으로 persistAll 분리. Spring AOP 프록시가 @Transactional을 정상 적용"},
     {"id": "persistall-dead-code", "resolved_in": "(Verify)", "severity": "HIGH", "note": "B-H2 — findByStockId(null, date, date) 호출 및 미사용 existingPriceIds 변수 삭제"},
     {"id": "batch-idempotency", "resolved_in": "(Verify)", "severity": "HIGH", "note": "B-H3 — 일자별 기존 레코드 stockId 집합을 1회 조회 후 skip. 수동 재수집 시 유니크 제약 충돌 방지, 스킵 건수 로깅"}
-  ]
+  ],
+  "iterations": {
+    "v1.1-chart-upgrade": {
+      "current_phase": "Phase 1 Discovery + Sprint A (완료, Judge PASS 9.20)",
+      "process_scope": "옵션 β — biz-analyst + pm + judge (marketing/crm 생략, 내부 기술 고도화 성격) + γ — A1 PoC 스파이크 선행",
+      "judge_score": 9.20,
+      "judge_verdict": "PASS",
+      "judge_report": "pipeline/decisions/discovery-v1.1-judge.md",
+      "artifacts": [
+        "pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md",
+        "pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md",
+        "pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md",
+        "pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md",
+        "pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md",
+        "pipeline/decisions/discovery-v1.1-judge.md"
+      ],
+      "scope_summary": "Candlestick + MA(5/20/60/120) + Volume + RSI(14) + MACD(12,26,9) + 토글 UI + localStorage 영속화 + 줌/팬 + OHLCV 툴팁 + sr-only 접근성",
+      "scope_deferred": "Bollinger Bands (v1.2), 지표 파라미터 편집 UI (v1.2), DB 영속화 (v1.2)",
+      "sprint_plan_summary": "Sprint A 5.5d (가격 페인 완성) + Sprint B 6.3d (지표 생태계 + 영속화) = 3주 내",
+      "dependencies_verified": {
+        "lightweight_charts_v5": true,
+        "backend_ohlcv_schema": true,
+        "krx_crawler_ohlc_parsing": true,
+        "real_ohlc_data_present": "verified — 005930 753 rows 100% OHLC, last 90 days 62/62 (A1 PoC 2026-04-23)",
+        "multi_pane_api_verified": "verified — addPane + IPane.setHeight in typings.d.ts:1689,1932 (A1 PoC 2026-04-23)"
+      },
+      "sprint_a_progress": {
+        "A1_poc": "completed",
+        "A2_candlestick": "completed",
+        "A3_sma_util": "completed",
+        "A4_ma_overlay": "completed",
+        "A5_volume_pane": "completed",
+        "A6_zoom_pan": "completed",
+        "A7_ohlcv_tooltip": "completed",
+        "A8_regression": "completed",
+        "effort_remaining_days": 0,
+        "gate_a_auto_checks_passed": "3/4 (모바일 터치 실기기 확인만 수동 대기)",
+        "final_lighthouse": {
+          "path": "/stocks/005930",
+          "performance": 95,
+          "accessibility": 100,
+          "best_practices": 100,
+          "seo": 100
+        }
+      },
+      "status": "sprint_a_completed",
+      "open_risks": [
+        {"id": "RISK-C03", "impact": "Medium", "note": "FE 지표 계산 성능 (500 포인트 × 지표 5개) — Sprint B 자연 모니터링"}
+      ],
+      "next_step": "Sprint B — indicators/rsi.ts + indicators/macd.ts + IndicatorTogglePanel + useIndicatorPreferences (localStorage) + sr-only 테이블",
+      "last_updated": "2026-04-23T16:30:00+09:00"
+    }
+  }
 }

@@ -10,7 +10,13 @@ import {
   SIGNAL_TYPE_LABELS,
   GRADE_COLORS,
 } from '@/types/signal';
-import type { SignalMarker } from '@/components/charts/PriceAreaChart';
+import type {
+  CandlePoint,
+  MALine,
+  SignalMarker,
+  VolumePoint,
+} from '@/components/charts/PriceAreaChart';
+import { sma } from '@/lib/indicators';
 
 const PriceAreaChart = dynamic(
   () => import('@/components/charts/PriceAreaChart'),
@@ -74,12 +80,57 @@ export default function StockDetailPage() {
 
   // lightweight-charts 는 'YYYY-MM-DD' 풀 포맷 요구 (slice 금지).
   // Rules-of-Hooks: early return 앞에서 호출되도록 위치 고정.
-  const chartData = useMemo(
-    () =>
-      data?.prices.map(p => ({ date: p.trading_date, price: p.close_price })) ??
-      [],
-    [data?.prices]
-  );
+  // v1.1: CandlestickSeries 용 OHLC 매핑 + Volume histogram 용 매핑. 한 패스로 처리해 N*2 순회 방지.
+  // 0값/null 레코드(부분 수집 실패, 공휴일 등)는 사전 제거.
+  const { chartData, volumeData } = useMemo<{
+    chartData: CandlePoint[];
+    volumeData: VolumePoint[];
+  }>(() => {
+    if (!data) return { chartData: [], volumeData: [] };
+    const candles: CandlePoint[] = [];
+    const volumes: VolumePoint[] = [];
+    for (const p of data.prices) {
+      if (
+        p.open_price == null ||
+        p.high_price == null ||
+        p.low_price == null ||
+        p.open_price <= 0 ||
+        p.high_price <= 0 ||
+        p.low_price <= 0 ||
+        p.close_price <= 0
+      ) {
+        continue;
+      }
+      candles.push({
+        date: p.trading_date,
+        open: p.open_price,
+        high: p.high_price,
+        low: p.low_price,
+        close: p.close_price,
+      });
+      if (p.volume > 0) {
+        volumes.push({
+          date: p.trading_date,
+          value: p.volume,
+          isUp: p.close_price >= p.open_price,
+        });
+      }
+    }
+    return { chartData: candles, volumeData: volumes };
+  }, [data]);
+
+  // MA(5/20/60/120) — 차트의 closes 를 기반으로 FE 계산. NaN 구간은 차트에서 자동 생략.
+  // 지표 on/off 토글 UI 는 Sprint B 에서 추가 예정이므로 visible=true 고정.
+  const maLines = useMemo<MALine[]>(() => {
+    if (chartData.length === 0) return [];
+    const closes = chartData.map(c => c.close);
+    return [
+      { window: 5, values: sma(closes, 5), color: '#FFCC00', visible: true },
+      { window: 20, values: sma(closes, 20), color: '#FF8B3E', visible: true },
+      { window: 60, values: sma(closes, 60), color: '#00D68F', visible: true },
+      { window: 120, values: sma(closes, 120), color: '#A78BFA', visible: true },
+    ];
+  }, [chartData]);
   const signalMarkers = useMemo<SignalMarker[]>(() => {
     if (!data) return [];
     const priceByDate = new Map(
@@ -87,7 +138,7 @@ export default function StockDetailPage() {
     );
     return data.signals.flatMap(s => {
       const price = priceByDate.get(s.signal_date);
-      return price != null ? [{ date: s.signal_date, price, label: s.grade }] : [];
+      return price != null && price > 0 ? [{ date: s.signal_date, price, label: s.grade }] : [];
     });
   }, [data]);
 
@@ -218,7 +269,12 @@ export default function StockDetailPage() {
       <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4 mb-6">
         {chartData.length > 0 ? (
           <div className="aspect-[1.4/1] sm:aspect-[2/1]">
-            <PriceAreaChart data={chartData} markers={signalMarkers} />
+            <PriceAreaChart
+              data={chartData}
+              markers={signalMarkers}
+              maLines={maLines}
+              volume={volumeData}
+            />
           </div>
         ) : (
           <div className="text-center py-16 text-[#6B7A90]">차트 데이터가 없어요</div>

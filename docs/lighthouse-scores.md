@@ -71,6 +71,17 @@ open lighthouse-reports/root.html     # 대시보드 상세
 > **측정 환경**: macOS · `docker compose -f docker-compose.prod.yml` 재빌드 직후 · caddy self-signed HTTPS · Chrome headless · 모바일 4G throttle 기본값 · 각 페이지 1회 측정(중앙값 아님).
 > **비로그인 주의**: `/portfolio`, `/settings`, `/portfolio/1/alignment` 는 로그인 미들웨어에서 로그인 리다이렉트 셸이 반환됐을 가능성. 실데이터 상태 스코어는 수동 절차(§측정 절차 B) 로 보완 필요.
 
+### v1.1 Sprint A 완료 후 — 2026-04-23 재측정 (`/stocks/005930` 단일 집중)
+
+| 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 변화 |
+|---|---|---:|---:|---:|---:|---|
+| `/stocks/005930` | 2026-04-23 15:58 | 95 → **95** | 100 → **100** | 100 | 100 | v1.1 Sprint A 전체 투입 (캔들 + MA 4개 + Volume pane + 줌/팬 + OHLCV 툴팁) 후에도 **완전 무회귀**. canvas 기반 lightweight-charts + FE 자체 지표 계산(O(n) 슬라이딩)의 경량성 입증. |
+
+> **A8 회귀 검증 결과**: Sprint A 의 모든 기능 추가(차트 기능 +6, 시리즈 +5개, pane +1)가 스코어에 영향 0. first-load JS 순증 추정 <5KB (SMA 유틸 ~0.4KB + 내부 로직만, 외부 의존성 0).
+> **Gate A 판정**: 3/4 자동 통과. 모바일 실기기 터치 핀치 줌/팬만 수동 확인 대기.
+
+---
+
 ### A11y 색 대비 수정 후 — 2026-04-23 재측정 (`/stocks/005930` 단일 집중)
 
 | 페이지 | 측정일 | Performance | Accessibility | Best Practices | SEO | 변화 |

@@ -7,6 +7,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] feat(chart): v1.1 Sprint A — 캔들 + MA + Volume + 줌/팬 + OHLCV 툴팁
+
+v1.1 `/stocks/[code]` 차트 고도화 Sprint A (A1~A8) 일괄 완료. `/plan` 으로 Discovery 수행 후 A1 PoC 로 2대 리스크 해소 → A2~A7 구현 → A8 회귀 검증까지 한 세션 완주.
+
+### Pipeline 산출물 (신규)
+- `pipeline/artifacts/00-input/user-request-v1.1-chart-upgrade.md` — (C) 풀 스택 범위 확정
+- `pipeline/artifacts/01-requirements/requirements-v1.1-chart-upgrade.md` — US 12 + FR 12 + NFR 8 + Risk 5
+- `pipeline/artifacts/02-prd/prd-v1.1-chart-upgrade.md` — PRD 8 섹션
+- `pipeline/artifacts/02-prd/roadmap-v1.1-chart-upgrade.md` — 3/6/12 개월
+- `pipeline/artifacts/02-prd/sprint-plan-v1.1-chart-upgrade.md` — RICE + 2 Sprint 분해
+- `pipeline/decisions/discovery-v1.1-judge.md` — Judge **PASS 9.20**
+
+### PoC 결과 (RISK 해소)
+- **RISK-C01** (KRX 실데이터) — 005930 753 거래일 100% OHLC + 최근 90일 62/62 확인 (2026-04-20 1건만 0값 → 방어 필터)
+- **RISK-C02** (v5 multi-pane API) — `typings.d.ts:1689,1932` 의 `addPane` + `IPane.setHeight` 확인, JSDoc 3-pane 예시 (`:2002-2004`)
+
+### Added
+- `src/frontend/src/lib/indicators/sma.ts` — Simple Moving Average, O(n) 슬라이딩 윈도우, NaN 구간 자동 생략
+- `src/frontend/src/lib/indicators/index.ts` — barrel export
+
+### Changed
+- `src/frontend/src/components/charts/PriceAreaChart.tsx` — 전면 재구성
+  - **A2** AreaSeries → **CandlestickSeries** (한국 증시 색: 상승 `#FF4D6A` / 하락 `#6395FF`)
+  - **A4** MA(5/20/60/120) LineSeries 4개 오버레이 (색 팔레트: 노랑/오렌지/녹색/보라), window 별 `Map` 관리
+  - **A5** Volume HistogramSeries — `chart.addPane()` + `IPane.setHeight(96px)`, 반투명 상승/하락 색
+  - **A6** 줌/팬 활성화 (`handleScroll: true`, `handleScale: true`)
+  - **A7** OHLCV 툴팁 — `subscribeCrosshairMove` + React state 오버레이 (우상단, `pointer-events-none`, `aria-live="polite"`)
+  - 시그널 마커 `inBar → aboveBar` (캔들 바디와 겹치지 않도록), 색 `#FFCC00`
+- `src/frontend/src/app/stocks/[code]/page.tsx` — `chartData`/`volumeData` 단일 패스 병합 계산 (0값/null 레코드 사전 제거), MA 4개 lines useMemo 추가
+- `docs/lighthouse-scores.md` — Sprint A 완료 측정 prepend
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과 (warning 0)
+- prod docker 스택 재빌드 + caddy self-signed HTTPS 경유 측정
+- `/stocks/005930` — **Perf 95 / A11y 100 / BP 100 / SEO 100** (무회귀, Sprint A 전체 투입에도 동일 스코어)
+
+### Scope Kept (Sprint B 이월)
+- RSI(14) / MACD(12,26,9) 페인
+- 지표 on/off 토글 UI (`IndicatorTogglePanel`)
+- localStorage 영속화 (`useIndicatorPreferences`)
+- sr-only 접근성 테이블
+- 모바일 breakpoint 기본 토글 집합 차등
+
+### Known — 수동 확인 필요
+- 모바일 실기기 (iPhone SE / Galaxy S8) 터치 핀치 줌/팬 UX 확인
+
+---
+
 ## [2026-04-23] fix(scripts): `docker-rebuild.sh` prod 모드 `--env-file` 자동 주입
 
 A11y 재측정을 위해 `./scripts/docker-rebuild.sh prod` 실행 시 compose 변수 interpolation 이 안 되어 POSTGRES/ADMIN 등이 blank 로 기동되고 backend 가 unhealthy 로 실패하던 버그 수정.
