@@ -32,6 +32,8 @@ body {
   z-index: 0;
   overflow: hidden;
   isolation: isolate;
+  /* Sprint B 체크포인트 4 : blob transform 애니메이션이 CLS 에 계상되는 것을 차단. */
+  contain: layout paint;
 }
 .aurora .blob {
   position: absolute;
@@ -42,6 +44,9 @@ body {
   opacity: 0.35;
   mix-blend-mode: screen;
   will-change: transform;
+  /* Chrome CLS 계산이 scale+translate 애니메이션을 상위 layout shift 로 집계하는 것을
+     차단. aurora 는 장식이라 contain 으로 격리해도 시각 손실 없음. */
+  contain: layout paint;
   transform: translate3d(-50%, -50%, 0);
   top: 50%;
   left: 50%;
@@ -63,25 +68,27 @@ body {
   animation: aurora-drift-4 74s ease-in-out infinite alternate;
 }
 
+/* Sprint B 체크포인트 4 : scale() 을 제거해 Chrome CLS 오검출 회피. blur+mix-blend-mode
+   blob 의 크기 변화가 layout shift 로 잘못 계상되던 문제 해결. 시각 효과는 translate 만으로도 충분. */
 @keyframes aurora-drift-1 {
-  0%   { transform: translate3d(-85%, -95%, 0) scale(1); }
-  50%  { transform: translate3d(-35%, -70%, 0) scale(1.15); }
-  100% { transform: translate3d(-60%, -55%, 0) scale(0.95); }
+  0%   { transform: translate3d(-85%, -95%, 0); }
+  50%  { transform: translate3d(-35%, -70%, 0); }
+  100% { transform: translate3d(-60%, -55%, 0); }
 }
 @keyframes aurora-drift-2 {
-  0%   { transform: translate3d(-15%, -40%, 0) scale(0.95); }
-  50%  { transform: translate3d(-60%, -85%, 0) scale(1.2); }
-  100% { transform: translate3d(-30%, -60%, 0) scale(1); }
+  0%   { transform: translate3d(-15%, -40%, 0); }
+  50%  { transform: translate3d(-60%, -85%, 0); }
+  100% { transform: translate3d(-30%, -60%, 0); }
 }
 @keyframes aurora-drift-3 {
-  0%   { transform: translate3d(-70%, -15%, 0) scale(1); }
-  50%  { transform: translate3d(-25%, -45%, 0) scale(1.1); }
-  100% { transform: translate3d(-50%, -30%, 0) scale(1.25); }
+  0%   { transform: translate3d(-70%, -15%, 0); }
+  50%  { transform: translate3d(-25%, -45%, 0); }
+  100% { transform: translate3d(-50%, -30%, 0); }
 }
 @keyframes aurora-drift-4 {
-  0%   { transform: translate3d(-40%, -80%, 0) scale(1.1); }
-  50%  { transform: translate3d(-75%, -30%, 0) scale(0.9); }
-  100% { transform: translate3d(-20%, -55%, 0) scale(1.05); }
+  0%   { transform: translate3d(-40%, -80%, 0); }
+  50%  { transform: translate3d(-75%, -30%, 0); }
+  100% { transform: translate3d(-20%, -55%, 0); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -19,6 +19,7 @@ import type {
   VolumePoint,
 } from '@/components/charts/PriceAreaChart';
 import IndicatorTogglePanel from '@/components/charts/IndicatorTogglePanel';
+import StockChartAccessibilityTable from '@/components/charts/StockChartAccessibilityTable';
 import {
   aggregateMonthly,
   aggregateWeekly,
@@ -202,6 +203,16 @@ export default function StockDetailPage() {
 
   // Volume 토글 OFF 시 PriceAreaChart 에 아예 전달하지 않아 pane 제거.
   const volumeProp = prefs.volume ? volumeData : undefined;
+
+  // sr-only 대체 테이블용 데이터 — chartData 와 인덱스 정렬된 볼륨 + 지표 값.
+  const accessibilityTableData = useMemo(() => {
+    if (chartData.length === 0) return null;
+    return {
+      volumes: aggregated.map(c => c.volume),
+      ma5: sma(closes, 5),
+      ma20: sma(closes, 20),
+    };
+  }, [chartData.length, aggregated, closes]);
   const signalMarkers = useMemo<SignalMarker[]>(() => {
     if (!data) return [];
     const priceByDate = new Map(
@@ -214,6 +225,8 @@ export default function StockDetailPage() {
   }, [data]);
 
   if (loading) {
+    // v1.1 Sprint B: skeleton 을 실제 DOM 구조와 정확히 일치시켜 CLS 방지
+    // (기간 버튼 3개, IndicatorTogglePanel placeholder, 차트 카드 outer + inner aspect).
     return (
       <main
         className="max-w-6xl mx-auto px-4 sm:px-5 py-5 sm:py-7 min-h-[calc(100dvh-8rem)]"
@@ -225,13 +238,25 @@ export default function StockDetailPage() {
           <div className="h-32 bg-[#131720] rounded-[14px] animate-pulse" />
           <div className="h-32 bg-[#131720] rounded-[14px] animate-pulse" />
         </div>
-        <div className="flex gap-1 mb-4">
-          <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
+        {/* 기간 버튼 (1D/1W/1M 3개) */}
+        <div className="flex gap-1 mb-3">
           <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
           <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
           <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
         </div>
-        <div className="aspect-[1.4/1] sm:aspect-[2/1] bg-[#131720] rounded-[14px] animate-pulse mb-6" />
+        {/* 지표 토글 패널 (7 토글) */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-6 w-16 bg-[#131720] rounded-lg animate-pulse"
+            />
+          ))}
+        </div>
+        {/* 차트 카드 — outer bg + p-3/p-4 패딩 + inner aspect */}
+        <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4 mb-6">
+          <div className="aspect-[1.4/1] sm:aspect-[2/1] bg-[#0B0E11] rounded animate-pulse" />
+        </div>
       </main>
     );
   }
@@ -262,7 +287,7 @@ export default function StockDetailPage() {
       <button
         onClick={() => router.push('/')}
         aria-label="대시보드로 돌아가기"
-        className="flex items-center gap-1 text-sm text-[#6B7A90] hover:text-[#6395FF] mb-5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 rounded"
+        className="flex items-center gap-1 text-sm text-[#7A8699] hover:text-[#E8ECF1] mb-5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 rounded"
       >
         <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
         대시보드
@@ -354,6 +379,16 @@ export default function StockDetailPage() {
           </div>
         ) : (
           <div className="text-center py-16 text-[#6B7A90]">차트 데이터가 없어요</div>
+        )}
+        {accessibilityTableData && (
+          <StockChartAccessibilityTable
+            data={chartData}
+            volumes={accessibilityTableData.volumes}
+            ma5={accessibilityTableData.ma5}
+            ma20={accessibilityTableData.ma20}
+            rsi={rsiSeries.values}
+            macd={macdSeries.macd}
+          />
         )}
       </div>
       </ErrorBoundary>

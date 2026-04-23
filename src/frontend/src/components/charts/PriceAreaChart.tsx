@@ -514,7 +514,14 @@ export default function PriceAreaChart({
 
   return (
     <div className="relative h-full w-full">
-      <div ref={containerRef} className="h-full w-full" />
+      {/* canvas/table 이 내부에 있어 aria-hidden 은 aria-hidden-focus 규칙을 건드림.
+          role="img" + aria-label 로 차트를 이미지로 취급하고, 상세 수치는 sr-only 테이블로 전달. */}
+      <div
+        ref={containerRef}
+        className="h-full w-full"
+        role="img"
+        aria-label="가격 캔들 차트 (상세 수치는 아래 표 참조)"
+      />
       {tooltip && (
         <div
           className="absolute top-2 right-2 z-10 bg-[#131720]/90 border border-white/10 rounded-lg px-3 py-2 text-[0.7rem] font-[family-name:var(--font-mono)] pointer-events-none backdrop-blur-sm"

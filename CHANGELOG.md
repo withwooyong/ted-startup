@@ -7,6 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] feat(chart): v1.1 Sprint B 체크포인트 4 — sr-only 테이블 + aria 정리 + Sprint B 완주
+
+### Added
+- `src/frontend/src/components/charts/StockChartAccessibilityTable.tsx` — sr-only 대체 테이블
+  - 최근 30 거래일 OHLCV + MA5 / MA20 / RSI(14) / MACD 10 컬럼
+  - `aria-label` + `<caption>` + `scope="col"` / `scope="row"` 로 SR 네비게이션 지원
+
+### Changed
+- `PriceAreaChart.tsx` — container div `aria-hidden="true"` → `role="img" + aria-label` (aria-hidden 내부 focusable 룰 충돌 해소)
+- `page.tsx` — back 버튼 `text-[#6B7A90]` → `text-[#7A8699]` (AA 4.43:1 → 4.86:1)
+- `page.tsx` — loading skeleton 을 실제 DOM 과 정확히 일치 (기간 버튼 3 개, 토글 패널 placeholder 7 개, 차트 카드 outer+inner 구조)
+- `globals.css` — `.aurora` / `.aurora .blob` 에 `contain: layout paint` 추가, `aurora-drift-*` keyframes 에서 `scale()` 제거 (Chrome CLS 오검출 회피 시도)
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과
+- `/stocks/005930` — Perf **80** / **A11y 100** / BP **100** / SEO **100**
+
+### Known Issue (후속)
+- **Perf 95 → 80 회귀** — aurora blob transform 애니메이션이 Chrome Lighthouse 에서 CLS culprit 으로 계상 (실측 `div.blob` 단일 소스로 CLS 0.393). 여러 차례 완화 시도 (`contain: layout paint` × 2, keyframe scale 제거) 효과 미미. Sprint B 기능 자체는 무회귀 (A11y/BP/SEO 모두 100). **실기기 체감 성능 확인 후 aurora 애니메이션 정적화 여부 별도 디자인 PR** 권장.
+
+### Sprint B 완주 요약
+- B0 봉 주기 (1D/1W/1M) + OHLC 재집계 ✅
+- B1 + B2 RSI(14) / MACD(12,26,9) 유틸 ✅
+- B3 + B4 RSI/MACD pane (동적 생성·제거) ✅
+- B5 IndicatorTogglePanel ✅
+- B6 useIndicatorPreferences (useSyncExternalStore + localStorage) ✅
+- B7 StockChartAccessibilityTable (sr-only) ✅
+- B8 모바일 breakpoint 기본값 차등 — DEFAULT_PREFS 자체가 이미 "MA5/MA20/Volume 만 ON" 이라 별도 breakpoint 로직 불필요 ✅
+- B9 + B10 회귀 + QA ✅ (Perf 회귀 1 건 Known Issue)
+- 시그널 마커 grade 색 구분 (사용자 요청) ✅
+
+---
+
 ## [2026-04-23] feat(chart): v1.1 Sprint B 체크포인트 3 — 토글 UI + RSI/MACD pane + localStorage
 
 ### Added
