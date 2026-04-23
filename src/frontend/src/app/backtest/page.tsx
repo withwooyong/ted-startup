@@ -1,20 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getBacktestResults } from '@/lib/api/client';
-import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { BacktestSummary } from '@/types/signal';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-} from 'recharts';
+import GroupedBarChart, {
+  type CategoryRow,
+  type SeriesDef,
+} from '@/components/charts/GroupedBarChart';
+
+const RETURN_SERIES: SeriesDef[] = [
+  { key: '5d', label: '5일', color: '#6395FF' },
+  { key: '10d', label: '10일', color: '#a78bfa' },
+  { key: '20d', label: '20일', color: 'rgba(163,175,200,0.55)' },
+];
+
+const returnFormatter = (v: number) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
 
 const SIGNAL_TYPE_NAMES: Record<string, string> = {
   RAPID_DECLINE: '대차 급감',
@@ -36,7 +37,6 @@ export default function BacktestPage() {
   const [results, setResults] = useState<BacktestSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const isMobile = useMediaQuery('(max-width: 639px)');
 
   useEffect(() => {
     getBacktestResults()
@@ -47,13 +47,19 @@ export default function BacktestPage() {
   // 백엔드가 Decimal 을 string 으로 직렬화 — 안전 변환 헬퍼.
   const num = (v: string | null | undefined): number => (v ? Number(v) : 0);
 
-  // 차트 데이터 변환
-  const chartData = results.map(r => ({
-    name: SIGNAL_TYPE_NAMES[r.signal_type] || r.signal_type,
-    '5일': num(r.avg_return_5d),
-    '10일': num(r.avg_return_10d),
-    '20일': num(r.avg_return_20d),
-  }));
+  // 그룹 막대 차트 데이터 (전략 × 5/10/20일 수익률)
+  const chartData = useMemo<CategoryRow[]>(
+    () =>
+      results.map(r => ({
+        name: SIGNAL_TYPE_NAMES[r.signal_type] || r.signal_type,
+        values: {
+          '5d': num(r.avg_return_5d),
+          '10d': num(r.avg_return_10d),
+          '20d': num(r.avg_return_20d),
+        },
+      })),
+    [results]
+  );
 
   const periodStr = results.length > 0
     ? `${results[0].period_start} — ${results[0].period_end}`
@@ -193,34 +199,19 @@ export default function BacktestPage() {
 
           {/* Return Chart */}
           <ErrorBoundary resetKeys={[chartData.length]}>
-          <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4">
-            <h2 className="text-[0.78rem] font-semibold text-[#6B7A90] font-[family-name:var(--font-display)] mb-4">
-              보유기간별 평균 수익률
-            </h2>
-            <ResponsiveContainer width="100%" aspect={isMobile ? 1.4 : 2.2}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="name" tick={{ fill: '#4A5568', fontSize: 11 }} tickLine={false} />
-                <YAxis
-                  tick={{ fill: '#4A5568', fontSize: 10 }}
-                  tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`}
-                  tickLine={false}
-                  axisLine={false}
+            <div className="bg-[#131720] border border-white/[0.06] rounded-[14px] p-3 sm:p-4">
+              <h2 className="text-[0.78rem] font-semibold text-[#6B7A90] font-[family-name:var(--font-display)] mb-4">
+                보유기간별 평균 수익률
+              </h2>
+              <div className="aspect-[1.4/1] sm:aspect-[2.2/1]">
+                <GroupedBarChart
+                  data={chartData}
+                  series={RETURN_SERIES}
+                  valueFormatter={returnFormatter}
+                  ariaLabel="시그널 타입별 보유기간(5·10·20일) 평균 수익률"
                 />
-                <Tooltip
-                  contentStyle={{ background: '#1A1F28', border: 'none', borderRadius: 10, color: '#E8ECF1' }}
-                  formatter={(value) => {
-                    const v = Number(value);
-                    return [`${v > 0 ? '+' : ''}${v.toFixed(1)}%`, ''];
-                  }}
-                />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 11, color: '#6B7A90' }} />
-                <Bar dataKey="5일" fill="#6395FF" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="10일" fill="#a78bfa" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="20일" fill="rgba(99,149,255,0.2)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+              </div>
+            </div>
           </ErrorBoundary>
         </>
       )}
