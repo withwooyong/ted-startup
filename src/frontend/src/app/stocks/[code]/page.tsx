@@ -16,7 +16,12 @@ import type {
   SignalMarker,
   VolumePoint,
 } from '@/components/charts/PriceAreaChart';
-import { sma } from '@/lib/indicators';
+import {
+  aggregateMonthly,
+  aggregateWeekly,
+  sma,
+  type DailyCandle,
+} from '@/lib/indicators';
 
 const PriceAreaChart = dynamic(
   () => import('@/components/charts/PriceAreaChart'),
@@ -28,11 +33,18 @@ const PriceAreaChart = dynamic(
   }
 );
 
-const PERIODS = [
-  { label: '1M', months: 1 },
-  { label: '3M', months: 3 },
-  { label: '6M', months: 6 },
-  { label: '1Y', months: 12 },
+// v1.1 B0: 기간 버튼을 봉 주기로 재정의.
+// 1D=일봉 (3 개월치 fetch), 1W=주봉 (1 년치 fetch → 주봉 재집계), 1M=월봉 (3 년치 fetch → 월봉 재집계).
+type PeriodKey = 'day' | 'week' | 'month';
+
+const PERIODS: ReadonlyArray<{
+  key: PeriodKey;
+  label: string;
+  monthsFetch: number;
+}> = [
+  { key: 'day', label: '1D', monthsFetch: 3 },
+  { key: 'week', label: '1W', monthsFetch: 12 },
+  { key: 'month', label: '1M', monthsFetch: 36 },
 ];
 
 export default function StockDetailPage() {
@@ -41,7 +53,7 @@ export default function StockDetailPage() {
   const rawCode = params.code;
   const code = Array.isArray(rawCode) ? rawCode[0] : rawCode ?? '';
   const [data, setData] = useState<StockDetail | null>(null);
-  const [period, setPeriod] = useState(3);
+  const [period, setPeriod] = useState<PeriodKey>('day');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prevKey, setPrevKey] = useState(`${code}:${period}`);
@@ -58,9 +70,10 @@ export default function StockDetailPage() {
     // 기간 버튼 빠른 전환 시 stale response 가 최신 state 를 덮어쓰는 것을 막기 위해
     // AbortController 로 이전 요청을 실제 네트워크 레벨에서 취소한다.
     const controller = new AbortController();
+    const cfg = PERIODS.find(p => p.key === period) ?? PERIODS[0];
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
-    fromDate.setMonth(fromDate.getMonth() - period);
+    fromDate.setMonth(fromDate.getMonth() - cfg.monthsFetch);
     const from = fromDate.toISOString().split('T')[0];
 
     getStockDetail(code, from, to, { signal: controller.signal })
@@ -80,15 +93,10 @@ export default function StockDetailPage() {
 
   // lightweight-charts 는 'YYYY-MM-DD' 풀 포맷 요구 (slice 금지).
   // Rules-of-Hooks: early return 앞에서 호출되도록 위치 고정.
-  // v1.1: CandlestickSeries 용 OHLC 매핑 + Volume histogram 용 매핑. 한 패스로 처리해 N*2 순회 방지.
-  // 0값/null 레코드(부분 수집 실패, 공휴일 등)는 사전 제거.
-  const { chartData, volumeData } = useMemo<{
-    chartData: CandlePoint[];
-    volumeData: VolumePoint[];
-  }>(() => {
-    if (!data) return { chartData: [], volumeData: [] };
-    const candles: CandlePoint[] = [];
-    const volumes: VolumePoint[] = [];
+  // v1.1: 단일 패스로 일봉 OHLCV 배열 생성. 0값/null 레코드(부분 수집 실패, 공휴일 등)는 사전 제거.
+  const dailyCandles = useMemo<DailyCandle[]>(() => {
+    if (!data) return [];
+    const candles: DailyCandle[] = [];
     for (const p of data.prices) {
       if (
         p.open_price == null ||
@@ -107,20 +115,41 @@ export default function StockDetailPage() {
         high: p.high_price,
         low: p.low_price,
         close: p.close_price,
+        volume: p.volume,
       });
-      if (p.volume > 0) {
-        volumes.push({
-          date: p.trading_date,
-          value: p.volume,
-          isUp: p.close_price >= p.open_price,
-        });
-      }
     }
-    return { chartData: candles, volumeData: volumes };
+    return candles;
   }, [data]);
 
-  // MA(5/20/60/120) — 차트의 closes 를 기반으로 FE 계산. NaN 구간은 차트에서 자동 생략.
-  // 지표 on/off 토글 UI 는 Sprint B 에서 추가 예정이므로 visible=true 고정.
+  // v1.1 B0: period 에 따라 일봉/주봉/월봉 재집계. chartData 는 volume 을 뺀 CandlePoint.
+  const aggregated = useMemo<DailyCandle[]>(() => {
+    if (dailyCandles.length === 0) return [];
+    if (period === 'day') return dailyCandles;
+    if (period === 'week') return aggregateWeekly(dailyCandles);
+    return aggregateMonthly(dailyCandles);
+  }, [dailyCandles, period]);
+
+  const chartData = useMemo<CandlePoint[]>(
+    () =>
+      aggregated.map(c => ({
+        date: c.date,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      })),
+    [aggregated]
+  );
+
+  const volumeData = useMemo<VolumePoint[]>(
+    () =>
+      aggregated
+        .filter(c => c.volume > 0)
+        .map(c => ({ date: c.date, value: c.volume, isUp: c.close >= c.open })),
+    [aggregated]
+  );
+
+  // MA(5/20/60/120) — 현재 period 의 closes 를 기반으로 FE 계산. NaN 구간은 차트에서 자동 생략.
   const maLines = useMemo<MALine[]>(() => {
     if (chartData.length === 0) return [];
     const closes = chartData.map(c => c.close);
@@ -245,16 +274,16 @@ export default function StockDetailPage() {
         )}
       </div>
 
-      {/* Period selector */}
-      <div className="flex gap-1 mb-4" role="group" aria-label="차트 기간 선택">
+      {/* Period selector — v1.1 B0: 봉 주기 (일봉/주봉/월봉) */}
+      <div className="flex gap-1 mb-4" role="group" aria-label="차트 봉 주기 선택">
         {PERIODS.map(p => (
           <button
-            key={p.label}
+            key={p.key}
             type="button"
-            aria-pressed={period === p.months}
-            onClick={() => setPeriod(p.months)}
+            aria-pressed={period === p.key}
+            onClick={() => setPeriod(p.key)}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50 ${
-              period === p.months
+              period === p.key
                 ? 'text-[#0B0E11] bg-[#6395FF] font-semibold'
                 : 'text-[#6B7A90] hover:text-[#E8ECF1]'
             }`}

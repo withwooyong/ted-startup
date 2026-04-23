@@ -7,6 +7,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-23] feat(chart): v1.1 Sprint B 체크포인트 1 — 봉 주기(1D/1W/1M) + 시그널 grade 색 구분
+
+### Changed
+- 기간 버튼 의미 재정의: 표시 기간(1M/3M/6M/1Y) → **봉 주기(1D 일봉 / 1W 주봉 / 1M 월봉)**
+  - `page.tsx` `PeriodKey` `'day'|'week'|'month'`, fetch monthsFetch 3/12/36
+  - `chartData`/`volumeData` 는 집계 결과에서 파생 (일봉일 때 집계 없음)
+- 시그널 마커 색 grade 별 차등: 기존 전부 `#FFCC00` → **A 노랑 / B 녹색 / C 오렌지 / D 회색**
+  - `enums.py` `SignalGrade.from_score` 기준 동기 (A ≥ 80, B ≥ 60, C ≥ 40, D < 40)
+
+### Added
+- `src/lib/indicators/aggregate.ts` — `aggregateWeekly` / `aggregateMonthly`
+  - 집계 규칙: `first.open`, `max.high`, `min.low`, `last.close`, `sum.volume`, `date = group 시작일`
+  - 주봉 키는 ISO 8601 week, 월봉 키는 `YYYY-MM`
+
+### Verified
+- `yarn tsc --noEmit` + `yarn lint` 통과 (warning 0)
+- `/stocks/005930` Lighthouse Perf 95 / A11y 100 / BP 100 / SEO 100 (무회귀)
+
+### Next (Sprint B 잔여)
+- 체크포인트 2 — RSI(14) + MACD(12,26,9) 페인
+- 체크포인트 3 — IndicatorTogglePanel + localStorage 영속화
+- 체크포인트 4 — sr-only 테이블 + 모바일 breakpoint + 회귀
+
+---
+
 ## [2026-04-23] feat(chart): v1.1 Sprint A — 캔들 + MA + Volume + 줌/팬 + OHLCV 툴팁
 
 v1.1 `/stocks/[code]` 차트 고도화 Sprint A (A1~A8) 일괄 완료. `/plan` 으로 Discovery 수행 후 A1 PoC 로 2대 리스크 해소 → A2~A7 구현 → A8 회귀 검증까지 한 세션 완주.

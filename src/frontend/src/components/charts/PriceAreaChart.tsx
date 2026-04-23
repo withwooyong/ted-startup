@@ -80,11 +80,21 @@ function mapCandle(p: CandlePoint) {
   return { time: toTime(p.date), open: p.open, high: p.high, low: p.low, close: p.close };
 }
 
+// v1.1 Sprint B: 시그널 grade(A/B/C/D) 별 색 구분. 점수 구간은 enums.py SignalGrade.from_score 와 동기.
+// A(≥80) 노랑/하이라이트 → B(60~79) 녹색 → C(40~59) 오렌지 → D(<40) 회색 (거의 무의미하므로 부각 낮춤).
+const GRADE_COLOR: Record<string, string> = {
+  A: '#FFCC00',
+  B: '#00D68F',
+  C: '#FF8B3E',
+  D: '#6B7A90',
+};
+
 function mapMarker(m: SignalMarker): SeriesMarker<Time> {
+  const color = (m.label && GRADE_COLOR[m.label]) || '#FFCC00';
   return {
     time: toTime(m.date),
     position: 'aboveBar',
-    color: '#FFCC00',
+    color,
     shape: 'circle',
     size: 1,
     text: m.label,
