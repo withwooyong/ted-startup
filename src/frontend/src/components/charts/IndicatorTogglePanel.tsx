@@ -17,6 +17,7 @@ const ITEMS: ReadonlyArray<ToggleItem> = [
   { key: 'volume', label: '거래량', color: '#FF4D6A' },
   { key: 'rsi', label: 'RSI(14)', color: '#00BCFF' },
   { key: 'macd', label: 'MACD', color: '#FF80EC' },
+  { key: 'bb', label: 'BB(20,2)', color: '#6FD4D4' },
 ];
 
 interface Props {

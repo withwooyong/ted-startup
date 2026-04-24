@@ -14,6 +14,7 @@ export interface IndicatorPrefs {
   volume: boolean;
   rsi: boolean;
   macd: boolean;
+  bb: boolean;
 }
 
 export const DEFAULT_PREFS: IndicatorPrefs = {
@@ -24,6 +25,7 @@ export const DEFAULT_PREFS: IndicatorPrefs = {
   volume: true,
   rsi: false,
   macd: false,
+  bb: false,
 };
 
 const STORAGE_KEY = 'stock-chart-indicators:v1';
@@ -36,12 +38,29 @@ const PREF_KEYS: ReadonlyArray<keyof IndicatorPrefs> = [
   'volume',
   'rsi',
   'macd',
+  'bb',
 ];
 
-function isValidPrefs(v: unknown): v is IndicatorPrefs {
+// v1.1 localStorage 에는 bb 필드가 없다. v1.2 Cp 1 에서는 전체 스키마를 v2 로
+// 전환하지 않고 bb 만 추가 — v1 데이터에 bb 가 없으면 false 로 보정해 호환.
+// (v1 → v2 전체 마이그레이션은 v1.2 Cp 2 에서.)
+function isValidPrefs(v: unknown): v is Record<string, unknown> {
   if (!v || typeof v !== 'object') return false;
   const obj = v as Record<string, unknown>;
-  return PREF_KEYS.every(k => typeof obj[k] === 'boolean');
+  return PREF_KEYS.filter(k => k !== 'bb').every(k => typeof obj[k] === 'boolean');
+}
+
+function coerceFromStored(raw: Record<string, unknown>): IndicatorPrefs {
+  return {
+    ma5: Boolean(raw.ma5),
+    ma20: Boolean(raw.ma20),
+    ma60: Boolean(raw.ma60),
+    ma120: Boolean(raw.ma120),
+    volume: Boolean(raw.volume),
+    rsi: Boolean(raw.rsi),
+    macd: Boolean(raw.macd),
+    bb: typeof raw.bb === 'boolean' ? raw.bb : false,
+  };
 }
 
 // 같은 탭 내에서의 변경은 window.storage 이벤트를 발생시키지 않으므로,
@@ -90,7 +109,7 @@ function getSnapshot(): IndicatorPrefs {
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    cachedSnapshot = isValidPrefs(parsed) ? parsed : DEFAULT_PREFS;
+    cachedSnapshot = isValidPrefs(parsed) ? coerceFromStored(parsed) : DEFAULT_PREFS;
   } catch {
     cachedSnapshot = DEFAULT_PREFS;
   }

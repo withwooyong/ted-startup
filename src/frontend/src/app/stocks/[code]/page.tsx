@@ -11,6 +11,7 @@ import {
   GRADE_COLORS,
 } from '@/types/signal';
 import type {
+  BBSeriesProp,
   CandlePoint,
   MACDSeriesProp,
   MALine,
@@ -23,6 +24,7 @@ import StockChartAccessibilityTable from '@/components/charts/StockChartAccessib
 import {
   aggregateMonthly,
   aggregateWeekly,
+  bb as calcBb,
   macd as calcMacd,
   rsi as calcRsi,
   sma,
@@ -201,6 +203,17 @@ export default function StockDetailPage() {
     };
   }, [closes, prefs.macd]);
 
+  // Bollinger Bands(20, 2) — 가격 페인 오버레이. 파라미터 편집 UI 는 v1.2 Cp 2 에서 추가.
+  // 토글 OFF 또는 데이터 없음 시 연산 회피.
+  const bbSeries = useMemo<BBSeriesProp>(() => {
+    const colors = { upper: '#6FD4D4', middle: '#A8B2BF', lower: '#6FD4D4' };
+    if (!prefs.bb || closes.length === 0) {
+      return { upper: [], middle: [], lower: [], visible: prefs.bb, colors };
+    }
+    const r = calcBb(closes, 20, 2);
+    return { upper: r.upper, middle: r.middle, lower: r.lower, visible: prefs.bb, colors };
+  }, [closes, prefs.bb]);
+
   // Volume 토글 OFF 시 PriceAreaChart 에 아예 전달하지 않아 pane 제거.
   const volumeProp = prefs.volume ? volumeData : undefined;
 
@@ -244,9 +257,9 @@ export default function StockDetailPage() {
           <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
           <div className="h-7 w-10 bg-[#131720] rounded-lg animate-pulse" />
         </div>
-        {/* 지표 토글 패널 (7 토글) */}
+        {/* 지표 토글 패널 (8 토글: MA4 + Volume + RSI + MACD + BB) */}
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div
               key={i}
               className="h-6 w-16 bg-[#131720] rounded-lg animate-pulse"
@@ -375,6 +388,7 @@ export default function StockDetailPage() {
               volume={volumeProp}
               rsi={rsiSeries}
               macd={macdSeries}
+              bb={bbSeries}
             />
           </div>
         ) : (

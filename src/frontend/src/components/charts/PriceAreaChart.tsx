@@ -61,6 +61,14 @@ export interface MACDSeriesProp {
   colors: { macd: string; signal: string; up: string; down: string };
 }
 
+export interface BBSeriesProp {
+  upper: ReadonlyArray<number>;
+  middle: ReadonlyArray<number>;
+  lower: ReadonlyArray<number>;
+  visible: boolean;
+  colors: { upper: string; middle: string; lower: string };
+}
+
 interface Props {
   data: CandlePoint[];
   markers?: SignalMarker[];
@@ -68,6 +76,7 @@ interface Props {
   volume?: ReadonlyArray<VolumePoint>; // 전달 시 pane 표시, null/빈 배열 시 pane 제거
   rsi?: RSISeriesProp;
   macd?: MACDSeriesProp;
+  bb?: BBSeriesProp;
 }
 
 interface HoverTooltip {
@@ -149,12 +158,16 @@ export default function PriceAreaChart({
   volume,
   rsi,
   macd,
+  bb,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const maSeriesMapRef = useRef<Map<number, ISeriesApi<'Line'>>>(new Map());
+  const bbUpperRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bbMiddleRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const bbLowerRef = useRef<ISeriesApi<'Line'> | null>(null);
 
   const volumePaneRef = useRef<IPaneApi<Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
@@ -282,6 +295,9 @@ export default function PriceAreaChart({
       macdLineRef.current = null;
       macdSignalRef.current = null;
       macdHistRef.current = null;
+      bbUpperRef.current = null;
+      bbMiddleRef.current = null;
+      bbLowerRef.current = null;
       setTooltip(null);
     };
   }, []);
@@ -511,6 +527,62 @@ export default function PriceAreaChart({
     }
     macdHistRef.current!.setData(histPoints);
   }, [macd, data]);
+
+  // Bollinger Bands — 가격 페인 오버레이. visible=false 시 3 LineSeries 제거.
+  // lightweight-charts v5 는 두 선 사이 band 채움을 네이티브 지원하지 않아 v1.2 는 3 선만(v1.3 custom primitive 고려).
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const shouldShow = bb != null && bb.visible && bb.upper.length > 0;
+
+    if (!shouldShow) {
+      for (const ref of [bbUpperRef, bbMiddleRef, bbLowerRef]) {
+        if (ref.current) {
+          chart.removeSeries(ref.current);
+          ref.current = null;
+        }
+      }
+      return;
+    }
+
+    if (!bbUpperRef.current) {
+      bbUpperRef.current = chart.addSeries(LineSeries, {
+        color: bb!.colors.upper,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+    if (!bbMiddleRef.current) {
+      bbMiddleRef.current = chart.addSeries(LineSeries, {
+        color: bb!.colors.middle,
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+    if (!bbLowerRef.current) {
+      bbLowerRef.current = chart.addSeries(LineSeries, {
+        color: bb!.colors.lower,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+
+    bbUpperRef.current!.applyOptions({ color: bb!.colors.upper });
+    bbMiddleRef.current!.applyOptions({ color: bb!.colors.middle });
+    bbLowerRef.current!.applyOptions({ color: bb!.colors.lower });
+
+    bbUpperRef.current!.setData(toLinePoints(data, bb!.upper));
+    bbMiddleRef.current!.setData(toLinePoints(data, bb!.middle));
+    bbLowerRef.current!.setData(toLinePoints(data, bb!.lower));
+  }, [bb, data]);
 
   return (
     <div className="relative h-full w-full">

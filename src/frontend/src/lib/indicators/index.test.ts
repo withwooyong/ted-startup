@@ -6,6 +6,7 @@ describe('indicators barrel', () => {
     expect(typeof barrel.sma).toBe('function');
     expect(typeof barrel.rsi).toBe('function');
     expect(typeof barrel.macd).toBe('function');
+    expect(typeof barrel.bb).toBe('function');
     expect(typeof barrel.aggregateWeekly).toBe('function');
     expect(typeof barrel.aggregateMonthly).toBe('function');
   });
