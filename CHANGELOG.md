@@ -7,6 +7,108 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-04-24] feat(v1.2): Cp 2α — `useIndicatorPreferences` v2 스키마 + 파라미터 end-to-end 배선 (`45837fd`)
+
+v1.2 체크포인트 2α. 훅 전면 재작성 + v1→v2 자동 마이그레이션 + MA4/RSI/MACD/BB 파라미터를 사용자 편집 대상으로 전환. 편집 UI 는 Cp 2β 에서 별도 커밋으로.
+
+### Added
+- `IndicatorPrefs` v2 스키마 — `{ schema_version: 2, toggles, params }` 구조
+- `IndicatorParams` — `ma: [n,n,n,n]`, `rsi: {period, overbought, oversold}`, `macd: {fast, slow, signal}`, `bb: {period, k}`
+- `isValidPrefsV2` 수동 엄격 가드 (중첩 필드 전체 검증 — RSI overbought>oversold, MACD fast<slow 교차검증 포함)
+- `migrateV1ToV2` — v1 flat 7-boolean → v2 toggles + DEFAULT_PARAMS
+- `__resetForTesting__` — 모듈 스코프 캐시/subscriber 리셋
+- `src/frontend/src/lib/hooks/useIndicatorPreferences.test.ts` — 35 케이스, 훅 coverage **100%/100%/100%/100%**
+- 페이지 모듈 스코프 상수 `MA_COLORS` / `MA_TOGGLE_KEYS`
+
+### Changed
+- 훅 API: `{ prefs, setPref }` → `{ prefs, setToggle, setParams, setPrefs }`
+  - `setPrefs` 는 v1.2 Cp 3 DB 어댑터가 서버 페이로드 일괄 주입에 사용
+- snapshot 캐시 키를 `${source}:${raw}` 조합으로 확장 (v2 우선, v1 fallback)
+- `IndicatorTogglePanel` props `{ prefs, onToggle }` → `{ toggles, onToggle }`
+- `PriceAreaChart` `RSISeriesProp` 에 `overbought` / `oversold` 추가, 가이드 라인 70/30 하드코딩 제거
+- `StockChartAccessibilityTable` props `ma5/ma20` 고정 → `{ ma1, ma2 }` + `rsiPeriod` 동적 레이블 (`MA{window}`, `RSI({period})`)
+- `stocks/[code]/page.tsx` — 하드코딩 파라미터 (5/20/60/120, 14, 12/26/9, 20/2) 전면 제거, `prefs.params.*` 사용
+- `vitest.config.ts` — coverage include 에 `src/lib/hooks/**/*.ts` 추가, `useIndicatorPreferences.ts` 100% 임계 활성
+
+### Verified
+- npm test: 8 files / **94 tests PASS**
+- npm run test:ci: 전체 Lines 100%, indicators+hooks 임계 전부 통과
+- npm run type-check: clean
+- npm run build: Next 16 Turbopack 성공, 7 static pages 무회귀
+- typescript-reviewer: APPROVE (CRITICAL/HIGH 0, MEDIUM 2 반영)
+
+### Migration Notes
+- v1 키 `stock-chart-indicators:v1` 는 첫 `setToggle`/`setParams` 시 v2 저장 후 자동 삭제 (1 회성 정리)
+- 기존 사용자 토글 상태 전부 유지, 파라미터는 DEFAULT_PARAMS 로 초기화 (v1 에는 파라미터 개념 자체가 없었음)
+
+---
+
+## [2026-04-24] feat(v1.2): Cp 1 — Bollinger Bands 유틸 + 차트 overlay + 토글 통합 (`8ece65c`)
+
+v1.2 체크포인트 1. BB 지표 라인업 완성. lightweight-charts v5 의 band 채움 미지원 확인 (AreaSeries/BaselineSeries 는 baseline-relative 단일 그라데이션) → v1.2 MVP 는 3 LineSeries only, 채움은 v1.3 custom primitive 과제로 이월.
+
+### Added
+- `src/frontend/src/lib/indicators/bb.ts` — Bollinger Bands `(values, period=20, k=2)` → `{upper, middle, lower}[]`
+  - SMA 중앙선 + 표본 표준편차(Bessel 보정) O(n) 슬라이딩 윈도우
+  - sum / sumSq 롤링, variance 음수 방어 클램프
+  - KRW 스케일 정밀도 한계 주석 (리뷰 MEDIUM 1 반영)
+- `src/frontend/src/lib/indicators/bb.test.ts` — 12 케이스 (입력 검증 / 경계 / known sample / 대칭성 / k 선형 스케일 / 슬라이딩 vs slice 일치)
+- `PriceAreaChart.tsx` `BBSeriesProp` export + 가격 페인 오버레이 useEffect (MA 패턴 상속, 3 LineSeries)
+- `IndicatorTogglePanel.tsx` `bb` 토글 (label 'BB(20,2)', 색 `#6FD4D4`)
+- `useIndicatorPreferences` `IndicatorPrefs` 에 `bb: boolean`, `DEFAULT_PREFS.bb = false`
+- `stocks/[code]/page.tsx` `bbSeries` useMemo + `!prefs.bb || closes.length === 0` 단락 (리뷰 MEDIUM 3 반영)
+
+### Changed
+- 스켈레톤 토글 placeholder 수 `7 → 8` (BB 반영, 리뷰 INFO 4)
+- middle 선만 dashed (`lineStyle: 2`) — upper/lower(실선) 과 시각 구분
+
+### Verified
+- npm test: 7 files / 51 tests PASS (+12 bb tests)
+- npm run test:ci: indicators 99.37%/97.56%/100%/100% (임계 90% 유지)
+- npm run type-check: clean
+- npm run build: 성공, 7 static pages 무회귀
+- typescript-reviewer: APPROVE (CRITICAL/HIGH 0)
+
+### Decided
+- **lightweight-charts v5 band 채움 미지원**: typings.d.ts PoC 로 확인 (AreaSeries/BaselineSeries 는 baseline-relative 단일 그라데이션만). v1.2 MVP 는 3 LineSeries, 채움은 v1.3 custom primitive 로 이월
+- **v1 localStorage 호환**: bb 필드 없으면 `coerceFromStored` 가 `false` 로 보정 → 기존 사용자 토글 유실 0
+
+---
+
+## [2026-04-24] feat(v1.2): Discovery + Cp 0 Vitest 하네스 — 테스트 기반 선행 (`e13e0e2`)
+
+v1.2 착수. 옵션 β (biz+pm+judge) 로 Discovery 6 산출물 생성 (Judge PASS 9.05). 사전 스파이크로 실스택 교정 — 카카오 OAuth 미구현 확인, NotificationPreference 싱글톤 id=1 패턴 상속 결정. 이어서 Cp 0 (Vitest 하네스) 선행 구축.
+
+### Added (Discovery v1.2)
+- `pipeline/artifacts/00-input/user-request-v1.2-chart-params-db-vitest.md` — BB + 파라미터 편집 UI + DB 영속화 + Vitest 하네스
+- `pipeline/artifacts/01-requirements/requirements-v1.2-chart-params-db-vitest.md` — US 12 / FR 16 / NFR 10 / Risk 7
+- `pipeline/artifacts/02-prd/prd-v1.2-chart-params-db-vitest.md`
+- `pipeline/artifacts/02-prd/roadmap-v1.2-chart-params-db-vitest.md` (v1.1 대비 delta 포함)
+- `pipeline/artifacts/02-prd/sprint-plan-v1.2-chart-params-db-vitest.md` — 체크포인트 5 개 (Cp 0~4), 공수 10.5d
+- `pipeline/decisions/discovery-v1.2-judge.md` — PASS 9.05 / 10
+- `pipeline/state/current-state.json` `iterations.v1.2-chart-params-db-vitest` 블록 신설
+
+### Added (Cp 0 — Vitest 하네스)
+- `src/frontend/vitest.config.ts` — jsdom + `@vitejs/plugin-react` + `vite-tsconfig-paths` + coverage v8
+- `src/frontend/src/test-setup.ts` — `@testing-library/jest-dom/vitest` matchers + MSW 라이프사이클
+- `src/frontend/src/test/msw/{handlers,server,msw-smoke.test}.ts` — `/api/admin/indicator-preferences` GET/PUT + errorHandlers (400/500/network)
+- `src/frontend/src/lib/indicators/{sma,rsi,macd,aggregate,index}.test.ts` — 39 케이스
+- `package.json` scripts: `test`, `test:ci`
+- devDep 10 종: vitest@^4, @vitejs/plugin-react@^6, @testing-library/{react,dom,jest-dom,user-event}, jsdom@^29, msw@^2, @vitest/coverage-v8@^4, vite-tsconfig-paths@^6
+
+### Verified
+- npm test: 6 files / 39 tests PASS (701ms)
+- npm run test:ci: indicators 99.25%/97.05%/100%/100% (임계 90% 통과)
+- npm run type-check: clean
+- npm run build: Next 16 Turbopack 성공
+- typescript-reviewer: APPROVE (CRITICAL/HIGH 0, LOW 1 반영)
+
+### Decided
+- **auth 체계 교정**: CLAUDE.md 의 "카카오 OAuth 2.0" 언급은 로드맵 레벨 — 실구현은 미완. 백엔드는 `X-API-Key` (ADMIN_API_KEY) 어드민 단일 인증. v1.2 DB 영속화는 `NotificationPreference` 싱글톤 id=1 패턴 상속
+- **Judge 권고 #1 (Cp 2 분리)**: 3-split (2a/2b/2c) 원안 대신 **2-split** 채택 — 2α (훅 v2 + 배선) / 2β (편집 UI). 2a 단독 상태가 dead code 가 되는 문제 회피
+
+---
+
 ## [2026-04-23] fix(chart): `useIndicatorPreferences` 무한 루프 해소 — snapshot 캐싱 (`669d9e8`)
 
 ### Fixed
