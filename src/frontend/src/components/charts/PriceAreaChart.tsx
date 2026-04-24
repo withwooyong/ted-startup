@@ -51,6 +51,8 @@ export interface RSISeriesProp {
   values: ReadonlyArray<number>; // length == data.length, NaN 허용
   color: string;
   visible: boolean;
+  overbought: number;
+  oversold: number;
 }
 
 export interface MACDSeriesProp {
@@ -445,11 +447,11 @@ export default function PriceAreaChart({
     rsiSeriesRef.current!.applyOptions({ color: rsi!.color });
     rsiSeriesRef.current!.setData(toLinePoints(data, rsi!.values));
 
-    // 가이드 라인: 데이터 전 구간 x 위에 y=70 / y=30 평행선.
-    const guideOverbought = data.map(d => ({ time: toTime(d.date), value: 70 }));
-    const guideOversold = data.map(d => ({ time: toTime(d.date), value: 30 }));
-    rsiOverboughtRef.current!.setData(guideOverbought);
-    rsiOversoldRef.current!.setData(guideOversold);
+    // 가이드 라인: 데이터 전 구간 x 위에 overbought / oversold 평행선 (파라미터 편집 가능).
+    const ob = rsi!.overbought;
+    const os = rsi!.oversold;
+    rsiOverboughtRef.current!.setData(data.map(d => ({ time: toTime(d.date), value: ob })));
+    rsiOversoldRef.current!.setData(data.map(d => ({ time: toTime(d.date), value: os })));
   }, [rsi, data]);
 
   // MACD pane — MACD/Signal 라인 + Histogram (양/음 색 분리).

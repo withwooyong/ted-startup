@@ -13,11 +13,11 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
-      include: ['src/lib/indicators/**/*.ts'],
+      include: ['src/lib/indicators/**/*.ts', 'src/lib/hooks/**/*.ts'],
       exclude: ['**/*.test.ts', '**/*.test.tsx', '**/index.ts'],
       thresholds: {
         'src/lib/indicators/**/*.ts': { lines: 90, branches: 90, functions: 90, statements: 90 },
-        // NOTE v1.2 Cp 2 에서 `src/lib/hooks/useIndicatorPreferences.ts` 100% 임계 + hooks include 추가 예정
+        'src/lib/hooks/useIndicatorPreferences.ts': { lines: 100, branches: 100, functions: 100, statements: 100 },
       },
     },
   },

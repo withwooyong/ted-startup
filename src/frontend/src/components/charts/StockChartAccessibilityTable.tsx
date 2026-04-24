@@ -1,11 +1,17 @@
 import type { CandlePoint } from '@/components/charts/PriceAreaChart';
 
+interface MaSlot {
+  window: number;
+  values: ReadonlyArray<number>;
+}
+
 interface Props {
   data: ReadonlyArray<CandlePoint>;
   volumes: ReadonlyArray<number>; // length == data.length
-  ma5: ReadonlyArray<number>;
-  ma20: ReadonlyArray<number>;
+  ma1: MaSlot; // 사용자 편집된 MA 1 번 슬롯
+  ma2: MaSlot; // 사용자 편집된 MA 2 번 슬롯
   rsi: ReadonlyArray<number>;
+  rsiPeriod: number;
   macd: ReadonlyArray<number>;
 }
 
@@ -22,9 +28,10 @@ function fmt(v: number | undefined | null, digits = 0): string {
 export default function StockChartAccessibilityTable({
   data,
   volumes,
-  ma5,
-  ma20,
+  ma1,
+  ma2,
   rsi,
+  rsiPeriod,
   macd,
 }: Props) {
   if (data.length === 0) return null;
@@ -42,9 +49,9 @@ export default function StockChartAccessibilityTable({
           <th scope="col">저가</th>
           <th scope="col">종가</th>
           <th scope="col">거래량</th>
-          <th scope="col">MA5</th>
-          <th scope="col">MA20</th>
-          <th scope="col">RSI(14)</th>
+          <th scope="col">MA{ma1.window}</th>
+          <th scope="col">MA{ma2.window}</th>
+          <th scope="col">RSI({rsiPeriod})</th>
           <th scope="col">MACD</th>
         </tr>
       </thead>
@@ -59,8 +66,8 @@ export default function StockChartAccessibilityTable({
               <td>{fmt(r.low)}</td>
               <td>{fmt(r.close)}</td>
               <td>{fmt(volumes[i])}</td>
-              <td>{fmt(ma5[i], 2)}</td>
-              <td>{fmt(ma20[i], 2)}</td>
+              <td>{fmt(ma1.values[i], 2)}</td>
+              <td>{fmt(ma2.values[i], 2)}</td>
               <td>{fmt(rsi[i], 2)}</td>
               <td>{fmt(macd[i], 2)}</td>
             </tr>

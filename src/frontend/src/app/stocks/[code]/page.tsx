@@ -56,6 +56,10 @@ const PERIODS: ReadonlyArray<{
   { key: 'month', label: '1M', monthsFetch: 36 },
 ];
 
+// MA 4 슬롯의 색 + toggle 키. 모듈 스코프로 빼서 useMemo 의존성 안정화.
+const MA_COLORS = ['#FFCC00', '#FF8B3E', '#00D68F', '#A78BFA'] as const;
+const MA_TOGGLE_KEYS = ['ma5', 'ma20', 'ma60', 'ma120'] as const;
+
 export default function StockDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -66,7 +70,7 @@ export default function StockDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prevKey, setPrevKey] = useState(`${code}:${period}`);
-  const { prefs, setPref } = useIndicatorPreferences();
+  const { prefs, setToggle } = useIndicatorPreferences();
 
   // fetch 파라미터 변경 시 loading 재진입 (render 중 리셋 패턴)
   const currentKey = `${code}:${period}`;
@@ -162,70 +166,71 @@ export default function StockDetailPage() {
   // 현재 period 의 closes — MA/RSI/MACD 공통 입력.
   const closes = useMemo(() => chartData.map(c => c.close), [chartData]);
 
-  // MA(5/20/60/120) visible 은 사용자 토글 상태.
+  // MA 4 슬롯 — 각 window 는 prefs.params.ma 의 사용자 편집값. 토글로 개별 표시 제어.
+  const { ma5: t5, ma20: t20, ma60: t60, ma120: t120 } = prefs.toggles;
   const maLines = useMemo<MALine[]>(() => {
     if (closes.length === 0) return [];
-    return [
-      { window: 5, values: sma(closes, 5), color: '#FFCC00', visible: prefs.ma5 },
-      { window: 20, values: sma(closes, 20), color: '#FF8B3E', visible: prefs.ma20 },
-      { window: 60, values: sma(closes, 60), color: '#00D68F', visible: prefs.ma60 },
-      { window: 120, values: sma(closes, 120), color: '#A78BFA', visible: prefs.ma120 },
-    ];
-  }, [closes, prefs.ma5, prefs.ma20, prefs.ma60, prefs.ma120]);
+    const vis = [t5, t20, t60, t120];
+    return prefs.params.ma.map((window, i) => ({
+      window,
+      values: sma(closes, window),
+      color: MA_COLORS[i],
+      visible: vis[i],
+    }));
+  }, [closes, prefs.params.ma, t5, t20, t60, t120]);
 
-  // RSI(14) + MACD(12,26,9) — 표시 여부는 PriceAreaChart 에서 prefs.rsi/macd 로 제어.
-  const rsiSeries = useMemo<RSISeriesProp>(
-    () => ({
-      values: closes.length > 0 ? calcRsi(closes, 14) : [],
+  // RSI + MACD — 파라미터는 prefs.params 에서 사용자 편집 가능. 표시 여부는 toggles.
+  const rsiSeries = useMemo<RSISeriesProp>(() => {
+    const { period, overbought, oversold } = prefs.params.rsi;
+    return {
+      values: closes.length > 0 ? calcRsi(closes, period) : [],
       color: '#00BCFF',
-      visible: prefs.rsi,
-    }),
-    [closes, prefs.rsi],
-  );
+      visible: prefs.toggles.rsi,
+      overbought,
+      oversold,
+    };
+  }, [closes, prefs.params.rsi, prefs.toggles.rsi]);
 
   const macdSeries = useMemo<MACDSeriesProp>(() => {
+    const { fast, slow, signal } = prefs.params.macd;
+    const colors = { macd: '#00BCFF', signal: '#FF80EC', up: '#FF4D6A', down: '#6395FF' };
     if (closes.length === 0) {
-      return {
-        macd: [],
-        signal: [],
-        histogram: [],
-        visible: prefs.macd,
-        colors: { macd: '#00BCFF', signal: '#FF80EC', up: '#FF4D6A', down: '#6395FF' },
-      };
+      return { macd: [], signal: [], histogram: [], visible: prefs.toggles.macd, colors };
     }
-    const r = calcMacd(closes, 12, 26, 9);
+    const r = calcMacd(closes, fast, slow, signal);
     return {
       macd: r.macd,
       signal: r.signal,
       histogram: r.histogram,
-      visible: prefs.macd,
-      colors: { macd: '#00BCFF', signal: '#FF80EC', up: '#FF4D6A', down: '#6395FF' },
+      visible: prefs.toggles.macd,
+      colors,
     };
-  }, [closes, prefs.macd]);
+  }, [closes, prefs.params.macd, prefs.toggles.macd]);
 
-  // Bollinger Bands(20, 2) — 가격 페인 오버레이. 파라미터 편집 UI 는 v1.2 Cp 2 에서 추가.
-  // 토글 OFF 또는 데이터 없음 시 연산 회피.
+  // Bollinger Bands — period/k 편집 가능. 토글 OFF 또는 데이터 없음 시 연산 회피.
   const bbSeries = useMemo<BBSeriesProp>(() => {
     const colors = { upper: '#6FD4D4', middle: '#A8B2BF', lower: '#6FD4D4' };
-    if (!prefs.bb || closes.length === 0) {
-      return { upper: [], middle: [], lower: [], visible: prefs.bb, colors };
+    if (!prefs.toggles.bb || closes.length === 0) {
+      return { upper: [], middle: [], lower: [], visible: prefs.toggles.bb, colors };
     }
-    const r = calcBb(closes, 20, 2);
-    return { upper: r.upper, middle: r.middle, lower: r.lower, visible: prefs.bb, colors };
-  }, [closes, prefs.bb]);
+    const { period, k } = prefs.params.bb;
+    const r = calcBb(closes, period, k);
+    return { upper: r.upper, middle: r.middle, lower: r.lower, visible: prefs.toggles.bb, colors };
+  }, [closes, prefs.toggles.bb, prefs.params.bb]);
 
   // Volume 토글 OFF 시 PriceAreaChart 에 아예 전달하지 않아 pane 제거.
-  const volumeProp = prefs.volume ? volumeData : undefined;
+  const volumeProp = prefs.toggles.volume ? volumeData : undefined;
 
-  // sr-only 대체 테이블용 데이터 — chartData 와 인덱스 정렬된 볼륨 + 지표 값.
+  // sr-only 대체 테이블용 데이터 — MA 표시는 사용자 편집된 첫 2 슬롯(MA #1, MA #2) 의 window 값으로 레이블.
   const accessibilityTableData = useMemo(() => {
     if (chartData.length === 0) return null;
+    const [w1, w2] = prefs.params.ma;
     return {
       volumes: aggregated.map(c => c.volume),
-      ma5: sma(closes, 5),
-      ma20: sma(closes, 20),
+      ma1: { window: w1, values: sma(closes, w1) },
+      ma2: { window: w2, values: sma(closes, w2) },
     };
-  }, [chartData.length, aggregated, closes]);
+  }, [chartData.length, aggregated, closes, prefs.params.ma]);
   const signalMarkers = useMemo<SignalMarker[]>(() => {
     if (!data) return [];
     const priceByDate = new Map(
@@ -373,8 +378,8 @@ export default function StockDetailPage() {
         ))}
       </div>
 
-      {/* Indicator toggles — v1.1 체크포인트 3 */}
-      <IndicatorTogglePanel prefs={prefs} onToggle={setPref} />
+      {/* Indicator toggles — v1.2 Cp 2α 에서 prefs.toggles 구조로 분리 */}
+      <IndicatorTogglePanel toggles={prefs.toggles} onToggle={setToggle} />
 
       {/* Chart */}
       <ErrorBoundary resetKeys={[period, chartData.length]}>
@@ -398,9 +403,10 @@ export default function StockDetailPage() {
           <StockChartAccessibilityTable
             data={chartData}
             volumes={accessibilityTableData.volumes}
-            ma5={accessibilityTableData.ma5}
-            ma20={accessibilityTableData.ma20}
+            ma1={accessibilityTableData.ma1}
+            ma2={accessibilityTableData.ma2}
             rsi={rsiSeries.values}
+            rsiPeriod={prefs.params.rsi.period}
             macd={macdSeries.macd}
           />
         )}
