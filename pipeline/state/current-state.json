@@ -199,12 +199,69 @@
           "seo": 100
         }
       },
-      "status": "sprint_a_completed",
+      "status": "sprint_a_and_b_completed_2026_04_23",
       "open_risks": [
-        {"id": "RISK-C03", "impact": "Medium", "note": "FE 지표 계산 성능 (500 포인트 × 지표 5개) — Sprint B 자연 모니터링"}
+        {"id": "RISK-C03", "impact": "Medium", "note": "FE 지표 계산 성능 (500 포인트 × 지표 5개) — v1.2 에서 자연 모니터링, 필요 시 Web Worker 오프로드"}
       ],
-      "next_step": "Sprint B — indicators/rsi.ts + indicators/macd.ts + IndicatorTogglePanel + useIndicatorPreferences (localStorage) + sr-only 테이블",
-      "last_updated": "2026-04-23T16:30:00+09:00"
+      "next_step": "v1.2 — Bollinger Bands + 파라미터 편집 UI + DB 영속화 + Vitest 하네스 (v1.1 Sprint A+B 완주 2026-04-23)",
+      "last_updated": "2026-04-23T18:42:00+09:00"
+    },
+    "v1.2-chart-params-db-vitest": {
+      "current_phase": "Phase 1 Discovery (완료, Judge PASS 9.05)",
+      "process_scope": "옵션 β — biz-analyst + pm + judge (marketing/crm 생략, 내부 기술 고도화 성격) + 사전 스파이크 2건 (auth 체계 교정 + 선례 패턴 확인)",
+      "judge_score": 9.05,
+      "judge_verdict": "PASS",
+      "judge_report": "pipeline/decisions/discovery-v1.2-judge.md",
+      "artifacts": [
+        "pipeline/artifacts/00-input/user-request-v1.2-chart-params-db-vitest.md",
+        "pipeline/artifacts/01-requirements/requirements-v1.2-chart-params-db-vitest.md",
+        "pipeline/artifacts/02-prd/prd-v1.2-chart-params-db-vitest.md",
+        "pipeline/artifacts/02-prd/roadmap-v1.2-chart-params-db-vitest.md",
+        "pipeline/artifacts/02-prd/sprint-plan-v1.2-chart-params-db-vitest.md",
+        "pipeline/decisions/discovery-v1.2-judge.md"
+      ],
+      "scope_summary": "Bollinger Bands(20,2σ) 유틸+overlay+토글 + MA/RSI/MACD/BB 파라미터 편집 UI(Drawer/Sheet) + DB 영속화(indicator_preferences 싱글톤 id=1, NotificationPreference 선례 상속) + Vitest+RTL+MSW 테스트 하네스 + CI FE job",
+      "scope_deferred": "명명 프리셋 저장/공유 (v1.3), 지표 기반 알림 (v1.3), Stochastic/ATR/ADX 2차 지표 (v1.3+), Web Worker 오프로드 (조건부), Playwright E2E (v1.3)",
+      "sprint_plan_summary": "1 Sprint × 2주. 체크포인트 5개 (Cp 0~4) 합 10.5d — Cp 0 Vitest 하네스 선행 → Cp 1 BB → Cp 2 파라미터 UI + v2 스키마 → Cp 3 DB 영속화 → Cp 4 접근성/CI/런칭",
+      "dependencies_verified": {
+        "v1_1_chart_base": true,
+        "lightweight_charts_v5_addPane": true,
+        "require_admin_key_auth": "verified — src/backend_py/app/adapter/web/_deps.py:113-124",
+        "notification_preference_singleton_precedent": "verified — migrations/versions/002_notification_preference.py + repositories/notification_preference.py:8-17",
+        "nextjs_route_handler_relay_precedent": "verified — src/frontend/src/app/api/admin/notifications/preferences/route.ts:17-58",
+        "latest_alembic_revision": "008_brokerage_credential — v1.2 migration will be 009_indicator_preferences",
+        "kakao_oauth_implemented": false,
+        "vitest_nextjs16_react19_compat": "pending — Cp 0 PoC 0.3d"
+      },
+      "corrected_assumptions": [
+        {
+          "from": "requirements-v1.2 초기 가정 US-D04 '카카오 OAuth 로그인 세션 기반 사용자 식별'",
+          "to": "본 서비스는 카카오 OAuth 미구현 확인 — X-API-Key 어드민 단일 인증 + NotificationPreference 싱글톤 id=1 패턴 상속",
+          "verified_at": "2026-04-24T09:30:00+09:00"
+        }
+      ],
+      "checkpoints": {
+        "cp0_vitest_harness": {"effort_days": 1.5, "status": "pending", "scope": "Vitest + RTL + MSW + indicators 단위 테스트 5종"},
+        "cp1_bollinger_bands": {"effort_days": 1.25, "status": "pending", "scope": "BB 유틸 + overlay + 토글 + 테스트"},
+        "cp2_params_ui_and_v2": {"effort_days": 3.5, "status": "pending", "scope": "편집 Drawer + v2 스키마 + v1→v2 migration + 테스트"},
+        "cp3_db_persistence": {"effort_days": 3.0, "status": "pending", "scope": "Alembic 009 + model + repository + router + Pydantic + Route Handler 릴레이 + FE 어댑터 + 테스트"},
+        "cp4_a11y_ci_launch": {"effort_days": 1.25, "status": "pending", "scope": "BB 툴팁/sr-only + CI FE job + Lighthouse + 번들 diff + 벤치마크 + QA"}
+      },
+      "open_risks": [
+        {"id": "RISK-D03", "impact": "Medium", "note": "파라미터 매트릭스 폭증 NaN — 이중 검증 + 경계값 Vitest"},
+        {"id": "RISK-D04", "impact": "Low", "note": "Vitest 2 + Next 16 + React 19 호환성 — Cp 0 PoC 로 검증"},
+        {"id": "buffer-absent", "impact": "Medium", "note": "Sprint 10.5d / 10 영업일, 버퍼 없음 — Judge 권고: Cp 2 를 2a/2b/2c 로 분리 고려"}
+      ],
+      "judge_recommendations_pending_decision": [
+        "Cp 2 를 2a(훅 v2 + migration) / 2b(편집 UI) / 2c(차트 params 반영) 3 단계 분리",
+        "Cp 4 에 Playwright 스모크 1 건 추가 (편집 → 저장 → 새로고침 → 유지)",
+        "Cp 1.0 BB band 영역 채움 15분 PoC",
+        "파라미터 변경 반영 벤치마크 Vitest bench 자동화",
+        "편집 UI Figma 와이어프레임 병행 (v1.1 Judge 권고 이월)"
+      ],
+      "next_step": "사용자 Gate 승인 후 Cp 0 (Vitest 하네스) 착수. 또는 경량 /design 으로 편집 UI Drawer 와이어프레임 30분 선행 후 Cp 0.",
+      "status": "discovery_passed",
+      "last_updated": "2026-04-24T10:15:00+09:00"
     }
   }
 }
