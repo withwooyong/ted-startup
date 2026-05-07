@@ -1,0 +1,953 @@
+# endpoint-13-ka20006.md — 업종일봉조회요청 (보강 시계열)
+
+## 0. 메타
+
+| 항목 | 값 |
+|------|-----|
+| API ID | `ka20006` |
+| API 명 | 업종일봉조회요청 |
+| 분류 | Tier 4 (보강 시계열 — 업종 지수) |
+| Phase | **D** |
+| 우선순위 | **P2** |
+| Method | `POST` |
+| URL | `/api/dostk/chart` |
+| 운영 도메인 | `https://api.kiwoom.com` |
+| 모의투자 도메인 | `https://mockapi.kiwoom.com` (KRX 만 지원) |
+| Content-Type | `application/json;charset=UTF-8` |
+| 의존 endpoint | `au10001`, `ka10101` (업종 마스터) |
+| 후속 endpoint | (없음 — 섹터 회전 / 시장 비교 백테스트의 입력) |
+
+---
+
+## 1. 목적
+
+**업종 단위 일봉 OHLCV** 를 적재한다. ka10081 이 종목 단위 일봉이라면, 본 endpoint 는 KOSPI / KOSDAQ / 업종 지수 단위. 백테스팅 측면:
+
+1. **섹터 회전 시그널** — 종합(KOSPI) / 대형주 / 중형주 / 소형주 / 업종(음식료/화학/의약품/...) 의 상대 강도
+2. **시장 비교 (Beta)** — 종목 일봉 vs 업종 일봉의 상관계수 / 베타 계산
+3. **업종 momentum** — 일봉 종가 N일 변화율로 업종 단위 추세 추적
+4. **시장 redirect 시그널** — KOSPI200 vs KRX100 의 발산 패턴
+
+**왜 P2**:
+- 백테스팅 첫 사이클은 종목 단위로 충분
+- 그러나 시그널의 "시장 대비 상대 강도" 보강은 본 endpoint 가 핵심
+- 데이터 부담은 종목 OHLCV 의 1/100 수준 (업종 ~50개 vs 종목 ~3000개)
+
+**Phase D 3 endpoint 중 본 endpoint 가 가장 가벼움**. 종목과 별개 카테고리라 ka10081 패턴 복제하면서 NXT 미지원으로 단순화.
+
+---
+
+## 2. Request 명세
+
+### 2.1 Header
+
+| Element | 한글명 | Type | Required | Length | Description |
+|---------|-------|------|----------|--------|-------------|
+| `api-id` | TR 명 | String | Y | 10 | `"ka20006"` 고정 |
+| `authorization` | 접근토큰 | String | Y | 1000 | `Bearer <token>` |
+| `cont-yn` | 연속조회 여부 | String | N | 1 | 응답 헤더 그대로 전달 |
+| `next-key` | 연속조회 키 | String | N | 50 | 응답 헤더 그대로 전달 |
+
+### 2.2 Body
+
+| Element | 한글명 | Type | Required | Length | Description |
+|---------|-------|------|----------|--------|-------------|
+| `inds_cd` | 업종코드 | String | Y | **3** | `001`:종합(KOSPI), `002`:대형주, `003`:중형주, `004`:소형주, `101`:종합(KOSDAQ), `201`:KOSPI200, `302`:KOSTAR, `701`:KRX100 + 나머지 (ka10101 참조) |
+| `base_dt` | 기준일자 | String | Y | 8 | `YYYYMMDD` (이 날짜를 포함한 과거 시계열 응답) |
+
+> **주의**: ka10101 의 `mrkt_tp=2` (KOSPI200) → ka20006 의 `inds_cd=201` 매핑. 두 endpoint 의 코드 체계가 **다른 차원**이다.
+>
+> ka10101 의 `code` 필드 ("001"/"002"/...) 가 ka20006 의 `inds_cd` 와 직접 호환. UseCase 가 `Sector.sector_code` 를 그대로 사용.
+
+### 2.3 Request 예시 (Excel 원문)
+
+```json
+POST https://api.kiwoom.com/api/dostk/chart
+Content-Type: application/json;charset=UTF-8
+api-id: ka20006
+authorization: Bearer Egicyx...
+
+{
+    "inds_cd": "001",
+    "base_dt": "20250905"
+}
+```
+
+### 2.4 Pydantic 모델
+
+```python
+# app/adapter/out/kiwoom/chart.py (또는 sect.py 분리)
+class SectorChartRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    inds_cd: Annotated[str, Field(min_length=3, max_length=3, pattern=r"^\d{3}$")]
+    base_dt: Annotated[str, Field(pattern=r"^\d{8}$")]
+```
+
+> ka10081 과 달리 **`upd_stkpc_tp` 없음** — 지수는 수정주가 개념이 다름 (자체 보정).
+
+---
+
+## 3. Response 명세
+
+### 3.1 Header
+
+| Element | Type | Description |
+|---------|------|-------------|
+| `api-id` | String | `"ka20006"` 에코 |
+| `cont-yn` | String | `Y` 면 다음 페이지 |
+| `next-key` | String | 다음 호출 헤더에 세팅 |
+
+### 3.2 Body
+
+| Element | 한글명 | Type | Length | 영속화 컬럼 | 메모 |
+|---------|-------|------|--------|-------------|------|
+| `inds_cd` | 업종코드 | String | 20 | (FK lookup via Sector) | 응답 length 20 — 요청 3 과 다름 |
+| `inds_dt_pole_qry[]` | 업종일봉차트 list | LIST | — | (전체 row 적재) | **list key 명** |
+| `cur_prc` | 현재가 (지수 종가) | String | 20 | `close_index_centi` (BIGINT) | **★ 지수값은 소수점 제거 후 100배 값으로 반환** (예: `252127` = 2521.27) |
+| `trde_qty` | 거래량 | String | 20 | `trade_volume` (BIGINT) | 주 |
+| `dt` | 일자 | String | 20 | `trading_date` (DATE) | `YYYYMMDD` |
+| `open_pric` | 시가 (지수 시가) | String | 20 | `open_index_centi` (BIGINT) | **100배 값** |
+| `high_pric` | 고가 | String | 20 | `high_index_centi` (BIGINT) | **100배 값** |
+| `low_pric` | 저가 | String | 20 | `low_index_centi` (BIGINT) | **100배 값** |
+| `trde_prica` | 거래대금 | String | 20 | `trade_amount` (BIGINT) | 백만원 추정 (운영 검증) |
+| `return_code` | 처리코드 | Integer | — | (raw_response only) | 0 정상 |
+| `return_msg` | 처리메시지 | String | — | (raw_response only) | |
+
+> **★ 가장 큰 ka10081 과의 차이**: "지수 값은 소수점 제거 후 100배 값으로 반환"
+> - 예: KOSPI 종합 2521.27 → 응답 `"252127"`
+> - 영속화: 그대로 BIGINT 저장 (centi-index 단위) + 컬럼명에 `_centi` suffix 로 명시
+> - 또는 NUMERIC(12,2) 로 응답 / 100 저장 — **두 옵션 § 11.1 결정 필요**
+>
+> **`pred_pre`/`pred_pre_sig`/`trde_tern_rt` 없음** (ka10081 에 비해): 지수 카테고리는 전일대비 / 회전율 미제공. 백테스팅에서 필요하면 derived feature.
+
+### 3.3 Response 예시 (Excel 원문)
+
+```json
+{
+    "inds_cd": "001",
+    "inds_dt_pole_qry": [
+        {
+            "cur_prc": "252127",
+            "trde_qty": "393564",
+            "dt": "20250210",
+            "open_pric": "251064",
+            "high_pric": "252733",
+            "low_pric": "249918",
+            "trde_prica": "10582466"
+        },
+        {
+            "cur_prc": "252192",
+            "trde_qty": "419872",
+            "dt": "20250207",
+            "open_pric": "253209",
+            "high_pric": "253763",
+            "low_pric": "251901",
+            "trde_prica": "10240141"
+        }
+    ],
+    "return_code": 0,
+    "return_msg": "정상적으로 처리되었습니다"
+}
+```
+
+> KOSPI 종합 (`inds_cd=001`) 의 2025-02-10 종가 = 2521.27 (응답 252127). 정렬은 DESC (예시 기준).
+
+### 3.4 Pydantic 모델 + 정규화
+
+```python
+# app/adapter/out/kiwoom/_records.py
+class SectorChartRow(BaseModel):
+    """ka20006 응답 row."""
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    cur_prc: str = ""
+    trde_qty: str = ""
+    dt: str = ""
+    open_pric: str = ""
+    high_pric: str = ""
+    low_pric: str = ""
+    trde_prica: str = ""
+
+    def to_normalized(
+        self,
+        *,
+        sector_id: int,
+    ) -> "NormalizedSectorDailyOhlcv":
+        return NormalizedSectorDailyOhlcv(
+            sector_id=sector_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            open_index_centi=_to_int(self.open_pric),
+            high_index_centi=_to_int(self.high_pric),
+            low_index_centi=_to_int(self.low_pric),
+            close_index_centi=_to_int(self.cur_prc),
+            trade_volume=_to_int(self.trde_qty),
+            trade_amount=_to_int(self.trde_prica),
+        )
+
+
+class SectorChartResponse(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+    inds_cd: str = ""
+    inds_dt_pole_qry: list[SectorChartRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedSectorDailyOhlcv:
+    sector_id: int
+    trading_date: date
+    open_index_centi: int | None        # 응답 그대로 (×100 값)
+    high_index_centi: int | None
+    low_index_centi: int | None
+    close_index_centi: int | None
+    trade_volume: int | None
+    trade_amount: int | None
+
+    # 사용자 친화 read 헬퍼
+    @property
+    def close_index(self) -> Decimal | None:
+        return Decimal(self.close_index_centi) / 100 if self.close_index_centi is not None else None
+```
+
+> **저장 형식 결정** (§ 11.1): centi BIGINT (응답 그대로) + read 헬퍼로 / 100. 정수 산술이 빠르고 정확. 별도 NUMERIC 변환 불필요.
+
+---
+
+## 4. NXT 처리
+
+| 항목 | 적용 여부 |
+|------|-----------|
+| `stk_cd` 에 `_NX` suffix | **N** (종목코드 없음 — 업종 지수) |
+| `nxt_enable` 게이팅 | N |
+| `mrkt_tp` 별 분리 | N |
+| KRX 운영 / 모의 차이 | mockapi 는 KRX 전용 (지수도 동일) |
+
+### 4.1 NXT 미지원의 의미
+
+업종 지수는 거래소 통합 지수 — KRX/NXT 분리 개념 없음. ka10101 의 `mrkt_tp=2/4/7` (KOSPI200/100/KRX100) 도 지수이지 거래소가 아님.
+
+→ 본 endpoint 는 단일 호출 (KRX/NXT 동시 호출 패턴 없음). master.md § 3 의 "물리 분리" 대상 아님.
+
+→ 단, NXT 거래소가 별도 지수를 산출하면 (예: NXT 100) 본 endpoint 가 그 inds_cd 를 응답 가능. **운영 검증**: ka10101 의 응답에 NXT 관련 inds_cd 가 등장하는지 확인 후 본 endpoint 가 NXT 지수도 응답 가능한지 확인.
+
+---
+
+## 5. DB 스키마
+
+### 5.1 신규 테이블 — Migration 002 또는 별도
+
+> **결정 필요** (§ 11.1): Migration 002 (`stock_fundamental_and_sector.py`) 에 sector 와 함께 sector_price_daily 추가 vs 별도 마이그레이션 분리.
+>
+> **권장**: 별도 마이그레이션 `008_sector_price_daily.py` (Phase D 활성화 시점).
+> 이유: sector 마스터는 Phase A (P1) 에 작성, 본 테이블은 Phase D — 적용 시점 분리.
+
+```sql
+CREATE TABLE kiwoom.sector_price_daily (
+    id                       BIGSERIAL PRIMARY KEY,
+    sector_id                BIGINT NOT NULL REFERENCES kiwoom.sector(id) ON DELETE CASCADE,
+    trading_date             DATE NOT NULL,
+    open_index_centi         BIGINT,                          -- 지수 × 100
+    high_index_centi         BIGINT,
+    low_index_centi          BIGINT,
+    close_index_centi        BIGINT,
+    trade_volume             BIGINT,
+    trade_amount             BIGINT,
+    fetched_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_sector_price_daily UNIQUE (sector_id, trading_date)
+);
+
+CREATE INDEX idx_sector_price_daily_date ON kiwoom.sector_price_daily(trading_date);
+CREATE INDEX idx_sector_price_daily_sector ON kiwoom.sector_price_daily(sector_id);
+```
+
+### 5.2 ORM 모델
+
+```python
+# app/adapter/out/persistence/models/sector_price_daily.py
+class SectorPriceDaily(Base):
+    __tablename__ = "sector_price_daily"
+    __table_args__ = (
+        UniqueConstraint("sector_id", "trading_date", name="uq_sector_price_daily"),
+        {"schema": "kiwoom"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sector_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("kiwoom.sector.id", ondelete="CASCADE"), nullable=False
+    )
+    trading_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    open_index_centi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    high_index_centi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    low_index_centi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    close_index_centi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trade_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trade_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False,
+    )
+```
+
+### 5.3 row 수 추정
+
+| 항목 | 값 |
+|------|----|
+| 업종 수 (ka10101 5 시장 합계) | ~50~80 (운영 검증) |
+| 1일 row | 50~80 |
+| 1년 row (252 거래일) | ~12,600~20,160 |
+| 3년 백필 | ~37,800~60,480 |
+
+→ **단일 테이블, 파티션 불필요**. 종목 OHLCV 의 0.1~1% 부담.
+
+### 5.4 sector 마스터와의 매핑
+
+`Sector.sector_code` (ka10101 응답의 `code`) 가 ka20006 의 `inds_cd` 와 직접 호환. UseCase 가 `Sector.sector_code` 로 조회 → `Sector.id` 를 FK 로 사용.
+
+⚠ **주의**: ka10101 의 `(market_code, sector_code)` UNIQUE — 같은 sector_code 가 시장별로 중복 가능. 본 endpoint 는 sector_code 만 받으므로 어느 market 의 sector 인지 구분 불가 → ka10101 의 `code` 가 시장 무관하게 unique 한지 운영 검증 필요. unique 하지 않다면 본 endpoint 의 inds_cd → market_code 매핑 규칙 필요.
+
+---
+
+## 6. UseCase / Service / Adapter
+
+### 6.1 Adapter — `KiwoomChartClient.fetch_sector_daily` (또는 별도 클래스)
+
+```python
+# app/adapter/out/kiwoom/chart.py 또는 sect.py
+class KiwoomChartClient:
+    """ka10079~ka10094 + ka20006 공유."""
+
+    PATH = "/api/dostk/chart"
+
+    async def fetch_sector_daily(
+        self,
+        inds_cd: str,
+        *,
+        base_date: date,
+        max_pages: int = 10,
+    ) -> list[SectorChartRow]:
+        """업종 일봉 시계열. cont-yn 자동 페이지네이션.
+
+        - inds_cd: 3자리 ("001"/"101"/"201"/...). ka10101 sector_code 와 호환
+        - max_pages=10 기본. 1 페이지 ~600 거래일 추정 (ka10081 와 동일 가정)
+        """
+        if not (len(inds_cd) == 3 and inds_cd.isdigit()):
+            raise ValueError(f"inds_cd 3자리 숫자만: {inds_cd}")
+
+        body = {
+            "inds_cd": inds_cd,
+            "base_dt": base_date.strftime("%Y%m%d"),
+        }
+
+        all_rows: list[SectorChartRow] = []
+        async for page in self._client.call_paginated(
+            api_id="ka20006",
+            endpoint=self.PATH,
+            body=body,
+            max_pages=max_pages,
+        ):
+            parsed = SectorChartResponse.model_validate(page.body)
+            if parsed.return_code != 0:
+                raise KiwoomBusinessError(
+                    api_id="ka20006",
+                    return_code=parsed.return_code,
+                    return_msg=parsed.return_msg,
+                )
+            all_rows.extend(parsed.inds_dt_pole_qry)
+
+        return all_rows
+```
+
+### 6.2 Repository
+
+```python
+# app/adapter/out/persistence/repositories/sector_price.py
+class SectorPriceDailyRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert_many(self, rows: Sequence[NormalizedSectorDailyOhlcv]) -> int:
+        if not rows:
+            return 0
+
+        values = [
+            {
+                "sector_id": r.sector_id,
+                "trading_date": r.trading_date,
+                "open_index_centi": r.open_index_centi,
+                "high_index_centi": r.high_index_centi,
+                "low_index_centi": r.low_index_centi,
+                "close_index_centi": r.close_index_centi,
+                "trade_volume": r.trade_volume,
+                "trade_amount": r.trade_amount,
+            }
+            for r in rows
+            if r.trading_date != date.min     # 빈 dt skip
+        ]
+        if not values:
+            return 0
+
+        stmt = pg_insert(SectorPriceDaily).values(values)
+        update_set = {col: stmt.excluded[col] for col in values[0]
+                      if col not in ("sector_id", "trading_date")}
+        update_set["fetched_at"] = func.now()
+        update_set["updated_at"] = func.now()
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["sector_id", "trading_date"],
+            set_=update_set,
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return rowcount_of(result)
+
+    async def get_latest_date(self, sector_id: int) -> date | None:
+        stmt = (
+            select(SectorPriceDaily.trading_date)
+            .where(SectorPriceDaily.sector_id == sector_id)
+            .order_by(SectorPriceDaily.trading_date.desc())
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def get_range(
+        self,
+        sector_id: int,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> list[SectorPriceDaily]:
+        stmt = (
+            select(SectorPriceDaily)
+            .where(
+                SectorPriceDaily.sector_id == sector_id,
+                SectorPriceDaily.trading_date >= start_date,
+                SectorPriceDaily.trading_date <= end_date,
+            )
+            .order_by(SectorPriceDaily.trading_date)
+        )
+        return list((await self._session.execute(stmt)).scalars())
+```
+
+### 6.3 UseCase — `IngestSectorDailyUseCase`
+
+```python
+# app/application/service/sector_ohlcv_service.py
+class IngestSectorDailyUseCase:
+    """단일 업종 일봉 적재.
+
+    sector 테이블에 inds_cd 가 없으면 KiwoomBusinessError 또는 캐시 미스 → 호출 안 함.
+    """
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        chart_client: KiwoomChartClient,
+    ) -> None:
+        self._session = session
+        self._client = chart_client
+        self._sector_repo = SectorRepository(session)
+        self._price_repo = SectorPriceDailyRepository(session)
+
+    async def execute(
+        self,
+        inds_cd: str,
+        *,
+        base_date: date,
+    ) -> SectorOhlcvIngestOutcome:
+        # sector 마스터 조회 — 없으면 ka10101 sync 권고 후 fail
+        sector = await self._sector_repo.find_by_code(inds_cd)
+        if sector is None:
+            return SectorOhlcvIngestOutcome(
+                inds_cd=inds_cd,
+                upserted=0,
+                skipped=True,
+                reason="sector_not_found",
+            )
+        if not sector.is_active:
+            return SectorOhlcvIngestOutcome(
+                inds_cd=inds_cd,
+                upserted=0,
+                skipped=True,
+                reason="sector_inactive",
+            )
+
+        try:
+            raw_rows = await self._client.fetch_sector_daily(
+                inds_cd, base_date=base_date,
+            )
+        except KiwoomBusinessError as exc:
+            return SectorOhlcvIngestOutcome(
+                inds_cd=inds_cd,
+                upserted=0,
+                error=f"business: {exc.return_code}",
+            )
+
+        normalized = [
+            r.to_normalized(sector_id=sector.id) for r in raw_rows
+        ]
+        upserted = await self._price_repo.upsert_many(normalized)
+
+        return SectorOhlcvIngestOutcome(
+            inds_cd=inds_cd,
+            sector_name=sector.sector_name,
+            fetched=len(raw_rows),
+            upserted=upserted,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SectorOhlcvIngestOutcome:
+    inds_cd: str
+    sector_name: str | None = None
+    fetched: int = 0
+    upserted: int = 0
+    skipped: bool = False
+    reason: str | None = None
+    error: str | None = None
+```
+
+### 6.4 Bulk — `IngestSectorDailyBulkUseCase`
+
+```python
+class IngestSectorDailyBulkUseCase:
+    """모든 active 업종의 일봉 일괄 적재.
+
+    동시성: RPS 4 + 250ms.
+    소요: 50~80 업종 × 0.25s = 12~20초 (이론).
+      실측 추정 1~5분 (페이지네이션 + 응답 시간).
+
+    — ka10081 의 4500 호출 vs 본 endpoint 50~80 호출. 부담 작음.
+    """
+
+    BATCH_SIZE = 20
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        single_use_case: IngestSectorDailyUseCase,
+    ) -> None:
+        self._session = session
+        self._single = single_use_case
+        self._sector_repo = SectorRepository(session)
+
+    async def execute(
+        self,
+        *,
+        base_date: date,
+        only_market_codes: Sequence[str] | None = None,
+    ) -> SectorOhlcvBulkResult:
+        sectors = await self._sector_repo.list_all_active(
+            only_market_codes=only_market_codes,
+        )
+
+        outcomes: list[SectorOhlcvIngestOutcome] = []
+        for i, sector in enumerate(sectors, start=1):
+            try:
+                async with self._session.begin_nested():
+                    o = await self._single.execute(
+                        sector.sector_code, base_date=base_date,
+                    )
+                    outcomes.append(o)
+            except Exception as exc:
+                logger.warning(
+                    "sector ingest 실패 inds_cd=%s: %s", sector.sector_code, exc,
+                )
+                outcomes.append(SectorOhlcvIngestOutcome(
+                    inds_cd=sector.sector_code,
+                    sector_name=sector.sector_name,
+                    error=f"{type(exc).__name__}: {exc}",
+                ))
+
+            if i % self.BATCH_SIZE == 0:
+                await self._session.commit()
+
+        await self._session.commit()
+        return SectorOhlcvBulkResult(
+            base_date=base_date,
+            total_sectors=len(sectors),
+            outcomes=outcomes,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SectorOhlcvBulkResult:
+    base_date: date
+    total_sectors: int
+    outcomes: list[SectorOhlcvIngestOutcome]
+
+    @property
+    def total_rows_inserted(self) -> int:
+        return sum(o.upserted for o in self.outcomes)
+
+    @property
+    def success_count(self) -> int:
+        return sum(1 for o in self.outcomes if o.upserted > 0)
+```
+
+---
+
+## 7. 배치 / 트리거
+
+| 트리거 | 빈도 | 비고 |
+|--------|------|------|
+| **수동 단건** | on-demand | `POST /api/kiwoom/sectors/{inds_cd}/daily?date=YYYYMMDD` (admin) |
+| **수동 일괄** | on-demand | `POST /api/kiwoom/sectors/daily/sync?date=YYYYMMDD` (admin) |
+| **일 1회 cron** | KST 19:15 평일 | ka10081 (18:30) → ka10086 (19:00) → 본 endpoint (19:15) → ka10080 분봉 (19:30) |
+| **백필** | on-demand | `python scripts/backfill_sector.py --start 2023-01-01 --end 2026-05-07` |
+
+### 7.1 라우터
+
+```python
+# app/adapter/web/routers/sector_ohlcv.py
+router = APIRouter(prefix="/api/kiwoom/sectors", tags=["kiwoom-sector"])
+
+
+@router.post(
+    "/{inds_cd}/daily",
+    response_model=SectorOhlcvIngestOutcomeOut,
+    dependencies=[Depends(require_admin_key)],
+)
+async def ingest_one_sector_daily(
+    inds_cd: str,
+    base_date: date = Query(default_factory=lambda: date.today()),
+    use_case: IngestSectorDailyUseCase = Depends(get_ingest_sector_daily_use_case),
+) -> SectorOhlcvIngestOutcomeOut:
+    outcome = await use_case.execute(inds_cd, base_date=base_date)
+    return SectorOhlcvIngestOutcomeOut.model_validate(asdict(outcome))
+
+
+@router.post(
+    "/daily/sync",
+    response_model=SectorOhlcvBulkResultOut,
+    dependencies=[Depends(require_admin_key)],
+)
+async def sync_sector_daily_bulk(
+    body: SectorOhlcvBulkRequestIn = Body(default_factory=SectorOhlcvBulkRequestIn),
+    use_case: IngestSectorDailyBulkUseCase = Depends(get_ingest_sector_daily_bulk_use_case),
+) -> SectorOhlcvBulkResultOut:
+    result = await use_case.execute(
+        base_date=body.base_date or date.today(),
+        only_market_codes=body.only_market_codes or None,
+    )
+    return SectorOhlcvBulkResultOut.model_validate(asdict(result))
+
+
+@router.get(
+    "/{inds_cd}/daily",
+    response_model=list[SectorPriceDailyOut],
+)
+async def get_sector_daily_range(
+    inds_cd: str,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> list[SectorPriceDailyOut]:
+    """백테스팅 엔진의 read API."""
+    sector_repo = SectorRepository(session)
+    sector = await sector_repo.find_by_code(inds_cd)
+    if sector is None:
+        raise HTTPException(status_code=404, detail=f"sector not found: {inds_cd}")
+    repo = SectorPriceDailyRepository(session)
+    rows = await repo.get_range(
+        sector.id, start_date=start_date, end_date=end_date,
+    )
+    return [SectorPriceDailyOut.model_validate(r) for r in rows]
+```
+
+### 7.2 APScheduler Job
+
+```python
+# app/batch/sector_ohlcv_job.py
+async def fire_sector_daily_sync() -> None:
+    """매 평일 19:15 KST — 업종 일봉 적재.
+
+    cron 시간 분리:
+      18:30 — ka10081 (종목 일봉)
+      19:00 — ka10086 (종목 일별 + 투자자별)
+      19:15 — ka20006 (업종 일봉)  ← 본 job
+      19:30 — ka10080 (종목 분봉)
+    """
+    today = date.today()
+    if not is_trading_day(today):
+        return
+    try:
+        async with get_sessionmaker()() as session:
+            kiwoom_client = build_kiwoom_client_for("prod-main")
+            chart = KiwoomChartClient(kiwoom_client)
+            single = IngestSectorDailyUseCase(session, chart_client=chart)
+            bulk = IngestSectorDailyBulkUseCase(session, single_use_case=single)
+            result = await bulk.execute(base_date=today)
+        logger.info(
+            "sector daily sync 완료 base_date=%s total=%d success=%d rows=%d",
+            today, result.total_sectors, result.success_count, result.total_rows_inserted,
+        )
+    except Exception:
+        logger.exception("sector daily sync 콜백 예외")
+
+
+scheduler.add_job(
+    fire_sector_daily_sync,
+    CronTrigger(day_of_week="mon-fri", hour=19, minute=15, timezone=KST),
+    id="sector_daily_sync",
+    replace_existing=True,
+    max_instances=1,
+    coalesce=True,
+    misfire_grace_time=60 * 30,    # 30분 grace (호출 부담 작음)
+)
+```
+
+### 7.3 RPS / 시간 추정
+
+| 항목 | 값 |
+|------|----|
+| active 업종 수 | ~50~80 (운영 검증) |
+| 호출당 인터벌 | 250ms |
+| 동시성 | 4 |
+| 1회 sync 호출 수 | 50~80 |
+| 페이지네이션 평균 | 1 (ka10081 가정 동일) |
+| 이론 시간 | 80 / 4 × 0.25 = 5초 |
+| 실측 추정 | 1~5분 |
+
+→ cron 19:15 + 30분 grace.
+
+---
+
+## 8. 에러 처리
+
+| HTTP / 응답 | 도메인 예외 | 라우터 매핑 | UseCase 정책 |
+|-------------|-------------|-------------|--------------|
+| 400 (잘못된 inds_cd) | `ValueError` | 400 | 호출 전 차단 |
+| 401 / 403 | `KiwoomCredentialRejectedError` | 400 | bubble up |
+| 429 | `KiwoomRateLimitedError` | 503 | 재시도 후 다음 업종 |
+| 5xx, 네트워크 | `KiwoomUpstreamError` | 502 | 다음 업종 |
+| `return_code != 0` | `KiwoomBusinessError` | 400 | outcome.error 노출, 다음 업종 |
+| sector 마스터 미존재 | (skip) | — | outcome.skipped=true, reason="sector_not_found" |
+| sector 비활성 (is_active=false) | (skip) | — | outcome.skipped=true, reason="sector_inactive" |
+| 응답 `dt=""` | (적재 skip) | — | upsert_many 자동 제외 |
+| 빈 응답 `list=[]` | (정상) | — | upserted=0 |
+| FK 위반 (sector_id 없음) | `IntegrityError` | 502 | UseCase 가 sector 조회 선행 |
+
+### 8.1 partial 실패 알람
+
+50~80 업종 × 1 호출 = 50~80 호출 중:
+- < 1%: 정상
+- 1~5%: warning
+- > 5%: error + alert (호출 수 작아 1 건만 실패해도 1.25%~2%)
+
+### 8.2 같은 호출 두 번 (멱등성)
+
+UNIQUE (sector_id, trading_date) ON CONFLICT UPDATE — 마지막 값 갱신.
+
+---
+
+## 9. 테스트
+
+### 9.1 Unit (MockTransport)
+
+`tests/adapter/kiwoom/test_chart_sector.py`:
+
+| 시나리오 | 입력 | 기대 |
+|----------|------|------|
+| 정상 단일 페이지 | 200 + list 60건 + cont-yn=N | 60건 반환 |
+| 페이지네이션 | 첫 cont-yn=Y, 둘째 N | 합쳐 N건 |
+| 빈 list | 200 + `inds_dt_pole_qry=[]` | 빈 list |
+| `return_code=1` | 비즈니스 에러 | `KiwoomBusinessError` |
+| 401 | 자격증명 거부 | `KiwoomCredentialRejectedError` |
+| inds_cd "01" | 호출 차단 | `ValueError` |
+| inds_cd "1234" | 호출 차단 | `ValueError` |
+| inds_cd "abc" | 호출 차단 | `ValueError` |
+| base_date 포함 | `date(2026, 5, 7)` | request body `base_dt="20260507"` |
+| `dt=""` row | 빈 dt 1건 + 정상 4건 | repo 가 자동 skip |
+| 100배 값 그대로 | cur_prc="252127" | NormalizedSectorDailyOhlcv.close_index_centi=252127 |
+| close_index property | close_index_centi=252127 | close_index = Decimal("2521.27") |
+| 페이지네이션 폭주 | cont-yn=Y 무한 | `max_pages=10` 도달 → `KiwoomPaginationLimitError` |
+
+### 9.2 Integration (testcontainers)
+
+`tests/application/test_sector_ohlcv_service.py`:
+
+| 시나리오 | 셋업 | 기대 |
+|----------|------|------|
+| INSERT (DB 빈 상태) | sector 1건 (inds_cd=001) + 응답 60 row | sector_price_daily 60 row INSERT |
+| UPDATE (멱등성) | 같은 호출 두 번 | row 60개 유지, updated_at 갱신 |
+| sector 미존재 | DB 에 inds_cd 없음 | outcome.skipped=true, reason="sector_not_found" |
+| sector 비활성 | is_active=false | outcome.skipped=true, reason="sector_inactive" |
+| sector 마스터 매핑 | inds_cd="001" → sector.sector_code=001 → sector_id 매핑 | INSERT 정상 |
+| Bulk 50 sector | 50 active sectors | 50건 처리, 일부 페이지네이션 |
+| only_market_codes 필터 | KOSPI 시장 만 | KOSDAQ sector skip |
+| 빈 응답 처리 | 응답 list=[] | upserted=0 |
+| 100배 값 INSERT | cur_prc="252127" | close_index_centi=252127 (그대로) |
+| read 시 100배 변환 | repo.get_range 후 close_index 호출 | Decimal("2521.27") |
+
+### 9.3 E2E (요청 시 1회)
+
+```python
+@pytest.mark.requires_kiwoom_real
+async def test_real_ka20006():
+    creds = KiwoomCredentials(
+        appkey=os.environ["KIWOOM_PROD_APPKEY"],
+        secretkey=os.environ["KIWOOM_PROD_SECRETKEY"],
+    )
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com") as auth:
+        token = await auth.issue_token(creds)
+    try:
+        kiwoom_client = KiwoomClient(
+            base_url="https://api.kiwoom.com", token=token.token,
+        )
+        chart = KiwoomChartClient(kiwoom_client)
+
+        # KOSPI 종합 일봉
+        rows = await chart.fetch_sector_daily("001", base_date=date.today())
+        assert len(rows) >= 60
+
+        latest = rows[0]
+        assert latest.dt
+        # 100배 값 가정 검증 — KOSPI 종합 = ~2500 정도라 응답은 250000 부근
+        close = _to_int(latest.cur_prc)
+        assert 100_000 <= close <= 1_000_000   # 1000~10000 KOSPI 범위 × 100
+
+        # KOSPI200 (inds_cd=201)
+        kospi200 = await chart.fetch_sector_daily("201", base_date=date.today())
+        assert len(kospi200) >= 60
+    finally:
+        async with KiwoomAuthClient(base_url="https://api.kiwoom.com") as auth:
+            await auth.revoke_token(creds, token.token)
+```
+
+---
+
+## 10. 완료 기준 (DoD)
+
+### 10.1 코드
+
+- [ ] `app/adapter/out/kiwoom/chart.py` (또는 `sect.py`) — `KiwoomChartClient.fetch_sector_daily`
+- [ ] `app/adapter/out/kiwoom/_records.py` — `SectorChartRow`, `SectorChartResponse`, `NormalizedSectorDailyOhlcv`
+- [ ] `app/adapter/out/persistence/models/sector_price_daily.py` — `SectorPriceDaily`
+- [ ] `app/adapter/out/persistence/repositories/sector_price.py` — `SectorPriceDailyRepository`
+- [ ] `app/application/service/sector_ohlcv_service.py` — `IngestSectorDailyUseCase`, `IngestSectorDailyBulkUseCase`
+- [ ] `app/adapter/web/routers/sector_ohlcv.py` — POST/GET endpoints
+- [ ] `app/batch/sector_ohlcv_job.py` — APScheduler 등록 (KST mon-fri 19:15)
+- [ ] `migrations/versions/008_sector_price_daily.py` — `sector_price_daily` 테이블
+- [ ] `scripts/backfill_sector.py` — CLI
+
+### 10.2 테스트
+
+- [ ] Unit 13 시나리오 (§9.1) PASS
+- [ ] Integration 10 시나리오 (§9.2) PASS
+- [ ] coverage `KiwoomChartClient.fetch_sector_daily`, `IngestSectorDailyUseCase`, `SectorPriceDailyRepository` ≥ 80%
+
+### 10.3 운영 검증
+
+- [ ] **100배 값 가정 실증** — KOSPI 종합 응답값 / 100 ≈ 실제 KOSPI 지수와 일치하는지
+- [ ] `inds_cd` 응답 length 가 20 으로 명시됨에도 실제는 3~4 자리만 오는지
+- [ ] `dt` 정렬 (Excel 예시는 DESC — ka10081 와 동일 가정)
+- [ ] `trde_prica` 단위 (백만원 추정 — ka10081 와 동일 운영 검증)
+- [ ] 1 페이지 응답 row 수 (ka10081 와 동일 ~600 거래일 추정)
+- [ ] 페이지네이션 발생 빈도 (3년 백필 시)
+- [ ] **ka10101 의 sector_code 가 (market_code 무관) unique 한가** — `(market_code, sector_code)` UNIQUE 인지 `sector_code` 만 UNIQUE 인지. 잘못 매핑하면 KOSPI 와 KOSDAQ 의 같은 sector_code 가 충돌
+- [ ] active 업종 50~80개 sync 실측 시간
+- [ ] NXT 거래소 별도 지수 응답 가능 여부 (NXT 100 등)
+- [ ] **수정주가 개념** — 본 endpoint 는 `upd_stkpc_tp` 없는데 지수가 자체 보정되는지
+
+### 10.4 문서
+
+- [ ] CHANGELOG: `feat(kiwoom): ka20006 sector daily ingest (KOSPI/KOSDAQ/sector indices)`
+- [ ] `master.md` § 12 결정 기록에:
+  - 100배 값 저장 형식 (centi BIGINT vs NUMERIC)
+  - `inds_cd` 응답 length 실측
+  - `(market_code, sector_code)` UNIQUE vs `sector_code` 만 UNIQUE
+  - active 업종 수 + sync 실측 시간
+
+---
+
+## 11. 위험 / 메모
+
+### 11.1 결정 필요 항목
+
+| # | 항목 | 옵션 | 결정 시점 |
+|---|------|------|-----------|
+| 1 | 100배 값 저장 형식 | (a) **centi BIGINT (현재)** + read property 변환 / (b) NUMERIC(12,2) 응답 / 100 변환 후 저장 | Phase D 코드화 직전 |
+| 2 | sector 마스터 매핑 | sector_code 만 / (market_code, sector_code) 페어 | ka10101 운영 검증 후 |
+| 3 | 마이그레이션 분리 | Migration 002 (sector 와 함께) / **008 (Phase D 단독)** | Phase D 코드화 |
+| 4 | NXT 지수 처리 | KRX 지수만 / NXT 별도 지수 (운영 검증 후) | 운영 검증 후 |
+| 5 | cron 시간 | 19:15 (제안) / 18:45 (이른 시간) | Phase D 후반 |
+| 6 | 백필 윈도 | 3년 (ka10081 와 동일) / 1년 (필요한 만큼) | Phase H 백테스팅 정책 |
+| 7 | active 업종 결정 | ka10101 의 is_active=true 만 / 본 endpoint 의 첫 호출 응답 기반 | Phase D 코드화 |
+
+### 11.2 알려진 위험
+
+- **100배 값 가정의 정확성** — Excel 명세의 "지수 값은 소수점 제거 후 100배 값으로 반환" 이 모든 지수에 적용되는지. KOSPI200 (응답값이 ~50000 → 실제 500.00) / KRX100 / KOSDAQ150 등 모든 지수를 운영 검증. 잘못 적용하면 백테스팅의 시장 비교가 100배 어긋남
+- **`cur_prc` "현재가" 의 의미** — 일봉 응답에서는 "그 일자 종가" 로 해석. ka10081 와 동일 — 컬럼명 `close_index_centi` 로 명확화
+- **`dt` 정렬 미확정** — Excel 예시는 DESC. ka10081 와 동일 가정. 백테스팅 엔진은 ASC 가정 — 정규화 후 ORDER BY 강제
+- **`inds_cd` length 응답이 20** — Excel 명세 R29 에 응답 length=20 으로 표기. 실제는 3~4 자리만 올 가능성 (요청 length=3). 운영 검증 후 String(10) 컬럼으로 충분한지 확인
+- **sector 마스터 매핑 모호** — ka10101 의 (market_code, sector_code) UNIQUE 라면 같은 sector_code 가 시장별로 중복 가능. 본 endpoint 의 `inds_cd` 만으로 어느 sector 인지 결정 불가 → Sector 테이블의 UNIQUE 정책 변경 또는 별도 매핑 테이블 필요
+- **수정주가 개념 부재** — 본 endpoint 는 `upd_stkpc_tp` 없음. 지수가 액면분할에 자동 보정되는지 (KOSPI 같은 시가총액 가중 지수는 자동 보정), 또는 보정이 미적용되는지 운영 검증
+- **`pred_pre`/`pred_pre_sig`/`trde_tern_rt` 필드 없음** — ka10081 일봉에 비해 응답 정보 부족. 백테스팅의 derived feature 로 자체 계산 (close_t / close_t-1 - 1)
+- **NXT 지수의 별도 산출 가능성** — NXT 거래소가 자체 지수 (NXT 100 등) 산출 시 본 endpoint 에서 응답되는지 ka10101 응답 확인 후 결정. 응답되지 않으면 NXT 시장 분석은 종목 단위만 가능
+- **국제 지수 (NASDAQ / S&P500) 와의 매핑** — 본 endpoint 는 한국 내 지수만. 글로벌 비교는 별도 source 필요 — Phase 외
+- **거래대금 (`trde_prica`) 단위** — ka10081 와 동일 백만원 가정. 운영 검증 후 master.md § 12 에 한 번만 기록 (다른 chart endpoint 들도 같은 단위 가정)
+
+### 11.3 ka20006 vs ka10081 비교
+
+| 항목 | ka10081 종목 일봉 | ka20006 업종 일봉 |
+|------|-----------|------------------|
+| URL | /api/dostk/chart | 동일 |
+| Body 키 (식별자) | `stk_cd` (6~20자리) | `inds_cd` (3자리) |
+| upd_stkpc_tp | 있음 | **없음** (지수 자체 보정) |
+| 응답 list 키 | `stk_dt_pole_chart_qry` | `inds_dt_pole_qry` |
+| 응답 필드 수 | 10 | **7** (pred_pre/pred_pre_sig/trde_tern_rt 없음) |
+| 가격 단위 | KRW (정수) | **지수 × 100** (centi) |
+| KRX/NXT 분리 | Yes | **No** (지수는 거래소 통합) |
+| 영속화 테이블 | stock_price_krx/nxt | sector_price_daily |
+| FK 대상 | stock | sector (ka10101) |
+| 1회 sync 호출 수 | 4500 | **50~80** |
+| sync 시간 추정 | 30~60분 | **1~5분** |
+| 백테스팅 우선순위 | P0 | P2 |
+| 마이그레이션 | 003/004 | 008 |
+
+→ ka10081 의 70% 패턴 복제 + 지수 단위 변환 + sector FK + NXT 미지원으로 단순화. 본 계획서가 다른 chart endpoint 보다 짧은 이유.
+
+### 11.4 ka20006 vs ka10101 의 매핑
+
+```python
+# Phase D 코드화 시점의 매핑 흐름
+async def sync_all_sector_ohlcv(session: AsyncSession, base_date: date) -> None:
+    sector_repo = SectorRepository(session)
+    sectors = await sector_repo.list_all_active()
+    # → ka10101 응답에서 채워진 sector 마스터
+
+    for sector in sectors:
+        # sector.sector_code = "001" / "002" / "101" / "201" / "302" / "701" / ...
+        # → ka20006 의 inds_cd 와 직접 호환
+        await ingest_use_case.execute(
+            inds_cd=sector.sector_code,
+            base_date=base_date,
+        )
+```
+
+→ **본 endpoint 의 의존성**: ka10101 sync 가 선행되어 sector 마스터에 active row 가 존재해야 함. ka10101 은 Phase A (P1), 본 endpoint 는 Phase D (P2) — 시점 차이로 자연 보장. Phase D 코드화 전에 ka10101 의 운영 검증 (DoD § 10.3) 완료 권장.
+
+### 11.5 향후 확장
+
+- **백테스팅의 베타 계산**: 종목 일봉 vs `sector_price_daily` 의 일별 수익률 회귀 — derived feature
+- **섹터 회전 시그널**: 업종별 N일 수익률 랭킹의 변화 패턴
+- **시장 redirect 시그널**: KOSPI200 vs KRX100 의 발산 (large-cap vs broad market)
+- **업종 주봉/월봉**: ka10081 의 ka10082~94 처럼 업종 주봉 (`ka20007`?) / 월봉 (`ka20008`?) 등 — 키움 카탈로그 추가 조사 필요
+- **글로벌 지수**: NASDAQ / S&P500 별도 source — 본 endpoint 범위 외
+- **업종 ↔ 종목 cross-reference**: stock.sector_id FK 가 있으면 자연스러운 join 쿼리 — Phase B 의 stock 마스터 보강 단계에서 수행
+
+---
+
+_Phase D 의 세 번째이자 마지막 endpoint. 가장 가벼운 호출 부담 + 가장 단순한 로직. 단, 100배 값 / sector 매핑 / NXT 지수 처리 의 세 결정이 본 endpoint 의 운영 검증 1순위. 백테스팅 엔진의 시장 비교 / 베타 계산 / 섹터 회전 시그널의 입력._

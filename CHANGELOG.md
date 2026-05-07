@@ -7,7 +7,253 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-05-07] docs(kiwoom): Phase C 계획서 5건 — 백테스팅 OHLCV + 일별 수급 (uncommitted)
+## [2026-05-07] docs(kiwoom): Phase E·F·G 계획서 11건 — 25 endpoint 100% 완성 (uncommitted)
+
+`backend_kiwoom` Phase E (시그널 보강 — 공매도/대차) 3건 + Phase F (순위 — 5종) 5건 + Phase G (투자자별 매매) 3건 = **11 endpoint 계획서** 일괄 완성. 본 세션도 **계획서만 작성** (코드 0줄). **25 endpoint 계획서 100% 완성** (~25,500줄 누적). 다음 단계는 Phase A 부터 코드화 착수.
+
+### Added — Phase E (시그널 보강 — 3건)
+
+- `endpoint-15-ka10014.md` — **공매도 추이 (P1, Phase E reference, 1,069줄)**
+  - URL `/api/dostk/shsa` — 공매도 카테고리 첫 endpoint
+  - 11 필드 (shrts_qty / ovr_shrts_qty / trde_wght / shrts_avg_pric)
+  - `tm_tp` (시작일/기간) 의미 운영 검증 1순위
+  - `short_selling_kw` 테이블 + partial index (매매비중 상위 시그널)
+  - KRX/NXT 동시 호출 (NXT 공매도 미지원 가능성)
+  - `_strip_double_sign_int` helper 재사용 (ka10086 패턴)
+  - cron mon-fri 19:45 KST + 1주 윈도 default
+- `endpoint-16-ka10068.md` — 대차거래 추이 (P1, 시장 단위, 700줄)
+  - URL `/api/dostk/slb` — 대차 카테고리 첫 endpoint
+  - **시장 전체** (stk_cd 없음, all_tp=1)
+  - 6 필드: 체결주수 / 상환주수 / 증감 / 잔고주수 / 잔고금액
+  - `lending_balance_kw` 테이블 + **partial unique index** (scope=MARKET vs STOCK 분리)
+  - cron 20:00 KST + 단일 호출 (RPS 부담 없음)
+- `endpoint-17-ka20068.md` — 대차거래 추이 (P2, 종목별, 672줄)
+  - 같은 URL `/api/dostk/slb` + stk_cd Length=6 (NXT 미지원 가능)
+  - ka10068 의 종목별 분리 — 같은 응답 schema, 같은 테이블 (scope=STOCK)
+  - cron 20:30 KST + 3000 종목 30~60분
+
+### Added — Phase F (순위 — 5건)
+
+- `endpoint-18-ka10027.md` — **전일대비 등락률 상위 (P2, Phase F reference, 979줄)**
+  - URL `/api/dostk/rkinfo` — 5 ranking endpoint 공유 첫 endpoint
+  - **`ranking_snapshot` 통합 테이블 + JSONB payload** 패턴 정의 — 5 endpoint 가변 schema 흡수
+  - `KiwoomRkInfoClient` 단일 클래스 (5 메서드)
+  - `RankingType` enum (FLU_RT/TODAY_VOLUME/PRED_VOLUME/TRDE_PRICA/VOLUME_SDNIN)
+  - `mrkt_tp` 의미 4번째 정의 (000/001/101 — ka10099/10101 와 다름)
+  - `stex_tp` (1:KRX/2:NXT/3:통합) — 5 ranking endpoint 공통
+  - 12 응답 필드 + Body 9 필터
+  - cron 19:30 KST
+- `endpoint-19-ka10030.md` — 당일 거래량 상위 (P2, 23 필드 wide, 574줄)
+  - 응답 필드 23개 (장중/장후/장전 거래량 분리)
+  - **★ `returnCode/returnMsg` camelCase 응답** (Excel 표기 — 운영 검증 1순위, Pydantic alias 로 흡수)
+  - `MarketOpenType` enum (장중/장후/장전 분기)
+  - `primary_metric_of_today_volume` sort_tp 별 분기 (volume/turnover/amount)
+  - cron 19:35 KST
+- `endpoint-20-ka10031.md` — 전일 거래량 상위 (P3, 가장 단순 6 필드, 398줄)
+  - 응답 필드 6개 (5 ranking 중 가장 단순)
+  - **`rank_strt`/`rank_end` 페이지네이션** — cont-yn 미사용 (0~100 분할 호출)
+  - `qry_tp` 2종 (전일거래량/전일거래대금)
+  - cron 19:40 KST
+- `endpoint-21-ka10032.md` — 거래대금 상위 (P2, now_rank/pred_rank, 388줄)
+  - **Body 가장 단순 (3 필드)** — sort_tp 없음 (단일 정렬)
+  - **`now_rank`/`pred_rank` 직접 응답** — 순위 변동 시그널의 raw input
+  - 호가 정보 (`sel_bid`/`buy_bid`) 응답 포함
+  - effective_rank = now_rank 우선 (응답 list 순서와 다를 가능성)
+  - cron 19:50 KST
+- `endpoint-22-ka10023.md` — 거래량 급증 (P2, sdnin spike, 442줄)
+  - 응답 필드 10 (sdnin_qty / sdnin_rt 시그널)
+  - **`tm_tp`/`tm` (분/전일)** + 합성 sort_tp 키 (composite="1_2_5")
+  - sort_tp 4종 (급증량/률/감량/감률)
+  - DECREASE (3/4) 시 음수 sdnin_qty 정렬
+  - cron 19:55 KST (Phase F 마지막)
+
+### Added — Phase G (투자자별 매매 — 3건)
+
+- `endpoint-23-ka10058.md` — **투자자별 일별 매매 종목 (P2, Phase G reference, 920줄)**
+  - URL `/api/dostk/stkinfo`
+  - **(투자자, 매매구분, 시장, 거래소) → 종목 ranking** (long format)
+  - 12 `invsr_tp` 카테고리 (개인/외국인/기관계/금융투자/투신/사모/기타금융/은행/보험/연기금/국가/기타법인)
+  - 11 필드 (netslmt_qty/_amt/prsm_avg_pric/avg_pric_pre)
+  - `mrkt_tp=001/101` (5번째 정의 — ka10027 의 000 없음)
+  - `investor_flow_daily` 테이블 + 운영 default 12 호출 (3 inv × 2 mkt × 2 trde)
+  - 이중 부호 (`--335`) 처리 (ka10086 helper 재사용)
+  - cron 20:00 KST
+- `endpoint-24-ka10059.md` — 종목별 투자자/기관별 wide (P2, 657줄)
+  - 같은 URL `/api/dostk/stkinfo`
+  - **wide format 20 필드** (12 투자자 카테고리 + OHLCV)
+  - **`amt_qty_tp` 의미 ka10131 과 반대** (1=금액, 2=수량 vs 0=금액, 1=수량)
+  - `flu_rt` 표기 "우측 2자리 소수점" (`+698` = +6.98%, ka10058 와 다름)
+  - `stock_investor_breakdown` 별도 테이블 (long format ka10058 와 분리)
+  - 운영 default = (수량, 순매수, 천주, 통합) × 3000 종목 = 30~60분 sync
+  - cron 20:30 KST
+- `endpoint-25-ka10131.md` — 기관/외국인 연속매매 (P2, 697줄)
+  - URL `/api/dostk/frgnistt` (다른 카테고리)
+  - **연속순매수 일수 시그널** (`orgn_cont_dys` / `frgnr_cont_dys` / `tot_cont_dys`)
+  - 19 필드 (3 카테고리 × 5 메트릭 + period_stkpc_flu_rt)
+  - `dt` (기간) = LATEST/3/5/10/20/120 일 / PERIOD (strt~end)
+  - `netslmt_tp=2` 고정 (순매수만)
+  - **`amt_qty_tp` 의미 ka10059 와 반대** (0=금액, 1=수량)
+  - `frgn_orgn_consecutive` 테이블 + total_cont_days 시그널 인덱스
+  - cron 21:00 KST (25 endpoint 의 마지막 cron)
+
+### Phase E·F·G 핵심 설계 결정
+
+- **`ranking_snapshot` 통합 테이블 + JSONB payload (Phase F)**: 5 ranking endpoint 의 가변 schema 를 단일 테이블로 흡수. UNIQUE 키 6개 (snapshot_date/time, ranking_type, sort_tp, market_type, exchange_type, rank). GIN 인덱스로 ad-hoc 쿼리 가속. 새 ranking endpoint 추가 시 enum + UseCase 만 작성
+- **`investor_flow_daily` (long) vs `stock_investor_breakdown` (wide) 분리 (Phase G)**: ka10058 의 ranking 추출과 ka10059 의 종목 단위 12 투자자 wide breakdown 의 책임 분리. 두 테이블 같은 마이그레이션 (008) + 같은 service 모듈
+- **`lending_balance_kw` partial unique index (Phase E)**: ka10068 (시장) + ka20068 (종목별) 같은 테이블 + scope 컬럼 분기. PostgreSQL partial index 로 (scope=MARKET, trading_date) 와 (scope=STOCK, stock_id, trading_date) 두 UNIQUE 키 분리
+- **`mrkt_tp` 4번째 + 5번째 의미 정의**: ka10099 (0/10/30/...) → ka10101 (0/1/2/4/7) → ka10027 (000/001/101) → ka10058 (001/101) → ka10131 (001/101). 5 카테고리 별 enum 분리 (`SectorMarketType`, `StockListMarketType`, `RankingMarketType`, `InvestorMarketType`)
+- **`stex_tp` 통합 (Phase F + G 일부)**: 5 ranking + ka10058 + ka10131 모두 `1`:KRX / `2`:NXT / `3`:통합. master.md § 11.3 의 `RankingExchangeType` enum 재사용
+- **camelCase 응답 흡수 (ka10030)**: Pydantic `Field(alias="returnCode")` + `populate_by_name=True` — Excel 표기와 실제 응답 차이를 안전망으로 흡수
+- **연속 일수 시그널 (ka10131)**: total_cont_days desc 정렬 + DESC NULLS LAST partial index — 강한 추세 종목 추출 1순위 쿼리
+- **합성 sort_tp 키 (ka10023)**: `composite="{sort_tp}_{tm_tp}_{tm}"` — 같은 시점에 다른 윈도 호출 분리. ranking_snapshot 의 UNIQUE 키 확장 없이 구현
+- **이중 부호 (`--335`/`--714`) 처리 일반화**: ka10086 의 `_strip_double_sign_int` helper 가 Phase E (ka10014/10068/20068), Phase G (ka10058/10059/10131) 6 endpoint 에서 재사용. 단일 helper 로 통일된 부호 처리
+- **cron chain 19~21시 분할**: 18:30 일봉 → 19:00 ka10086 → 19:15 ka20006 → 19:30~19:55 Phase F (5종) → 20:00 ka10058 → 20:30 ka10059 → 21:00 ka10131. 각 5~30분 간격으로 Semaphore 충돌 회피
+
+### 25 endpoint 누적 통계
+
+| Phase | endpoint | 줄수 | 누적 줄수 |
+|-------|----------|------|-----------|
+| A (au10001/au10002/ka10101) | 3 | ~3,200 | ~3,200 |
+| B (ka10099/100/ka10001) | 3 | ~2,400 | ~5,600 |
+| C (ka10081~94/ka10086) | 5 | ~3,170 | ~8,770 |
+| D (ka10079/80/ka20006) | 3 | ~3,220 | ~11,990 |
+| **E (ka10014/10068/20068)** | **3** | **~2,440** | **~14,430** |
+| **F (ka10027/30/31/32/23)** | **5** | **~2,780** | **~17,210** |
+| **G (ka10058/59/131)** | **3** | **~2,275** | **~19,485** |
+| master.md | — | 653 | **~20,140** |
+
+→ **25 endpoint × 평균 780줄 = ~20,140줄 계획서**. 본 세션 (E+F+G) **+7,496줄** 추가.
+
+### 25 endpoint 코드화 진입 준비 완료
+
+Phase A·B·C·D·E·F·G **모두 계획서 완성** (코드 0줄). master.md § 11 권고에 따라 다음 세션은 Phase A 부터 순차 코드화 착수:
+
+1. **Phase A** (인증 + sector 마스터, 3 endpoint) — pyproject.toml + Dockerfile + Alembic 001 + KiwoomClient 공통 트랜스포트
+2. **Phase B** (종목 마스터, 3 endpoint) — Alembic 002 + LookupStockUseCase
+3. **Phase C** (백테스팅 OHLCV, 5 endpoint) — Alembic 003/004/005 + 백테스팅 엔진 즉시 검증
+4. **Phase D** (보강 시계열, 3 endpoint)
+5. **Phase E** (시그널 보강, 3 endpoint)
+6. **Phase F** (순위, 5 endpoint)
+7. **Phase G** (투자자별, 3 endpoint)
+8. **Phase H** (통합) — 백테스팅 view, 데이터 품질 리포트, retention drop
+
+### Phase E·F·G 운영 검증 우선순위 (DoD § 10.3 모음)
+
+| Endpoint | 항목 | 영향 |
+|----------|------|------|
+| ka10014 | **`tm_tp` (시작일/기간) 의미** | 응답 row 분포 |
+| ka10014 | NXT 공매도 응답 가능 여부 | partial 실패율 |
+| ka10068 | 시장 분리 응답 가능 여부 (KOSPI/KOSDAQ) | 별도 호출 필요성 |
+| ka10068 | `rmnd` 누적 vs 일별 변동 의미 | derived feature 정합성 |
+| ka20068 | NXT 호출 가능 여부 (stk_cd Length=6) | NXT 시계열 가능성 |
+| ka10027 | `stk_cls`/`cntr_str`/`cnt` 의미 | payload 활용 |
+| ka10030 | **`returnCode/returnMsg` camelCase 응답 확정** | 5 endpoint 일관성 |
+| ka10030 | 장중/장후/장전 분리값 발효 시점 | mrkt_open_tp 활용 |
+| ka10031 | qry_tp=1 vs 2 응답 정렬 의미 | trde_qty 가 거래대금 대체? |
+| ka10032 | `now_rank` vs list 순서 일치 | rank 컬럼 의미 |
+| ka10023 | `tm_tp=1` + `tm="5"` 의미 | 분 단위 시그널 시점 |
+| ka10058 | **`netslmt_qty/_amt` 부호 의미** (trde_tp=2 시) | 부호 처리 |
+| ka10058 | 이중 부호 (`--335`) 빈도 | 정규화 helper 적용 |
+| ka10059 | **`flu_rt` 표기 (`+698` = 6.98%)** | 정규화 / 100 |
+| ka10059 | `orgn = 12 sub-카테고리 합` 정합성 | wide row 검증 |
+| ka10059 | `natfor` (내외국인) 의미 | 컬럼 활용 |
+| ka10131 | **`amt_qty_tp` (0=금액, 1=수량) — ka10059 와 반대** | 단위 mismatch 위험 |
+| ka10131 | `cont_netprps_dys` 산식 (orgn + frgnr = total?) | 시그널 정합성 |
+| ka10131 | 응답 stk_cd Length=6 (NXT 처리) | NXT 시그널 |
+
+---
+
+## [2026-05-07] docs(kiwoom): Phase D 계획서 3건 — 보강 시계열 (틱·분봉·업종) (uncommitted)
+
+`backend_kiwoom` Phase D (보강 시계열) 계획서 3건 완성. 본 세션도 **계획서만 작성** (코드 0줄). Phase A(3) + B(3) + C(5) + D(3) = 14 endpoint 계획서 누적, 약 ~12,200줄 문서. 25 endpoint 중 14 완성 (56%).
+
+### Added — Phase D endpoint 계획서
+
+- `src/backend_kiwoom/docs/plans/endpoint-11-ka10079.md` — **주식틱차트 (P3, 화이트리스트 + 옵션)**
+  - 1,100줄 — 데이터 폭증 정책이 본 endpoint 의 핵심 설계
+  - **화이트리스트 필수** — 액티브 50 종목 × tic_scope=1 × 정규장 = 일 ~500만 row × 거래소
+  - `TickWhitelist` 테이블 + 운영자 명시 등록 — 자동 추가 안 함
+  - `KiwoomChartClient.fetch_tick` + `IngestTickUseCase` + `IngestTickWhitelistUseCase`
+  - `cntr_tm` 14자리 (`YYYYMMDDHHMMSS` KST) → `executed_at` TIMESTAMPTZ
+  - **같은 cntr_tm 내 다중 체결**: `sequence_no` UNIQUE 컬럼으로 분리
+  - `tic_scope` 1/3/5/10/30 (분봉과 다름) → `TickScope` enum 분리
+  - **base_dt 파라미터 부재** → 백필 불가, forward-only ingest
+  - `stock_tick_price` 월별 파티션 + retention 30일 권장
+  - `tick_collection_enabled: bool = False` 토글 — 기본 OFF
+  - cron KST mon-fri 19:30 (선택, ka10080 와 시간 분리 필요)
+- `src/backend_kiwoom/docs/plans/endpoint-12-ka10080.md` — **주식분봉차트 (P2, normal-path)**
+  - 1,167줄 — Phase D 의 normal-path. 종목 OHLCV 의 일중 보강
+  - `tic_scope` 1/3/5/10/15/30/45/60 분 (틱과 다름 — 15·45 추가) → `MinuteScope` enum 분리
+  - **`base_dt` optional** — 백필 가능 (틱은 불가). `BackfillMinuteUseCase` 점진 과거 호출
+  - **`acc_trde_qty` (누적 거래량)** — Excel 스펙 표 누락 + 예시 등장. 운영 검증 1순위
+  - KRX/NXT 동시 호출 (NXT enable 만) — 분봉은 ka10079 와 달리 전체 active 종목 default
+  - `KiwoomChartClient.fetch_minute` + `IngestMinuteUseCase` + `IngestMinuteBulkUseCase`
+  - `stock_minute_price` 월별 파티션 — Migration 005 (ka10079 와 같은 마이그레이션)
+  - 운영 default `MinuteScope.MIN_5` (5분봉) — 1분봉은 P0 종목 화이트리스트만
+  - active 3000 × 2 거래소 = 4500 호출, 30~60분 sync 추정
+  - cron KST mon-fri 19:30 (틱과 시간 충돌 — 분봉 19:30, 틱 20:00 등 분리 필요)
+- `src/backend_kiwoom/docs/plans/endpoint-13-ka20006.md` — 업종일봉 (P2, 가벼움)
+  - 953줄 — Phase D 의 가장 가벼운 endpoint
+  - **★ 100배 값 정규화**: "지수 값은 소수점 제거 후 100배 값으로 반환" — 응답 252127 = 2521.27
+  - `close_index_centi` BIGINT 컬럼 + `close_index` Decimal property (centi/100)
+  - **NXT 미지원** — 업종 지수는 거래소 통합 카테고리. 단일 호출
+  - `inds_cd` 3자리 (ka10101 의 sector_code 와 직접 호환) — Phase A sector 마스터 의존
+  - 응답 7 필드 (ka10081 의 10필드보다 3개 적음 — pred_pre/pred_pre_sig/trde_tern_rt 없음)
+  - `KiwoomChartClient.fetch_sector_daily` + `IngestSectorDailyUseCase` + `IngestSectorDailyBulkUseCase`
+  - `sector_price_daily` 단일 테이블 — Migration 008 (Phase A 의 002 와 분리, 활성화 토글 가능)
+  - active 50~80 업종 × 1 호출 = 50~80 호출, 1~5분 sync 추정 (가장 가벼움)
+  - cron KST mon-fri 19:15 (ka10081 18:30 → ka10086 19:00 → ka20006 19:15 → ka10080 19:30 chain)
+
+### Phase D 의 핵심 설계 결정
+
+- **`TickScope` vs `MinuteScope` enum 분리**: ka10079 는 1/3/5/10/30 (5종), ka10080 은 1/3/5/10/15/30/45/60 (8종) — 같은 `tic_scope` 파라미터 이름의 다른 의미. 잘못 매핑하면 분봉 호출에 틱 enum 사용 가능 → 컴파일 시점 차단
+- **틱 화이트리스트 정책**: 자동 등록 없음, 운영자 명시 추가만. 데이터 폭증 통제의 1차 안전판. `tick_collection_enabled` 토글로 2차 안전판
+- **`stock_tick_price` 월별 파티션 필수**: 50 종목 × tic_scope=1 × 정규장 = 월 1.5억 row. 단일 테이블이면 PG 인스턴스 부담 폭발 — 월별 파티션 + retention 30일 운영 default
+- **`acc_trde_qty` Excel 표기 모순**: ka10080 스펙 표 누락 + 예시 포함. 운영 첫 호출 raw 측정으로 결정 — 응답에 없으면 cumulative_volume NULL, 시그널 활용 보류
+- **분봉 base_dt optional 활용**: ka10081 일봉은 required, ka10080 만 선택. 미지정 시 키움이 최신일 응답 추정. 백필 시 점진적 과거 base_dt 사용
+- **업종 지수 100배 값 → centi BIGINT**: 정수 산술이 빠르고 정확. NUMERIC(12,2) 변환 후 저장 안 함. read property 로 / 100 변환 노출
+- **ka20006 NXT 미지원**: 업종 지수는 거래소 통합 카테고리. master.md § 3 의 "물리 분리" 대상 아님. 단, NXT 자체 지수 산출 가능성은 운영 검증 후 결정
+- **cron 19시대 chain 분리**: 18:30 일봉 → 19:00 ka10086 → 19:15 ka20006 업종 → 19:30 ka10080 분봉. 각 15~30분 간격으로 Semaphore 충돌 회피
+- **2 endpoint = 1 마이그레이션 (Migration 005 intraday)**: ka10079 + ka10080 두 테이블 동시 생성 — 인트라데이 적재의 토글 단위 통합
+- **3 endpoint = 3 마이그레이션 (003/004/005/008 분리)**: 운영 중 단계별 활성화 가능. ka20006 의 008 은 Phase A 의 002 sector 마스터와 분리 — Phase D 도입 시점 결정
+
+### Phase D 의 운영 검증 핵심 (DoD § 10.3 모음)
+
+| Endpoint | 미확정 항목 | 영향 |
+|----------|------------|------|
+| ka10079 | **`last_tic_cnt` 의미** (빈 문자열 / 페이지 종료 / 다음 키) | 페이지네이션 동작의 1순위 unknown |
+| ka10079 | **`pred_pre` 부호** (Excel `"500"` 부호 누락) | ka10080 (`"-600"`) 과 다른 표현 — 부호 처리 일관성 |
+| ka10079 | 1 페이지 row 수 (액티브 vs 비액티브) | 페이지네이션 빈도 + max_pages 추정 |
+| ka10079 | 키움이 응답하는 기간 (당일만? 직전 N분?) | 백필 가능성 결정 |
+| ka10079 | tic_scope=1 vs 30 의 row 수 비율 (이론 30:1) | 데이터 부담 추정 |
+| ka10080 | **`acc_trde_qty` 응답 여부** (Excel 스펙 누락 + 예시 등장) | cumulative_volume 컬럼의 활용 가능 여부 |
+| ka10080 | `cntr_tm` 분봉 의미 (시작 시각? 종료 시각?) | 백테스팅 진입 시점 1분 lag 가능성 |
+| ka10080 | base_date 미지정 응답 범위 | 백필 전략 |
+| ka10080 | 1 페이지 row 수 (5분봉 ~80, 1분봉 ~390 추정) | 페이지네이션 빈도 |
+| ka10080 | NXT 응답 시간 범위 (8:00~20:00 추정) | NXT 데이터의 시간 분포 |
+| ka20006 | **100배 값 가정 실증** (KOSPI 응답값 / 100 ≈ 실제 KOSPI) | 모든 백테스팅 시장 비교의 정확도 |
+| ka20006 | `inds_cd` 응답 length (스펙 20 vs 실제 3~4 추정) | 컬럼 폭 결정 |
+| ka20006 | **(market_code, sector_code) UNIQUE vs sector_code 만 UNIQUE** | sector 마스터 매핑 정책 |
+| ka20006 | NXT 거래소 별도 지수 응답 가능 여부 | NXT 시장 분석 가능성 |
+
+### Phase D 가 끝나면 가능한 것
+
+- 종목 분봉 (5분봉) 전체 active × 1년 = ~60M row 적재 (월별 파티션) — 백테스팅 v2 의 분봉 입력
+- 업종 일봉 50~80 × 3년 = ~60K row — 시장 비교 / 베타 / 섹터 회전 시그널
+- 화이트리스트 50 종목 × 30틱 × 30일 = ~5M row — 슬리피지 시뮬 + 분봉 합성 검증
+- KRX/NXT 분봉 분리 — 정규장 외 시간대 가격 발견 패턴 분석
+- 종목 일봉 (Phase C) + 분봉 (Phase D) cross-check — 어느 source 가 정답인지 데이터 품질 리포트
+
+### Phase D 누적 통계
+
+- **계획서 라인**: 1,100 (ka10079) + 1,167 (ka10080) + 953 (ka20006) = **3,220줄**
+- **Phase A+B+C+D = 14 endpoint × 평균 870줄** = ~12,200줄 + master.md 653줄 = ~12,800줄 계획서
+- **25 endpoint 중 14 완성** = **56%**
+- **누적 코드 변경**: 0 (계획서 단계)
+
+---
+
+## [2026-05-07] docs(kiwoom): Phase C 계획서 5건 — 백테스팅 OHLCV + 일별 수급 (committed: de6d109)
 
 `backend_kiwoom` Phase C (백테스팅 본체) 계획서 5건 완성. 본 세션은 **계획서만 작성** (코드 0줄). Phase A(3) + Phase B(3) + Phase C(5) = 11 endpoint 계획서 누적, 약 ~8,400줄 문서. 25 endpoint 중 11 완성 (44%).
 
