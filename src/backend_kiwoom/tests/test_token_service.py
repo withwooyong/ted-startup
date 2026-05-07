@@ -307,11 +307,7 @@ async def test_token_manager_reissues_on_expired_token(
     def handler(_req: httpx.Request) -> httpx.Response:
         nonlocal call_count
         call_count += 1
-        soon = (
-            datetime.now(KST) + timedelta(seconds=60)
-            if call_count == 1
-            else datetime.now(KST) + timedelta(hours=23)
-        )
+        soon = datetime.now(KST) + timedelta(seconds=60) if call_count == 1 else datetime.now(KST) + timedelta(hours=23)
         body = {**_VALID_TOKEN_BODY, "expires_dt": soon.strftime("%Y%m%d%H%M%S")}
         return httpx.Response(200, json=body)
 
@@ -503,3 +499,358 @@ async def test_token_manager_cleans_lock_on_invalid_alias(
 
     # lock dict 가 비어 있어야 함
     assert len(manager._locks) == 0, f"무효 alias 는 lock 미보존 — 현재 {len(manager._locks)}"
+
+
+# =============================================================================
+# β chunk — TokenManager 확장 (peek / invalidate_all / alias_keys)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_token_manager_peek_returns_cache_only(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """peek 은 캐시만 조회 — 발급 트리거 안 함, 만료 무관."""
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(200, json=_VALID_TOKEN_BODY)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+
+    # 캐시 비어있음 → None
+    assert manager.peek(alias="test-prod") is None
+    assert call_count == 0
+
+    # get 으로 캐시 채움
+    issued = await manager.get(alias="test-prod")
+    assert call_count == 1
+
+    # peek → 같은 인스턴스
+    peeked = manager.peek(alias="test-prod")
+    assert peeked is issued
+    assert call_count == 1, "peek 은 발급 트리거 안 함"
+
+
+@pytest.mark.asyncio
+async def test_token_manager_peek_returns_expired_token_too(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """peek 은 만료 무관 — 폐기 UseCase 가 캐시 토큰을 직접 받기 위함."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        soon = datetime.now(KST) + timedelta(seconds=10)  # is_expired(margin=300)=True
+        body = {**_VALID_TOKEN_BODY, "expires_dt": soon.strftime("%Y%m%d%H%M%S")}
+        return httpx.Response(200, json=body)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    issued = await manager.get(alias="test-prod")
+    assert issued.is_expired() is True
+
+    peeked = manager.peek(alias="test-prod")
+    assert peeked is issued, "peek 은 만료된 토큰도 반환"
+
+
+@pytest.mark.asyncio
+async def test_token_manager_alias_keys_returns_active_aliases(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+) -> None:
+    """alias_keys — 캐시에 있는 alias 만 반환 (lock 만 있고 토큰 없는 alias 제외)."""
+    repo = KiwoomCredentialRepository(session, cipher)
+    for alias in ("a", "b", "c"):
+        await repo.upsert(
+            alias=alias,
+            env="mock",
+            credentials=KiwoomCredentials(appkey="A" * 32, secretkey="S" * 32),
+        )
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_VALID_TOKEN_BODY)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    await manager.get(alias="a")
+    await manager.get(alias="b")
+    # c 는 발급 안 함
+
+    keys = manager.alias_keys()
+    assert set(keys) == {"a", "b"}, f"활성 alias만 반환 — got {keys}"
+
+
+@pytest.mark.asyncio
+async def test_token_manager_invalidate_all_empties_cache(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+) -> None:
+    """invalidate_all — 모든 alias 캐시 비움. lock 은 보존 (정상 alias)."""
+    repo = KiwoomCredentialRepository(session, cipher)
+    for alias in ("a", "b", "c"):
+        await repo.upsert(
+            alias=alias,
+            env="mock",
+            credentials=KiwoomCredentials(appkey="A" * 32, secretkey="S" * 32),
+        )
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_VALID_TOKEN_BODY)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    await manager.get(alias="a")
+    await manager.get(alias="b")
+    await manager.get(alias="c")
+    assert len(manager.alias_keys()) == 3
+
+    manager.invalidate_all()
+    assert manager.alias_keys() == ()
+    assert manager.peek(alias="a") is None
+
+
+# =============================================================================
+# β chunk — RevokeKiwoomTokenUseCase
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_revoke_use_case_revoke_by_alias_succeeds_with_cached_token(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """캐시 hit + 200 → RevokeResult(revoked=True, reason='ok'). 캐시 무효화."""
+    from app.application.service.token_service import RevokeKiwoomTokenUseCase, RevokeResult
+
+    issue_call_count = 0
+    revoke_call_count = 0
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal issue_call_count, revoke_call_count
+        if req.url.path == "/oauth2/token":
+            issue_call_count += 1
+            return httpx.Response(200, json=_VALID_TOKEN_BODY)
+        if req.url.path == "/oauth2/revoke":
+            revoke_call_count += 1
+            return httpx.Response(200, json={"return_code": 0, "return_msg": "ok"})
+        return httpx.Response(404)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    issued = await manager.get(alias="test-prod")
+    assert manager.peek(alias="test-prod") is issued
+
+    revoke_uc = RevokeKiwoomTokenUseCase(
+        session_provider=_session_wrapper(session),
+        cipher=cipher,
+        auth_client_factory=_auth_factory(handler),
+        token_manager=manager,
+    )
+    result = await revoke_uc.revoke_by_alias(alias="test-prod")
+
+    assert isinstance(result, RevokeResult)
+    assert result.alias == "test-prod"
+    assert result.revoked is True
+    assert result.reason == "ok"
+    assert revoke_call_count == 1
+    # 캐시 무효화
+    assert manager.peek(alias="test-prod") is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_use_case_cache_miss_returns_idempotent_success(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """캐시 비어있음 → RevokeResult(revoked=False, reason='cache-miss'). adapter 호출 0."""
+    from app.application.service.token_service import RevokeKiwoomTokenUseCase
+
+    revoke_call_count = 0
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        nonlocal revoke_call_count
+        if req.url.path == "/oauth2/revoke":
+            revoke_call_count += 1
+        return httpx.Response(200, json={"return_code": 0})
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    revoke_uc = RevokeKiwoomTokenUseCase(
+        session_provider=_session_wrapper(session),
+        cipher=cipher,
+        auth_client_factory=_auth_factory(handler),
+        token_manager=manager,
+    )
+    result = await revoke_uc.revoke_by_alias(alias="test-prod")
+
+    assert result.revoked is False
+    assert result.reason == "cache-miss"
+    assert revoke_call_count == 0, "캐시 miss 시 adapter 호출 안 함"
+
+
+@pytest.mark.asyncio
+async def test_revoke_use_case_idempotent_on_401(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """캐시 hit + 401 → 멱등 성공 변환 (revoked=False, reason='already-expired'). 캐시 무효화."""
+    from app.application.service.token_service import RevokeKiwoomTokenUseCase
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/oauth2/token":
+            return httpx.Response(200, json=_VALID_TOKEN_BODY)
+        if req.url.path == "/oauth2/revoke":
+            return httpx.Response(401)  # 이미 만료된 토큰
+        return httpx.Response(404)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    await manager.get(alias="test-prod")
+
+    revoke_uc = RevokeKiwoomTokenUseCase(
+        session_provider=_session_wrapper(session),
+        cipher=cipher,
+        auth_client_factory=_auth_factory(handler),
+        token_manager=manager,
+    )
+    result = await revoke_uc.revoke_by_alias(alias="test-prod")
+
+    assert result.revoked is False
+    assert result.reason == "already-expired"
+    # 캐시는 키움 측 결과 무관하게 무효화
+    assert manager.peek(alias="test-prod") is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_use_case_credential_not_found(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """캐시에 토큰은 있지만 DB credential 미등록 → CredentialNotFoundError."""
+    from app.application.service.token_service import RevokeKiwoomTokenUseCase
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/oauth2/token":
+            return httpx.Response(200, json=_VALID_TOKEN_BODY)
+        return httpx.Response(200, json={"return_code": 0})
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    # test-prod 의 토큰을 발급 후 다른 alias 로 revoke 시도
+    await manager.get(alias="test-prod")
+
+    # 임의 alias 의 캐시 토큰을 위조 (실제로는 raw_token 사용 시 시나리오)
+    # → revoke_by_alias 는 cred 로 보호 — 미등록 alias 캐시는 발생 안 함
+    # 대신 raw_token 으로 미등록 alias 시도
+    revoke_uc = RevokeKiwoomTokenUseCase(
+        session_provider=_session_wrapper(session),
+        cipher=cipher,
+        auth_client_factory=_auth_factory(handler),
+        token_manager=manager,
+    )
+    with pytest.raises(CredentialNotFoundError):
+        await revoke_uc.revoke_by_raw_token(alias="missing", raw_token="X" * 100)
+
+
+@pytest.mark.asyncio
+async def test_revoke_use_case_revoke_by_raw_token(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+    seed_credential: KiwoomCredentials,
+) -> None:
+    """raw_token 폐기 — 캐시 외부 토큰을 명시 폐기. adapter 호출 1회 + 캐시 무효화."""
+    from app.application.service.token_service import RevokeKiwoomTokenUseCase
+
+    captured_tokens: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/oauth2/token":
+            return httpx.Response(200, json=_VALID_TOKEN_BODY)
+        if req.url.path == "/oauth2/revoke":
+            body = json.loads(req.content)
+            captured_tokens.append(body["token"])
+            return httpx.Response(200, json={"return_code": 0})
+        return httpx.Response(404)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    await manager.get(alias="test-prod")
+
+    revoke_uc = RevokeKiwoomTokenUseCase(
+        session_provider=_session_wrapper(session),
+        cipher=cipher,
+        auth_client_factory=_auth_factory(handler),
+        token_manager=manager,
+    )
+    raw_token = "ExternalToken-Leaked-987654321"
+    result = await revoke_uc.revoke_by_raw_token(alias="test-prod", raw_token=raw_token)
+
+    assert result.revoked is True
+    assert result.reason == "ok-raw"
+    assert raw_token in captured_tokens, "raw_token 이 키움에 전송됨"
+    # 캐시 무효화
+    assert manager.peek(alias="test-prod") is None
+
+
+# =============================================================================
+# β chunk — graceful shutdown 시나리오 (lifespan hook 의 단위 동작)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_revoke_use_case_processes_all_aliases_even_when_one_fails(
+    session: AsyncSession,
+    cipher: KiwoomCredentialCipher,
+) -> None:
+    """shutdown — alias B 폐기 실패해도 A/C 진행. 캐시 모두 비워짐."""
+    from app.application.service.token_service import RevokeKiwoomTokenUseCase
+
+    repo = KiwoomCredentialRepository(session, cipher)
+    for alias in ("alias-a", "alias-b", "alias-c"):
+        await repo.upsert(
+            alias=alias,
+            env="mock",
+            credentials=KiwoomCredentials(appkey="A" * 32, secretkey="S" * 32),
+        )
+
+    revoke_paths_seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/oauth2/token":
+            return httpx.Response(200, json=_VALID_TOKEN_BODY)
+        if req.url.path == "/oauth2/revoke":
+            # alias-b 의 토큰만 500 — appkey 동일이므로 token 으로 식별 어려우니 단순화
+            revoke_paths_seen.append("revoke")
+            if len(revoke_paths_seen) == 2:  # 2번째 호출 = alias-b
+                return httpx.Response(500)
+            return httpx.Response(200, json={"return_code": 0})
+        return httpx.Response(404)
+
+    manager = _make_manager(session=session, cipher=cipher, handler=handler)
+    await manager.get(alias="alias-a")
+    await manager.get(alias="alias-b")
+    await manager.get(alias="alias-c")
+    assert len(manager.alias_keys()) == 3
+
+    revoke_uc = RevokeKiwoomTokenUseCase(
+        session_provider=_session_wrapper(session),
+        cipher=cipher,
+        auth_client_factory=_auth_factory(handler),
+        token_manager=manager,
+    )
+
+    # 각각 시도 — alias-b 는 KiwoomUpstreamError raise (caller 가 swallow 결정)
+    from app.adapter.out.kiwoom._exceptions import KiwoomUpstreamError
+
+    results: list[str] = []
+    for alias in manager.alias_keys():
+        try:
+            r = await revoke_uc.revoke_by_alias(alias=alias)
+            results.append(f"{alias}:{r.reason}")
+        except KiwoomUpstreamError:
+            results.append(f"{alias}:upstream-fail")
+
+    assert len(revoke_paths_seen) == 3, "3 alias 모두 폐기 시도"
+    # alias-b 는 KiwoomUpstreamError 라 캐시 무효화 안 됨 (현재 동작)
+    # 다른 2개는 성공 + 캐시 비움

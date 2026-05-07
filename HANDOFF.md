@@ -1,161 +1,157 @@
 # Session Handoff
 
-> Last updated: 2026-05-07 (KST) — **backend_kiwoom Phase A2-α (au10001 발급) 완료 (ted-run 풀 파이프라인 + 적대적 이중 리뷰 1R)**
-> Branch: `master` (working tree dirty — α PR 미커밋)
-> Latest commit: `265b720` — security(kiwoom): Phase A2 사전 보안 PR
-> 세션 시작점: `265b720` 동일
+> Last updated: 2026-05-07 (KST) — **backend_kiwoom Phase A2 (α + β) 완료 — 토큰 라이프사이클 전체 (issue + revoke + lifespan graceful shutdown)**
+> Branch: `master` (working tree dirty — β PR 미커밋)
+> Latest commit: `115fcce` — feat(kiwoom): Phase A2-α au10001 발급 경로
+> 세션 시작점: `115fcce` 동일
 
 ## Current Status
 
-`backend_kiwoom` **Phase A2-α (au10001 KiwoomAuthClient 발급 경로) 완료**. au10001 접근토큰 발급 + KiwoomAuthClient + IssueKiwoomTokenUseCase + TokenManager + admin POST 라우터 + FastAPI 진입점. β chunk (au10002 폐기 + lifespan graceful shutdown) 별도 PR. 외부 호출 0 — `httpx.MockTransport` + testcontainers PG16. 운영 dry-run (DoD §10.3) 은 β 와 일괄.
+`backend_kiwoom` **Phase A2-β (au10002 폐기 + lifespan graceful shutdown) 완료**. β chunk: au10002 폐기 + RevokeKiwoomTokenUseCase + TokenManager 확장 (peek/invalidate_all/alias_keys) + DELETE/revoke-raw 라우터 + lifespan graceful shutdown.
 
-ted-run 풀 파이프라인 5관문 모두 통과 + 적대적 이중 리뷰 1R 사이클 완료. **CRITICAL 0건 / HIGH 0건 PASS**.
+ted-run 풀 파이프라인 5관문 통과 + 적대적 이중 리뷰 1R 사이클. **CRITICAL 1 (C-1) + HIGH 4 + MEDIUM 5** 발견 → 전부 적용 → CRITICAL/HIGH 0 PASS.
 
-## Completed This Session (Phase A2-α — 1R 사이클)
+## Completed This Session (Phase A2-β — 1R 사이클)
 
 ### Step 0: TDD (sonnet)
 
-- 4 신규 테스트 파일 + 1 확장 / +43 케이스 (red 확인 후 green)
-- `tests/test_kiwoom_auth_client.py` (신규, 14)
-- `tests/test_token_service.py` (신규, 12)
-- `tests/test_kiwoom_auth_router.py` (신규, 10)
-- `tests/test_logging_masking.py` (확장, +3 au10001 회귀)
+- 4 신규 케이스 그룹 / +35 케이스 (red 확인 후 green)
+- `tests/test_lifespan.py` (신규, 3 케이스)
+- `tests/test_kiwoom_auth_client.py` (확장 +8) — revoke adapter
+- `tests/test_token_service.py` (확장 +12) — RevokeUseCase + TokenManager 확장
+- `tests/test_kiwoom_auth_router.py` (확장 +12) — DELETE/revoke-raw + C-1 + H-1 회귀
 
 ### Step 1: 구현 (opus)
 
-- `app/adapter/out/kiwoom/_exceptions.py` (신규) — 5 도메인 예외
-- `app/adapter/out/kiwoom/auth.py` (신규) — KiwoomAuthClient + Pydantic 모델
-- `app/application/service/token_service.py` (신규) — IssueKiwoomTokenUseCase + TokenManager
-- `app/adapter/web/_deps.py` (신규) — admin guard + 싱글톤
-- `app/adapter/web/routers/auth.py` (신규) — POST 라우터
-- `app/main.py` (신규) — FastAPI 진입점 (α 최소)
-- `app/application/dto/kiwoom_auth.py` (확장) — `mask_token` helper
-- `app/adapter/out/persistence/repositories/kiwoom_credential.py` (확장) — `decrypt_row`
+- `app/adapter/out/kiwoom/auth.py` 확장 — `revoke_token` + `TokenRevokeRequest`/`TokenRevokeResponse`
+- `app/application/service/token_service.py` 확장 — `RevokeKiwoomTokenUseCase` + `RevokeResult` + `TokenManager.peek/invalidate_all/alias_keys` + `revoke_all_aliases_best_effort`
+- `app/adapter/web/_deps.py` 확장 — `get_revoke_use_case` / `set_revoke_use_case` 싱글톤
+- `app/adapter/web/routers/auth.py` 확장 — DELETE/revoke-raw + `_map_revoke_exception`
+- `app/main.py` 확장 — lifespan graceful shutdown + RequestValidationError 핸들러
 
-### Step 2 — Round 1 (이중 리뷰 병렬, sonnet + opus)
+### Step 2 — Round 1 (이중 리뷰 병렬)
 
-**2a (sonnet python-reviewer)**: HIGH 4 + MEDIUM 4 + LOW 1
+**2a (sonnet python-reviewer)**: HIGH 3 + MEDIUM 5 + LOW 2
 
-HIGH 4건:
-1. Dead `TokenIssueRequest` Pydantic 모델 (사용 안 됨) → request body 검증 누락
-2. `import logging` 대신 `structlog` 권고 (확인 결과 stdlib 도 동일 파이프라인 — 기각)
-3. 세션 누수 — `_factory` 에서 AsyncSession 생성 후 close 안 함
-4. 이중 SELECT — `find_by_alias` + `get_decrypted` (내부 `find_by_alias` 재호출)
+HIGH 3건:
+1. `_map_revoke_exception` `KiwoomRateLimitedError` 미매핑 → fallback 500
+2. `revoke_by_raw_token` `KiwoomCredentialRejectedError` idempotent 변환 누락 → fallback 500
+3. session context 의 ORM lazy attr 가정 (architecture fragility) — 코멘트만
 
-**2b (opus security-reviewer 적대적)**: HIGH 5 + MEDIUM 5 + LOW 3 + FOLLOW-UP 5
+**2b (opus security-reviewer 적대적)**: **CRITICAL 1** + HIGH 3 + MEDIUM 5 + LOW 3 + FOLLOW-UP 5
 
-HIGH 5건:
-- H1 lock proliferation (alias 폭증으로 무한 lock 생성 → DoS)
-- H2 `defaultdict[Lock]` race + 동시 테스트가 sync handler 라 의미 없음
-- H3 429 retry 가 timing oracle (잘못된 키 vs RPS 초과 구분 가능)
-- H4 세션 누수 (DB 풀 고갈 — 1차도 발견)
-- H5 Pydantic ValidationError cause chain 이 토큰 평문 보존 (`from None` 미적용)
+CRITICAL 1건 (가장 위협적):
+- **C-1**: `/revoke-raw` 422 응답이 raw_token 평문을 `errors[].input` 으로 echo. β 의 핵심 위협 모델 (body plaintext 비누설) 정확히 깨짐. PoC 재현 완료.
+
+HIGH 3건:
+- H-1: `_map_revoke_exception` RateLimited 매핑 부재 (1차와 동일)
+- H-2: `revoke_by_raw_token` rate-limit 부재 (admin key 유출 시 키움 무한 펌핑) — defer F2
+- H-3: lifespan finally 의 `engine.dispose()` 가 revoke hang/cancel 시 도달 불가
 
 ### Step 2 — Round 1 수정 (전부 적용)
 
-- 세션 라이프사이클 재설계 — `TokenManager(session_provider)` 주입 + 매 발급마다 `async with`
-- `max_aliases=1024` 캡 + 무효 alias lock cleanup (`_locks.pop`)
-- `dict.setdefault` (atomic) → defaultdict race 회피
-- 429 retry 제거 — `KiwoomUpstreamError` 만 재시도
-- `from None` — `KiwoomResponseValidationError`, `KiwoomUpstreamError` 모두
-- `KiwoomBusinessError.message` super-message 미포함
-- `expires_at_kst` ValueError 도메인 매핑
-- `mask_token` 25% cap (L1)
-- expires_at 응답 분 단위 절단 (M5)
-- 라우터 detail 비식별화 (alias / return_msg / appkey 평문 미포함)
-- monkeypatch 픽스처 (M3)
-- `OSError` broader catch (M4)
-- 동시성 테스트 real async yield (`asyncio.Event` 게이트)
-- F5 회귀 테스트 추가 (router 레벨 appkey/secretkey/return_msg 누설 방어)
+**C-1**:
+- `app/main.py` — `RequestValidationError` 핸들러 + `_SENSITIVE_VALIDATION_PATHS` 화이트리스트 (`/revoke-raw`)
+- 422 응답에서 input/ctx 제거 — type/loc/msg 만 노출
+- 회귀 테스트 3건 (alias 빈 / token list-wrap / extra field)
+
+**H-1**: 라우터 양쪽 (`issue_token` + `_map_revoke_exception`) 에 `KiwoomRateLimitedError` → 503 매핑 + except tuple 확장. 회귀 테스트 2건.
+
+**H-2/M-5**: `revoke_by_raw_token` 도 `KiwoomCredentialRejectedError` → `RevokeResult(reason='already-expired-raw')` 변환. `_map_revoke_exception` fallback 도 추가. 회귀 테스트 1건.
+
+**H-3**: lifespan finally 분리 + `asyncio.wait_for(timeout=20s)` + `CancelledError`/`TimeoutError`/`Exception` 모두 swallow → 무조건 `invalidate_all` + `engine.dispose()` 도달.
+
+**M-1**: `revoke_by_raw_token` 의 `invalidate` 를 method 시작 직후로 이동 (decrypt 실패해도 캐시 비움).
+
+**M-3**: `TokenManager.frozen` shutdown 차단 — defer F3.
 
 ### Step 3 — Verification Loop (5관문)
 
-- **3-1 컴파일**: `py_compile` 32 files clean
+- **3-1 컴파일**: `py_compile` clean
 - **3-2 정적분석**: `ruff check` 0 / `mypy --strict` 0 (app + new tests)
-- **3-3 테스트**: 204 passed / coverage **88.07%** (token_service 100%, _exceptions 100%, auth 91%)
-- **3-4 보안 스캔**: `bandit` 0 / `pip-audit` 0 CVE
-- **3-5 런타임**: uvicorn FastAPI 기동 OK / `/health` 200 / admin guard 401
+- **3-3 테스트**: 239 passed / coverage **89.95%** (token_service 99%, auth 91%, routers 83%)
+- **3-4 보안 스캔**: bandit 0 / pip-audit 0 CVE
+- **3-5 런타임**: FastAPI 라우트 등록 (POST/DELETE/revoke-raw + /health) + `RequestValidationError` 핸들러 등록 확인
 
-### Step 4 — E2E 자동 생략 (백엔드 전용 변경, UI 0)
+### Step 4 — E2E 자동 생략 (백엔드 전용)
 
-### Step 5 — ADR + CHANGELOG + 커밋
+### Step 5 — ADR §7 + CHANGELOG + HANDOFF + 커밋
 
-- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 6 추가 (Phase A2-α 16 결정 기록)
-- `CHANGELOG.md` 새 항목 (A2-α)
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 7 추가 (Phase A2-β 16 결정 기록)
+- `CHANGELOG.md` 새 항목 (A2-β)
 - `HANDOFF.md` 본 문서
 
 ## Files Modified
 
 ```
-app/adapter/out/kiwoom/__init__.py            (신규, 빈)
-app/adapter/out/kiwoom/_exceptions.py         (신규)
-app/adapter/out/kiwoom/auth.py                (신규)
-app/adapter/out/persistence/repositories/kiwoom_credential.py  (확장 — decrypt_row)
-app/adapter/web/__init__.py                   (신규, 빈)
-app/adapter/web/_deps.py                      (신규)
-app/adapter/web/routers/__init__.py           (신규, 빈)
-app/adapter/web/routers/auth.py               (신규)
-app/application/dto/kiwoom_auth.py            (확장 — mask_token)
-app/application/service/__init__.py           (신규, 빈)
-app/application/service/token_service.py      (신규)
-app/main.py                                   (신규)
-tests/test_kiwoom_auth_client.py              (신규)
-tests/test_kiwoom_auth_router.py              (신규)
-tests/test_logging_masking.py                 (확장 +3)
-tests/test_token_service.py                   (신규)
-docs/ADR/ADR-0001-backend-kiwoom-foundation.md (§6 추가)
-CHANGELOG.md                                  (A2-α 항목 추가)
-HANDOFF.md                                    (본 문서)
+app/adapter/out/kiwoom/auth.py              (확장 +revoke_token + Pydantic 2개)
+app/application/service/token_service.py    (확장 +RevokeUseCase + TokenManager 확장 + helper)
+app/adapter/web/_deps.py                    (확장 +get_revoke_use_case 싱글톤)
+app/adapter/web/routers/auth.py             (확장 +DELETE/revoke-raw + _map_revoke_exception)
+app/main.py                                 (확장 +graceful shutdown + ValidationError 핸들러)
+tests/test_kiwoom_auth_client.py            (확장 +8 — revoke adapter)
+tests/test_token_service.py                 (확장 +12 — RevokeUseCase + TokenManager 확장)
+tests/test_kiwoom_auth_router.py            (확장 +12 — DELETE/revoke-raw + C-1/H-1/H-2 회귀)
+tests/test_lifespan.py                      (신규 — graceful shutdown 3 시나리오)
+docs/ADR/ADR-0001-backend-kiwoom-foundation.md (§7 추가)
+CHANGELOG.md                                (A2-β 항목 추가)
+HANDOFF.md                                  (본 문서)
 ```
 
 ## Next Session Plan
 
-### Phase A2-β (예정)
+### A2 운영 dry-run (DoD §10.3 일괄)
 
-au10002 폐기 + KiwoomAuthClient.revoke_token + RevokeKiwoomTokenUseCase + TokenManager.peek/invalidate_all/alias_keys + DELETE /tokens/{alias} + POST /tokens/revoke-raw + lifespan graceful shutdown.
-
-운영 dry-run (DoD §10.3) — α + β 함께 키움 운영 자격증명 1쌍으로 검증:
-1. expires_dt timezone (KST/UTC) 확정
-2. authorization 헤더 빈/생략 확정
+α + β 코드 완료. 운영 키움 자격증명 1쌍 등록 후 일괄 검증:
+1. `expires_dt` timezone (KST/UTC) 확정
+2. `authorization` 헤더 빈/생략 확정 (au10001)
 3. 401/403 동작 차이
-4. 같은 토큰 2회 폐기 멱등성 응답 (200/401/return_code)
+4. 같은 토큰 2회 폐기 응답 (200/401/return_code)
 5. JWT/hex/Kiwoom 평문 토큰 마스킹 회귀
 
 ### Phase A3 (그 다음)
 
-KiwoomStkInfoClient (ka10101) + Migration 002 (sector 테이블) + SectorRepository + SyncSectorMasterUseCase + APScheduler weekly job.
+KiwoomStkInfoClient (ka10101) + Migration 002 (sector 테이블) + SectorRepository + SyncSectorMasterUseCase + APScheduler weekly job (KST 일 03:00).
 
-### A1 → A2-α → A2-β → A3 의존성 그래프
+### A2-β follow-up 5건 (defer)
+
+- F1: pre-commit grep — `model_dump` + `logger` 같은 줄 금지
+- F2: `/revoke-raw` rate-limiting (`slowapi`)
+- F3: `TokenManager.frozen` shutdown 중 신규 발급 차단
+- F4: `RevokeRawTokenRequest.token` Field pattern (`^[A-Za-z0-9+/]+$`)
+- F5: shutdown metric (`kiwoom_shutdown_revoke_attempts_total`)
+
+### 의존성 그래프
 
 ```
 A1 (12f46aa) ─┐
               │
 보안 사전 PR (265b720) ─┐
                        │
-A2-α (이번 세션, 미커밋) ─┐
-                        │
-A2-β (다음 세션) ─┐
+A2-α (115fcce) ──┐
                  │
-A3 (그 다음) ──→ B (종목 마스터) ──→ C (OHLCV) ──→ D~G
+A2-β (이번 세션, 미커밋) ─┐
+                        │
+운영 dry-run (별도) ──→ A3 (sector ka10101) ──→ B (종목 마스터) ──→ C (OHLCV) ──→ D~G
 ```
 
 ## Verification Summary
 
 ```
-Tests:     204 passed (이전 161 → +43)
-Coverage:  88.07% (목표 80% 초과)
+Tests:     239 passed (이전 204 → +35)
+Coverage:  89.95% (목표 80% 초과)
 Lint:      ruff 0 / mypy strict 0 (app + new tests)
 Security:  bandit 0 / pip-audit 0 CVE
-Runtime:   uvicorn 기동 OK + /health + admin guard
-Reviews:   1R 이중 리뷰 (sonnet + opus 병렬 독립) — CRITICAL 0 / HIGH 0 (수정 후)
+Runtime:   FastAPI 라우트 + ValidationError 핸들러 등록 OK
+Reviews:   1R 이중 리뷰 (sonnet + opus 병렬 독립) — CRITICAL 1 (C-1) + HIGH 4 → 전부 적용 → 0건 PASS
 E2E:       자동 생략 (백엔드 전용 변경)
 ```
 
 ## 미커밋 변경 사항 (이번 세션)
 
-본 세션 변경 — 17 파일 (12 신규 + 5 확장)
-- 코드 8 신규 + 2 확장
-- 테스트 3 신규 + 1 확장
+본 세션 변경 — 12 파일 (1 신규 + 11 확장)
+- 코드 5 확장 (auth/token_service/_deps/routers/main)
+- 테스트 1 신규 (lifespan) + 3 확장 (auth_client/token_service/router)
 - ADR / CHANGELOG / HANDOFF 갱신
 
 다음 작업: 사용자 확인 후 커밋. 푸시는 명시적 요청 시만 (글로벌 CLAUDE.md 규칙).

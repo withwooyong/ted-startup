@@ -220,3 +220,63 @@ DoD § 10.3 (운영 dry-run 필요) — α 단독 시점에 미수행:
 - [ ] 자격증명 1쌍 등록 후 실제 토큰 발급/폐기 (β 와 함께)
 
 **β chunk 작업**: au10002 + lifespan graceful shutdown + RevokeKiwoomTokenUseCase + DELETE/POST 폐기 라우터 + revoke-by-raw-token + audit 로그 + 운영 dry-run.
+
+---
+
+## 7. Phase A2-β — au10002 폐기 + lifespan graceful shutdown (2026-05-07)
+
+### 7.1 결정
+
+α (issue) 의 베이스라인 위에 폐기 + 종료 위생을 적층. β 단독으로 운영 dry-run 가능 (α + β 합쳐 전체 토큰 라이프사이클 검증).
+
+### 7.2 핵심 설계 결정
+
+| # | 항목 | 결정 | 이유 |
+|---|------|------|------|
+| 1 | revoke 재시도 | **0회** | best-effort. 키움이 멱등성 미보장 — 자동 재시도 시 "이미 폐기됨" 응답 동작 모호 |
+| 2 | 401/403 → idempotent 변환 | `RevokeResult(revoked=False, reason='already-expired'`) | 이미 만료/폐기된 토큰 폐기 시도는 정상 운영 시나리오 |
+| 3 | revoke_by_raw_token 401 변환 | `reason='already-expired-raw'` | 적대적 리뷰 H-2/M-5 — α 의 idempotency 와 일관성 |
+| 4 | cache miss 시 동작 | adapter 호출 0 + `reason='cache-miss'` 반환 | 키움 측 폐기 부담 최소화 |
+| 5 | revoke_by_raw_token 캐시 무효화 시점 | method 시작 직후 (decrypt 전) | 적대적 리뷰 M-1 — decrypt 실패 시에도 캐시 비움 보장 |
+| 6 | lifespan shutdown 타임아웃 | 글로벌 20초 (`asyncio.wait_for`) | 적대적 리뷰 H-3 — k8s SIGKILL 30초 grace 전 마진 |
+| 7 | shutdown timeout/cancel 시 | `manager.invalidate_all()` + engine.dispose() 보장 | finally 분리로 dispose 도달 보장 |
+| 8 | shutdown 처리 순서 | 활성 alias 별 polling → 실패해도 진행 → invalidate_all → engine.dispose | best-effort + 자원 정리 우선 |
+| 9 | `KiwoomRateLimitedError` 라우터 매핑 | 503 (issue + revoke 둘 다) | 적대적 리뷰 H-1 — 이전엔 fallback 500 (α 라우터에도 동일 누락이라 함께 패치) |
+| 10 | revoke 라우터 except tuple | 6개 명시 (`KiwoomCredentialRejectedError` / `KiwoomRateLimitedError` 포함) | 모든 도메인 예외 명시 매핑 + fallback 500 미사용 |
+| 11 | `RevokeRawTokenRequest` Pydantic 검증 | `extra='forbid'` + token `Field(min_length=20, max_length=1000)` | wire 직전 형식 강제 |
+| 12 | 422 응답 input 스크럽 | `app.exception_handler(RequestValidationError)` + sensitive paths 화이트리스트 | **적대적 리뷰 C-1 — `/revoke-raw` 422 응답이 token 평문 echo (Pydantic ValidationError input)** |
+| 13 | sensitive paths 정의 | `frozenset({"/api/kiwoom/auth/tokens/revoke-raw"})` 모듈 상수 | 다른 토큰 입력 라우터 추가 시 명시 등록 강제 |
+| 14 | 응답 detail 비식별화 | `_map_revoke_exception` 일관 — alias / `return_msg` / token 평문 미포함 | M1 일관 적용 |
+| 15 | TokenManager 확장 | `peek` (만료 무관 캐시 조회) / `alias_keys` (snapshot tuple) / `invalidate_all` (전체 비움) | β 라우터 + shutdown hook 진입점 |
+| 16 | revoke_all_aliases_best_effort | 함수형 helper — manager + revoke_uc 주입 | lifespan / 운영 사고 대응 / 테스트 모두에서 재사용 |
+
+### 7.3 결과
+
+- 신규 파일 1개 (테스트 `test_lifespan.py`) + 기존 6 파일 확장
+- 테스트 +35 → **239 passed / coverage 89.95%** (이전 204)
+- 이중 리뷰 사이클 1라운드 — **CRITICAL 1 (C-1) + HIGH 4 + MEDIUM 5** 발견 → 전부 적용 → CRITICAL/HIGH 0 PASS
+- ruff lint 0 / mypy strict 0 (app + new tests) / bandit 0 / pip-audit 0 CVE
+- 5관문 verification 통과 (lifespan 라우트 등록 + C-1 핸들러 등록 검증)
+
+### 7.4 운영 dry-run 보류
+
+A2 (α + β) 코드 완료. 운영 키움 자격증명 1쌍 등록 후 별도 작업으로 진행 (DoD § 10.3 일괄):
+- [ ] `expires_dt` timezone 확정 (KST/UTC)
+- [ ] `authorization` 헤더 빈 문자열 vs 생략
+- [ ] 401/403 동작 차이
+- [ ] 같은 토큰 2회 폐기 멱등성 응답 (200/401/return_code)
+- [ ] DEBUG 로그로 응답 본문 검증 → 평문 누설 회귀
+
+### 7.5 별도 후속 PR 권장 (β 적대적 리뷰 follow-up 5건)
+
+A2-β 적대적 리뷰의 FOLLOW-UP — defer-able:
+
+| # | 항목 | 출처 |
+|---|------|------|
+| F1 | pre-commit grep 가드 — `model_dump` + `logger` 같은 줄 금지 (β body plaintext 회귀 방어) | β 적대적 |
+| F2 | `/revoke-raw` 라우터 rate-limiting (`slowapi` per-admin-key) | β 적대적 H-2 |
+| F3 | `TokenManager.frozen` 플래그 — shutdown 중 신규 발급 차단 | β 적대적 M-3 |
+| F4 | `RevokeRawTokenRequest.token` `Field(pattern=r"^[A-Za-z0-9+/]+$")` 추가 | β 적대적 F-4 |
+| F5 | shutdown metric (`kiwoom_shutdown_revoke_attempts_total`) | β 적대적 F-5 |
+
+**다음 chunk**: A3 — KiwoomStkInfoClient (ka10101) + Migration 002 (sector 테이블) + SectorRepository + SyncSectorMasterUseCase + APScheduler weekly job.

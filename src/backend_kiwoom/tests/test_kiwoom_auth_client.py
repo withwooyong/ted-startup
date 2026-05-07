@@ -385,6 +385,177 @@ def test_expires_at_kst_invalid_date_raises_domain_error() -> None:
         resp.expires_at_kst()
 
 
+# =============================================================================
+# au10002 — revoke_token (β chunk)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_returns_response_on_200() -> None:
+    """정상 폐기 — 200 + return_code=0."""
+    captured_body: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/oauth2/revoke"
+        captured_body.update(json.loads(request.content))
+        assert request.headers["api-id"] == "au10002"
+        assert request.headers["authorization"] == f"Bearer {'X' * 100}"
+        return httpx.Response(200, json={"return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+        from app.adapter.out.kiwoom.auth import TokenRevokeResponse
+
+        resp = await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    assert isinstance(resp, TokenRevokeResponse)
+    assert resp.succeeded is True
+    # body 에 appkey + secretkey + token 3개 모두 포함 (au10002 § 3.1)
+    assert captured_body["appkey"] == _VALID_CREDS.appkey
+    assert captured_body["secretkey"] == _VALID_CREDS.secretkey
+    assert captured_body["token"] == "X" * 100
+    # grant_type 은 없음 (au10001 과의 차이)
+    assert "grant_type" not in captured_body
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_401_raises_credential_rejected_without_retry() -> None:
+    """이미 만료된 토큰 폐기 — 401, 재시도 0회. UseCase 가 idempotent 변환 책임."""
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(401)
+
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+        with pytest.raises(KiwoomCredentialRejectedError):
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    assert call_count == 1, "401 은 재시도 없음"
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_403_raises_credential_rejected_without_retry() -> None:
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(403)
+
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+        with pytest.raises(KiwoomCredentialRejectedError):
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    assert call_count == 1, "403 은 재시도 없음"
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_500_does_not_retry() -> None:
+    """폐기는 best-effort — 5xx 도 재시도 0회 (계획 §6.1: 재시도 없음 의도)."""
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(500)
+
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+        with pytest.raises(KiwoomUpstreamError):
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    assert call_count == 1, "revoke 는 5xx 도 재시도 없음 — caller best-effort 결정"
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_business_error_excludes_message_in_str() -> None:
+    """200 + return_code != 0 → KiwoomBusinessError. message attribute only (M1)."""
+    leaky_msg = "appkey AppKey-LEAKY rejected"
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"return_code": 5, "return_msg": leaky_msg})
+
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+        with pytest.raises(KiwoomBusinessError) as exc_info:
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    err = exc_info.value
+    assert err.api_id == "au10002"
+    assert err.return_code == 5
+    assert err.message == leaky_msg
+    assert leaky_msg not in str(err)
+    assert "AppKey-LEAKY" not in str(err)
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_response_body_not_logged_at_all_on_401() -> None:
+    """401 응답 본문이 어떤 경로로도 로그에 포함 안 됨 — au10002 도 동일 정책."""
+    setup_logging(log_level="DEBUG", json_output=True)
+
+    buf = io.StringIO()
+    root = logging.getLogger()
+    original_handlers = list(root.handlers)
+    for h in original_handlers:
+        root.removeHandler(h)
+    capture_handler = logging.StreamHandler(buf)
+    if original_handlers:
+        capture_handler.setFormatter(original_handlers[0].formatter)
+    else:
+        capture_handler.setFormatter(logging.Formatter())
+    root.addHandler(capture_handler)
+
+    leaky_token = "WQJCwyqInph" + "Y" * 140  # Kiwoom 평문 토큰 모양
+    leaky = {"return_msg": f"이전 토큰: {leaky_token}", "return_code": 1, "token": leaky_token}
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json=leaky)
+
+    try:
+        async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+            with pytest.raises(KiwoomCredentialRejectedError):
+                await client.revoke_token(_VALID_CREDS, leaky_token)
+    finally:
+        root.removeHandler(capture_handler)
+        for h in original_handlers:
+            root.addHandler(h)
+
+    output = buf.getvalue()
+    assert leaky_token not in output, "au10002 응답 본문이 로그에 노출됨 — 마스킹 회귀"
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_network_error_raises_upstream() -> None:
+    """네트워크 오류 → KiwoomUpstreamError, 재시도 없음 (best-effort)."""
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        raise httpx.ConnectError("connection refused")
+
+    async with KiwoomAuthClient(base_url="https://api.kiwoom.com", transport=_mock_transport(handler)) as client:
+        with pytest.raises(KiwoomUpstreamError):
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    assert call_count == 1
+
+
+def test_token_revoke_request_repr_masks_secrets() -> None:
+    """TokenRevokeRequest __repr__ 가 secretkey/token 마스킹."""
+    from app.adapter.out.kiwoom.auth import TokenRevokeRequest
+
+    req = TokenRevokeRequest(
+        appkey="A" * 32,
+        secretkey="REAL-SECRET-VALUE-1234567890",
+        token="REAL-TOKEN-VALUE-1234567890",
+    )
+    rep = repr(req)
+    assert "REAL-SECRET-VALUE" not in rep
+    assert "REAL-TOKEN-VALUE" not in rep
+    assert "<masked>" in rep
+
+
 # -----------------------------------------------------------------------------
 # Pydantic 모델 단위 (TokenIssueResponse)
 # -----------------------------------------------------------------------------

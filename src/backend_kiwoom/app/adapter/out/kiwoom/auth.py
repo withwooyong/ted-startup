@@ -93,6 +93,37 @@ class TokenIssueResponse(BaseModel):
             raise KiwoomResponseValidationError("au10001 expires_dt 파싱 실패") from None
 
 
+class TokenRevokeRequest(BaseModel):
+    """au10002 요청 본문. body 에 appkey + secretkey + token **3개 모두 평문**.
+
+    `__repr__` 가 우발적 print/logging 시 secretkey/token 마스킹.
+    실제 마스킹은 structlog `_scan` (1차) + `scrub_token_fields` helper (raw_response 2차).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    appkey: Annotated[str, Field(min_length=16, max_length=128, pattern=r"^\S+$")]
+    secretkey: Annotated[str, Field(min_length=16, max_length=256, pattern=r"^\S+$")]
+    token: Annotated[str, Field(min_length=20, max_length=1000)]
+
+    def __repr__(self) -> str:
+        tail = self.appkey[-4:] if len(self.appkey) >= 4 else "****"
+        return f"TokenRevokeRequest(appkey=••••{tail}, secretkey=<masked>, token=<masked>)"
+
+
+class TokenRevokeResponse(BaseModel):
+    """au10002 응답 본문. extra='ignore' — 키움 신규 필드 추가 호환."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    return_code: int = 0
+    return_msg: str = ""
+
+    @property
+    def succeeded(self) -> bool:
+        return self.return_code == 0
+
+
 class KiwoomAuthClient:
     """OAuth 발급/폐기 전용 어댑터.
 
@@ -210,6 +241,75 @@ class KiwoomAuthClient:
             # 본문 미포함 + cause chain 차단 — Pydantic ValidationError input 에 토큰 평문 (H5)
             logger.debug("au10001 response validation failed — body suppressed")
             raise KiwoomResponseValidationError("au10001 응답 검증 실패") from None
+
+    # =========================================================================
+    # au10002 — revoke_token (β chunk)
+    # =========================================================================
+
+    async def revoke_token(
+        self,
+        credentials: KiwoomCredentials,
+        token: str,
+    ) -> TokenRevokeResponse:
+        """접근토큰 폐기. **재시도 없음** — best-effort.
+
+        설계 (endpoint-02-au10002.md § 6.1):
+        - 멱등성 보장이 키움 측에서 안 되므로 caller 가 swallow/throw 결정
+        - 자동 재시도 시 "이미 폐기됨" 응답에 대한 동작이 모호해짐
+        - 401/403 은 UseCase 가 idempotent (already-expired) 변환 책임
+        """
+        # Pydantic 사전 검증 — appkey/secretkey/token 형식 강제 (au10001 과 동일 패턴)
+        try:
+            request_body = TokenRevokeRequest(
+                appkey=credentials.appkey,
+                secretkey=credentials.secretkey,
+                token=token,
+            ).model_dump()
+        except ValidationError:
+            raise KiwoomResponseValidationError("au10002 요청 검증 실패") from None
+
+        headers = {
+            "Content-Type": "application/json;charset=UTF-8",
+            "api-id": "au10002",
+            "authorization": f"Bearer {token}",
+        }
+        try:
+            resp = await self._client.post("/oauth2/revoke", json=request_body, headers=headers)
+        except (httpx.HTTPError, OSError) as exc:
+            exc_type = type(exc).__name__
+            raise KiwoomUpstreamError(f"au10002 네트워크 오류: {exc_type}") from None
+
+        if resp.status_code in (401, 403):
+            logger.debug("au10002 status=%d", resp.status_code)
+            raise KiwoomCredentialRejectedError(f"키움 폐기 거부: HTTP {resp.status_code} (이미 만료된 토큰일 수 있음)")
+        if resp.status_code == 429:
+            logger.debug("au10002 status=429 rate-limited")
+            raise KiwoomRateLimitedError("au10002 429 — 키움 RPS 초과")
+        if resp.status_code != 200:
+            logger.debug("au10002 status=%d", resp.status_code)
+            raise KiwoomUpstreamError(f"au10002 폐기 실패: HTTP {resp.status_code}")
+
+        try:
+            body_json: dict[str, Any] = resp.json()
+        except ValueError as exc:
+            exc_type = type(exc).__name__
+            raise KiwoomUpstreamError(f"au10002 응답 JSON 파싱 실패: {exc_type}") from None
+
+        return_code = body_json.get("return_code", 0)
+        if not isinstance(return_code, int):
+            raise KiwoomResponseValidationError("au10002 응답 return_code 타입 오류")
+        if return_code != 0:
+            raise KiwoomBusinessError(
+                api_id="au10002",
+                return_code=return_code,
+                message=str(body_json.get("return_msg", "")),
+            )
+
+        try:
+            return TokenRevokeResponse.model_validate(body_json)
+        except ValidationError:
+            logger.debug("au10002 response validation failed — body suppressed")
+            raise KiwoomResponseValidationError("au10002 응답 검증 실패") from None
 
     async def close(self) -> None:
         await self._client.aclose()

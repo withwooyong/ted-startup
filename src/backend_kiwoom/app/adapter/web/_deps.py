@@ -14,7 +14,7 @@ import hmac
 
 from fastapi import Depends, Header, HTTPException, status
 
-from app.application.service.token_service import TokenManager
+from app.application.service.token_service import RevokeKiwoomTokenUseCase, TokenManager
 from app.config.settings import Settings, get_settings
 
 
@@ -68,14 +68,36 @@ def set_token_manager(manager: TokenManager) -> None:
 
 def reset_token_manager() -> None:
     """테스트 전용 — 싱글톤 리셋."""
-    global _token_manager_singleton
+    global _token_manager_singleton, _revoke_use_case_singleton
     _token_manager_singleton = None
+    _revoke_use_case_singleton = None
+
+
+_revoke_use_case_singleton: RevokeKiwoomTokenUseCase | None = None
+
+
+def get_revoke_use_case() -> RevokeKiwoomTokenUseCase:
+    """RevokeKiwoomTokenUseCase 싱글톤. lifespan 에서 set 또는 dependency_overrides 로 테스트 주입."""
+    if _revoke_use_case_singleton is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RevokeUseCase 미초기화",
+        )
+    return _revoke_use_case_singleton
+
+
+def set_revoke_use_case(use_case: RevokeKiwoomTokenUseCase) -> None:
+    """lifespan 시작 시 호출."""
+    global _revoke_use_case_singleton
+    _revoke_use_case_singleton = use_case
 
 
 __all__ = [
+    "get_revoke_use_case",
     "get_settings_dep",
     "get_token_manager",
     "require_admin_key",
     "reset_token_manager",
+    "set_revoke_use_case",
     "set_token_manager",
 ]

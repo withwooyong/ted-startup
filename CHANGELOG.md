@@ -7,6 +7,117 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] feat(kiwoom): Phase A2-β — au10002 폐기 + lifespan graceful shutdown (이중 리뷰 1R, 239 tests / 89.95%)
+
+`backend_kiwoom` Phase A2 의 두 번째 chunk (β). au10002 접근토큰 폐기 + RevokeKiwoomTokenUseCase + TokenManager 확장 (peek/invalidate_all/alias_keys) + DELETE/revoke-raw 라우터 + FastAPI lifespan graceful shutdown. 외부 호출 0 — `httpx.MockTransport` + testcontainers PG16. 운영 dry-run (α+β 일괄)은 코드 완료 후 보류.
+
+ted-run 풀 파이프라인 + 적대적 이중 리뷰 1R. **CRITICAL 1 + HIGH 4 + MEDIUM 5** 발견 → 전부 적용 → CRITICAL/HIGH 0 PASS.
+
+가장 위협적이었던 것 (CRITICAL C-1): `/revoke-raw` 422 응답이 raw_token 평문을 `errors[].input` 으로 echo. β 의 핵심 위협 모델 (body plaintext 비누설) 을 정확히 깨는 이슈. `RequestValidationError` 핸들러로 sensitive paths 화이트리스트에서 input/ctx 필드 제거.
+
+### Added — `app/adapter/out/kiwoom/auth.py`
+
+- **`revoke_token()`** — au10002 어댑터 메서드 (재시도 0회 — best-effort)
+  - 401/403 → `KiwoomCredentialRejectedError` (UseCase 가 idempotent 변환)
+  - 429 → `KiwoomRateLimitedError` (재시도 금지, α H3 일관)
+  - 5xx/네트워크/파싱 → `KiwoomUpstreamError` (재시도 없음)
+  - body 에 `appkey + secretkey + token` **3개 평문** — 어떤 경로로도 logger/예외 메시지에 미포함
+- **`TokenRevokeRequest`** Pydantic 모델 — `__repr__` 가 secretkey/token 마스킹
+- **`TokenRevokeResponse`** Pydantic 모델 — `succeeded` property
+
+### Added — `app/application/service/token_service.py`
+
+- **`RevokeKiwoomTokenUseCase`** (신규)
+  - `revoke_by_alias(alias)` — 캐시 hit 시 키움 폐기 + 캐시 무효화. miss 시 `cache-miss` 멱등 응답
+  - `revoke_by_raw_token(alias, raw_token)` — 외부 토큰 명시 폐기 (운영 사고 대응)
+  - 401/403 → `RevokeResult(revoked=False, reason='already-expired')` (`already-expired-raw` for raw)
+  - 5xx/business → 캐시 무효화 후 caller 에 전파
+  - revoke_by_raw_token: M-1 적대적 리뷰 — invalidate 를 method 시작 직후로 이동 (decrypt 실패해도 캐시 비움)
+- **`RevokeResult`** dataclass — alias / revoked / reason
+- **`TokenManager` 확장**: `peek` (만료 무관 캐시 조회) / `alias_keys` (snapshot tuple) / `invalidate_all` (전체 비움)
+- **`revoke_all_aliases_best_effort(manager, revoke_use_case)`** — 함수형 shutdown helper. KiwoomError + Exception 모두 swallow + invalidate_all 보장
+
+### Added — `app/adapter/web/_deps.py`
+
+- `get_revoke_use_case` / `set_revoke_use_case` 싱글톤 패턴 (TokenManager 와 동일)
+- `reset_token_manager` 가 `_revoke_use_case_singleton` 도 함께 리셋
+
+### Added — `app/adapter/web/routers/auth.py`
+
+- **`DELETE /api/kiwoom/auth/tokens/{alias}`** (admin only) — 캐시 토큰 폐기. 응답에 token 평문 미포함
+- **`POST /api/kiwoom/auth/tokens/revoke-raw`** (admin only) — 외부 토큰 명시 폐기. body 의 raw_token 응답 미반환
+- **`RevokeTokenResponse`** / **`RevokeRawTokenRequest`** Pydantic 모델 (`extra='forbid'` + token 길이 검증)
+- **`_map_revoke_exception`** helper — 6개 도메인 예외 명시 매핑 + fallback 500
+- α 라우터 (`POST /tokens`) 에도 `KiwoomRateLimitedError` 매핑 추가 (H-1 적대적 리뷰 — α 부터 누락된 회귀)
+
+### Added — `app/main.py`
+
+- **lifespan graceful shutdown** — `revoke_all_aliases_best_effort` + `asyncio.wait_for(timeout=20s)`
+  - timeout / `CancelledError` / 일반 Exception 모두 swallow → 무조건 `manager.invalidate_all()` + `engine.dispose()` 도달 보장 (H-3 적대적 리뷰)
+  - finally 분리 — revoke hang/cancel 시에도 engine 자원 정리 보장
+- **`RequestValidationError` 핸들러** — `/revoke-raw` 등 sensitive paths 에서 422 응답 input/ctx 필드 제거 (**C-1 적대적 리뷰**: token 평문 echo 차단)
+- `_SENSITIVE_VALIDATION_PATHS` 모듈 상수 — frozenset 화이트리스트
+- `SHUTDOWN_REVOKE_TIMEOUT_SECONDS = 20.0` 모듈 상수
+
+### Tests — 신규 1 파일 + 확장 3 파일 / +35 케이스
+
+- `tests/test_lifespan.py` (신규) — 3 케이스
+  - 활성 alias 3개 모두 폐기 시도 + 캐시 비워짐
+  - alias B 폐기 5xx 실패 시 A/C 진행 + 캐시 모두 비워짐 (best-effort)
+  - 캐시 비어있을 때 폐기 시도 0회 — no-op
+- `tests/test_kiwoom_auth_client.py` (확장) — +8 케이스
+  - revoke 정상 200 / 401·403 재시도 0회 / 500 재시도 0회 (best-effort)
+  - return_code != 0 → KiwoomBusinessError + message attribute only
+  - 응답 본문 (Kiwoom 평문 토큰 모양) 어떤 경로로도 로그 미노출
+  - 네트워크 오류 → KiwoomUpstreamError 재시도 없음
+  - TokenRevokeRequest `__repr__` secretkey/token 마스킹
+- `tests/test_token_service.py` (확장) — +12 케이스
+  - peek 캐시 only / 만료 무관 / alias_keys / invalidate_all
+  - revoke_by_alias 정상 (cache hit) / cache-miss 멱등 / 401 idempotent / cred 미등록
+  - revoke_by_raw_token 정상 + 캐시 무효화 (시작 직후)
+  - shutdown — 한 alias 실패해도 나머지 진행
+- `tests/test_kiwoom_auth_router.py` (확장) — +12 케이스
+  - DELETE admin guard / cache hit / cache-miss / cred 미등록 (alias 평문 미포함)
+  - POST revoke-raw admin guard / 정상 / cred 미등록 / 422 short token
+  - **C-1 회귀 3건** — alias 빈 문자열 / token list-wrap / extra field 시 422 응답에 valid token 평문 미포함
+  - **H-1 회귀 2건** — issue 라우터 + revoke 라우터 모두 429 → 503 매핑
+  - **H-2/M-5 회귀** — revoke_by_raw_token 401 → 200 idempotent (`already-expired-raw`)
+
+### Verification
+
+```
+Tests:     239 passed (이전 204 → +35)
+Coverage:  89.95% (목표 80% 초과; token_service 99%, auth 91%, routers 83%)
+Lint:      ruff 0 / mypy strict 0 (app 32 files + new tests 4 files)
+Security:  bandit 0 / pip-audit 0 CVE
+Compile:   py_compile clean
+Runtime:   FastAPI 라우트 등록 + RequestValidationError 핸들러 등록 확인
+Reviews:   1R 이중 리뷰 — CRITICAL 1 (C-1) + HIGH 4 (H-1/H-2/H-3 + 1차 RateLimited) + MEDIUM 5 → 전부 적용
+```
+
+### 운영 dry-run 보류 (DoD §10.3 일괄)
+
+α + β 합쳐 전체 토큰 라이프사이클 검증 — 운영 키움 자격증명 1쌍 등록 후 별도 작업:
+1. `expires_dt` timezone (KST/UTC)
+2. `authorization` 헤더 빈 문자열 vs 생략 (au10001)
+3. 같은 토큰 2회 폐기 응답 패턴 (200 / 401 / return_code)
+4. authorization 헤더 + body token 중복 허용 여부 (au10002)
+5. JWT/hex/Kiwoom 평문 토큰 마스킹 회귀
+
+### 별도 후속 PR (β follow-up 5건)
+
+- F1: pre-commit grep — `model_dump` + `logger` 같은 줄 금지
+- F2: `/revoke-raw` rate-limiting (`slowapi`)
+- F3: `TokenManager.frozen` shutdown 중 신규 발급 차단
+- F4: `RevokeRawTokenRequest.token` Field pattern 검증
+- F5: shutdown metric
+
+### 다음 chunk
+
+A3 — KiwoomStkInfoClient (ka10101) + Migration 002 (sector 테이블) + SectorRepository + SyncSectorMasterUseCase + APScheduler weekly job.
+
+---
+
 ## [2026-05-07] feat(kiwoom): Phase A2-α — au10001 KiwoomAuthClient 발급 경로 (이중 리뷰 1R / 204 tests / 88.07%)
 
 `backend_kiwoom` Phase A2 의 첫 chunk (α). au10001 접근토큰 발급 + KiwoomAuthClient + IssueKiwoomTokenUseCase + TokenManager + admin POST 라우터 + FastAPI 진입점. β chunk (au10002 폐기 + lifespan graceful shutdown) 는 별도 PR. 외부 호출 0 — `httpx.MockTransport` + testcontainers PG16. 운영 dry-run (DoD §10.3) 은 β 와 일괄.
