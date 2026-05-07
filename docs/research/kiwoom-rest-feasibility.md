@@ -173,3 +173,63 @@ kiwoom_request_timeout_seconds: float = 15.0
 - 공식 Python SDK (미성숙): [`kiwoom-rest-api` on PyPI](https://pypi.org/project/kiwoom-rest-api/)
 - 대안 라이브러리: [`kiwoom-restful`](https://pypi.org/project/kiwoom-restful/), [`koapy`](https://pypi.org/project/koapy/), [`breadum/kiwoom`](https://github.com/breadum/kiwoom)
 - KIS 비교 기준: [한국투자증권 오픈API 개발자센터](https://apiportal.koreainvestment.com/intro)
+
+---
+
+## 10. 2026-05-07 업데이트 — 결정 번복 (착수)
+
+본 §1 의 결정 ("현 MVP 단계에서는 키움 REST 미구현") 은 **2026-05-07 부로 번복**. 백테스팅 데이터 출처 보강을 위해 신규 독립 프로젝트 `src/backend_kiwoom/` 으로 착수.
+
+### 10.1 번복 사유
+
+1. **KRX 익명 차단** (2026-04~) 로 `pykrx` 기반 backend_py OHLCV 수집이 불안정. 데이터 출처 다변화 필요
+2. **NXT 거래 가격 누락** — KRX 단일 시계열로는 실 체결가와 백테스팅 사이 괴리. NXT 별도 시계열 확보 필수
+3. **공식 Excel 명세서 입수** — `src/backend_py/키움 REST API 문서.xlsx` (209 sheets) 확보로 §2.3 "확인 실패" 항목 다수 해소
+
+### 10.2 §2.3 해소된 항목
+
+| 미해결 항목 | 2026-05-07 시점 답 | 출처 |
+|-------------|---------------------|------|
+| 전체 TR 목록 | 209 endpoint (Excel 시트별) | `키움 REST API 문서.xlsx` `API 리스트` 시트 |
+| OAuth 토큰 엔드포인트 | `POST /oauth2/token`, body `{grant_type=client_credentials, appkey, secretkey}` | `au10001` 시트 |
+| 토큰 폐기 | `POST /oauth2/revoke`, body `{appkey, secretkey, token}` | `au10002` 시트 |
+| 모의 vs 운영 도메인 | `https://api.kiwoom.com` (운영) / `https://mockapi.kiwoom.com` (KRX 만) | 모든 시트 R10 |
+| OHLCV TR | `ka10079`(틱) `ka10080`(분) `ka10081`(일) `ka10082`(주) `ka10083`(월) `ka10094`(년) | 차트 카테고리 |
+| **NXT 거래 가능 종목 식별** | `ka10099`/`ka10100` 응답의 `nxtEnable` 필드 (`Y`=가능) | `종목정보 리스트(ka10099)` R42, `종목정보 조회(ka10100)` R41 |
+| **NXT OHLCV** | 차트 API 의 `stk_cd` 에 `_NX` suffix (예: `005930_NX`). SOR 통합은 `_AL` | 모든 차트 시트 R22 |
+
+여전히 미확인:
+- Rate limit 구체 수치 (가정: 5 RPS — 운영 dry-run 으로 확정)
+- OAuth 토큰 TTL 정확 값 (가정: 24h — `expires_dt` 응답으로 검증)
+- `expires_dt` timezone (KST/UTC — 운영 검증 후 확정)
+
+### 10.3 §7 Go 조건 vs 현재 결정
+
+| Go 조건 | 충족 여부 | 비고 |
+|---------|-----------|------|
+| (1) Python SDK 성숙 | ❌ 미충족 | SDK 미사용 — `httpx` 직접 호출. backend_py 의 `KisClient` 패턴 복제 |
+| (2) 실서비스 사용자 발생 후 키움 모의 경로 강한 요청 | ⚠️ 부분 충족 | 사용자 요청보다 **데이터 품질 (NXT 부재 + KRX 차단)** 이 트리거 |
+| (3) BrokerAdapter Protocol 추출 완료 | ❌ 보류 | 본 신규 프로젝트는 backend_py 와 독립 — Protocol 통합은 향후 |
+
+→ Go 조건과 무관하게 **다른 동기**(데이터 품질) 로 착수. SDK 미성숙은 자체 어댑터로 회피.
+
+### 10.4 신규 프로젝트 범위
+
+- 위치: `src/backend_kiwoom/`
+- 목적: **백테스팅 데이터 적재 전용** — 주문/잔고/실시간웹소켓/ELW/금현물 제외
+- 범위: **25 endpoint** (인증 3 + 종목마스터 3 + OHLCV 5 + 보강 시계열 3 + 시그널 보강 3 + 순위 5 + 투자자별 3)
+- 의존: `backend_py` 와 **코드 의존성 0** (패턴만 복제: structlog 마스킹 / Fernet 암호화 / Hexagonal 레이어)
+- DB: PostgreSQL 별도 스키마 `kiwoom`
+- KRX/NXT **물리 분리 테이블** (`stock_price_krx`, `stock_price_nxt`) + application 레이어 view 합성
+
+### 10.5 산출물 (2026-05-07)
+
+```
+src/backend_kiwoom/docs/plans/
+  ├ master.md               # 통합 작업 계획서 (653줄, 12 섹션)
+  ├ endpoint-01-au10001.md  # 토큰 발급 (626줄)
+  ├ endpoint-02-au10002.md  # 토큰 폐기 (586줄)
+  └ endpoint-14-ka10101.md  # 업종코드 리스트 (668줄)
+```
+
+코드는 아직 0줄 — 계획서만 선행. 다음 세션 Phase B (ka10099/ka10100/ka10001) 부터 NXT 종목 마스터 계획서 작성 예정.

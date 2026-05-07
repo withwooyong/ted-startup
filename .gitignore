@@ -31,3 +31,7 @@ Thumbs.db
 
 # Claude Code local overrides (커밋된 settings.json 의 개인 커스터마이징용)
 .claude/settings.local.json
+
+# 키움 공식 API 명세서 (710KB 바이너리, 외부 다운로드 가능 — backend_kiwoom 계획서 작성 참조용)
+src/backend_kiwoom/docs/*.xlsx
+src/backend_py/*.xlsx

@@ -1,206 +1,226 @@
 # Session Handoff
 
-> Last updated: 2026-04-24 16:30 KST (세션 최종 마감 — **v1.2 착수: Discovery + Cp 0/1/2α 3 체크포인트 완주**)
-> Branch: `master` (working tree **clean**, origin 과 **미동기화** — 3 커밋 대기)
-> Latest commit: `45837fd` — feat(v1.2): Cp 2α — useIndicatorPreferences v2 스키마 + 파라미터 end-to-end 배선
-> 세션 시작점: `e110b30` (v1.1 마감 핸드오프 커밋) 이후
+> Last updated: 2026-05-07 (KST) — **backend_kiwoom Phase B 계획서 3건 완성 (ka10099/ka10100/ka10001)**
+> Branch: `master` (working tree dirty — Phase A·B 6 endpoint 계획서 + master.md + SPEC.md + 이전 세션 v1.2 Cp 2β 누적 untracked)
+> Latest commit: `b3e2546` — docs: 세션 마감 핸드오프 — v1.2 Discovery + Cp 0/1/2α 완주 반영
+> 세션 시작점: 위와 동일 (`b3e2546`) — 본 세션도 **커밋 0건**
 
 ## Current Status
 
-한 세션에 **v1.2 iteration 의 5 개 체크포인트 중 3 개(60%)를 완주**:
+`backend_kiwoom` 의 **Phase A 3건 + Phase B 3건 = 6 endpoint 계획서** + 통합 master.md + backend_py SPEC.md 작성 완료. 코드는 0줄 — 다음 세션 Phase C (백테스팅 OHLCV 본체 5건) 진입 또는 Phase A 코드화 시작 결정 필요.
 
-1. **Discovery**: 옵션 β (biz+pm+judge) 로 6 산출물 생성, Judge PASS **9.05 / 10**. 사전 스파이크로 실스택 교정 (카카오 OAuth 미구현 → X-API-Key + NotificationPreference 싱글톤 패턴 상속)
-2. **Cp 0 — Vitest + RTL + MSW 하네스**: 기존 indicators 5 유틸에 39 테스트 장착 (coverage 99.25%)
-3. **Cp 1 — Bollinger Bands**: BB 유틸 + 차트 overlay + 토글 (12 테스트 추가)
-4. **Cp 2α — 훅 v2 스키마 + 파라미터 배선**: 훅 전면 재작성 + v1→v2 마이그레이션 + 페이지/차트/테이블/토글 end-to-end 배선 (35 훅 테스트, coverage 100%)
+**Phase B 가 끝나면 가능한 것**:
+- `SELECT FROM stock WHERE nxt_enable=true AND is_active=true` → Phase C 의 NXT 호출 큐 즉시 생성
+- 종목 마스터(stock) + 일별 펀더멘털(stock_fundamental) + 업종(sector) 모두 적재
+- Phase C 의 ka10081 일봉 수집이 종목 큐 + NXT 큐로 즉시 시작 가능
 
-총 **3 커밋** (working tree clean, origin 반영 대기). 테스트 **94 건** 그린, useIndicatorPreferences.ts 100% 커버.
+## Completed This Session (Documentation only)
 
-## Completed This Session
+| # | 산출물 | 위치 | 줄수 | 성격 |
+|---|--------|------|------|------|
+| 1 | endpoint-03-ka10099 | `src/backend_kiwoom/docs/plans/endpoint-03-ka10099.md` | ~720 | 종목 리스트 (mrkt_tp 16종, NXT enable source) |
+| 2 | endpoint-04-ka10100 | `src/backend_kiwoom/docs/plans/endpoint-04-ka10100.md` | ~510 | 단건 조회 (gap-filler, lazy fetch) |
+| 3 | endpoint-05-ka10001 | `src/backend_kiwoom/docs/plans/endpoint-05-ka10001.md` | ~880 | 펀더멘털 (45 필드, 외부 벤더 PER/ROE) |
+| 4 | CHANGELOG.md prepend | `CHANGELOG.md` | +85 | 본 세션 항목 |
+| 5 | HANDOFF.md overwrite | `HANDOFF.md` | — | 본 문서 |
 
-| # | 커밋 | 제목 | 성격 |
-|---|---|---|---|
-| 1 | `e13e0e2` | Discovery + Cp 0 Vitest 하네스 — 테스트 기반 선행 (19 files, +3939/−38) | feat(v1.2) |
-| 2 | `8ece65c` | Cp 1 — Bollinger Bands 유틸 + 차트 overlay + 토글 통합 (8 files, +293/−5) | feat(v1.2) |
-| 3 | `45837fd` | Cp 2α — useIndicatorPreferences v2 스키마 + 파라미터 end-to-end 배선 (7 files, +658/−119) | feat(v1.2) |
+**Phase B 3건 = ~2,100줄. 코드 변경 0.**
 
-## v1.2 Sprint 진행 현황
-
-| Cp | 내용 | 공수 | 상태 | 커밋 |
-|---|---|---:|---|---|
-| **0** | Vitest + RTL + MSW 하네스 + indicators 테스트 | 1.5d | ✅ 완료 | `e13e0e2` |
-| **1** | Bollinger Bands 유틸 + overlay + 토글 | 1.25d | ✅ 완료 | `8ece65c` |
-| **2α** | 훅 v2 스키마 + v1→v2 마이그레이션 + params 배선 + 훅 테스트 35 건 | (2 split 채택) | ✅ 완료 | `45837fd` |
-| **2β** | `IndicatorParametersDrawer` 편집 UI + 컴포넌트 테스트 + Drawer 오픈 버튼 연결 | — | ⬜ 대기 | — |
-| **3** | Alembic 009 + BE 엔드포인트 + FE DB 어댑터 + Route Handler 릴레이 + 테스트 | 3.0d | ⬜ 대기 | — |
-| **4** | BB 툴팁/sr-only 업데이트 + CI FE job + Lighthouse + 번들 diff + QA | 1.25d | ⬜ 대기 | — |
-
-## 테스트 상태
-
-| 영역 | 파일 | 케이스 | Coverage |
-|---|---:|---:|---|
-| indicators (sma/rsi/macd/aggregate/bb/index) | 6 | 51 | 99.37%/97.56%/100%/100% |
-| useIndicatorPreferences | 1 | 35 | **100%/100%/100%/100%** |
-| MSW 하네스 sanity | 1 | 3 | — |
-| **합계** | **8** | **94** | — |
+**Phase A + Phase B 누적 = 6 endpoint × 600~880줄 = ~4,000줄 + master.md 653줄 = ~4,650줄 계획서. 25 endpoint 중 6 완성 (24%).**
 
 ## In Progress / Pending
 
-| # | 항목 | 상태 | 비고 |
-|---|---|---|---|
-| 1 | **커밋 푸시** | ⏳ 사용자 대기 | `e13e0e2 + 8ece65c + 45837fd` 3 커밋 origin 반영 필요 (전역 규칙상 명시 요청 시에만) |
-| 2 | **브라우저 시각 검증** | ⏳ 사용자 대기 | `/stocks/005930` 에서 기존 토글 + BB on/off 동작 회귀 없는지 확인. 파라미터 UI 는 Cp 2β 이후 |
-| 3 | **Cp 2β 착수** | 🟢 가능 | `IndicatorParametersDrawer` 편집 UI — Drawer/Sheet 반응형, 폼 검증, focus trap, 컴포넌트 테스트 |
-| 4 | **Cp 3 착수** (2β 이후) | 🟢 가능 | Alembic 009 + BE 라우터 + FE 어댑터 + Route Handler 릴레이 |
-| 5 | **Cp 4 착수** (3 이후) | 🟢 가능 | BB 툴팁/sr-only + CI FE job + Lighthouse + 번들 diff |
-| 6 | **Aurora CLS 개선** | 🟡 분리 | v1.1 이월. 실기기 체감 확인 후 디자인 PR |
-| 7 | **2026-04-20 OHLCV 전 0값 레코드** | 🟡 분석 | v1.1 이월. KRX 수집 배치 부분 실패 원인 추적 |
-| 8 | 이전 세션 이월 — 다른 서비스 DIP 확장 (Telegram/Krx/Dart) | 백엔드 1~2h | |
-| 9 | 이전 세션 이월 — DB 모델 `Mapped[str]` → `Literal` | 백엔드 1h | |
-| 10 | 이전 세션 이월 — R-04/R-05/R-06 소규모 이슈 | 각 30분 | |
+| # | 항목 | 상태 | Notes |
+|---|------|------|-------|
+| 1 | **다음 세션: Phase C 계획서 5건** | 🟢 즉시 가능 | `endpoint-06-ka10081.md` (일봉, KRX/NXT 동시) → `ka10082`(주봉) → `ka10083`(월봉) → `ka10094`(년봉) → `ka10086`(일별주가+투자자별). **백테스팅 본체** |
+| 2 | **Phase A·B 코드화 착수 (대안)** | 🟡 결정 필요 | master.md § 11 권고는 Phase 단위 교차. Phase B 까지 6 endpoint = stock + sector + stock_fundamental 까지 영속화 가능 |
+| 3 | **본 세션 + 이전 세션 결과 일괄 커밋** | ⏳ 사용자 대기 | 추천 메시지: `docs(kiwoom): backend_kiwoom 통합 계획서 + Phase A·B 6건 + backend_py SPEC.md` |
+| 4 | **`키움 REST API 문서.xlsx` gitignore 결정** | ⏳ 미결 | 710KB. 옵션 (a) 커밋 (b) gitignore + 별도 보관 (c) symlink |
+| 5 | **이전 세션 v1.2 Cp 2β 잔존** | ⏳ 사용자 대기 | `IndicatorParametersDrawer.tsx` 외 4건 — 분리 커밋 권장 |
+| 6 | Phase D~G 계획서 (보강/시그널/순위/투자자) | 🟡 후순위 | Phase C 후 진입 |
 
-**미커밋 변경**: **없음** (working tree clean). 본 HANDOFF.md 수정은 이 마감 커밋에 포함.
+## Key Decisions Made (본 세션)
 
-## Key Decisions Made
+### Phase B 설계 결정
 
-### v1.2 스코프 / 프로세스
-1. **옵션 β + 사전 스파이크 2 건**: v1.1 과 동일하게 biz+pm+judge 로 축소. 스파이크 2 건으로 실스택(카카오 OAuth 미구현 + NotificationPreference 싱글톤 선례) 을 검증 후 PRD 교정 — 정확성 9.0 달성
-2. **Judge 권고 #1 (Cp 2 분리)**: 원안 3-split (2a/2b/2c) 대신 **2-split** 채택. 2a 단독은 dead code 가 되는 구조적 문제 회피 — 2α = 훅 v2 + 배선, 2β = 편집 UI
+1. **Phase B 수집 시장 5종**: KOSPI(`0`) / KOSDAQ(`10`) / KONEX(`50`) / ETN(`60`) / REIT(`6`). ETF(`8`)/금현물(`80`)/ELW(`3`) 보류
+2. **`StockListMarketType` enum 16종 분리**: 키움 ka10099 의 mrkt_tp 가 다른 endpoint(ka10101/ka10027) 와 의미 완전히 다름 → 3개 enum 분리 확정 (`StockListMarketType` / `SectorMarketType` / `RankingExchangeType`)
+3. **디액티베이션 같은 market_code 한정**: KOSPI sync 가 KOSDAQ 종목을 비활성화하지 않도록 시장 단위 격리. `deactivate_missing(market_code, present_codes)` Repository 메서드
+4. **시장 단위 SAVEPOINT 격리**: `async with session.begin_nested()` 로 한 시장 호출 실패가 다른 시장 적재를 막지 않음
+5. **mock 환경 안전판**: `Settings.kiwoom_default_env="mock"` 일 때 응답 `nxtEnable` 무시하고 강제 false (mockapi.kiwoom.com 은 KRX 전용)
+6. **빈 응답 시 디액티베이션 skip**: `present_codes=set()` 이면 `deactivate_missing` 동작 안 함 (보수적)
 
-### 기술 결정
-3. **카카오 OAuth 미구현 확인 → 싱글톤 id=1 패턴 상속**: CLAUDE.md 의 "카카오 OAuth 2.0" 언급은 로드맵 레벨. 실구현은 `require_admin_key` (X-API-Key) 단일 인증. `indicator_preferences` 테이블은 `NotificationPreference` 선례(`migrations/versions/002`) 를 그대로 복제
-4. **lightweight-charts v5 band 채움 미지원**: typings.d.ts PoC 로 확인 (AreaSeries/BaselineSeries 는 baseline-relative 단일 그라데이션만). v1.2 MVP 는 3 LineSeries only, 채움은 v1.3 custom primitive 로 이월
-5. **BB 표본 표준편차 one-pass 공식**: sumSq / sum² 차분. KRW 대형 스케일 (예: 200,000 원) 에서는 정밀도 손실 가능하나 MVP 허용 범위. 필요 시 Welford online 으로 교체 — 주석 명시
-6. **v1 localStorage 무손실 마이그레이션**: v1 키 → v2 자동 합성(`migrateV1ToV2`), 토글 전부 이식, 파라미터는 DEFAULT_PARAMS. v2 저장 시점에 v1 키 1 회성 삭제
-7. **setPrefs API 선행 확보**: Cp 3 DB 어댑터가 서버 페이로드 일괄 주입할 통로로 `useIndicatorPreferences` 의 공개 API 에 setPrefs 포함. 훅 재작성 시 한 번에 반영
-8. **snapshot 캐시 키 확장**: `${source}:${raw}` 조합으로 v1/v2 전환 invalidate 동시에 v1.1 의 React #185 방어 패턴 유지
+### ka10100 (단건) 결정
 
-### 코드 품질
-9. **v8 ignore 로 SSR 분기 가드**: jsdom 도달 불가한 `typeof window === 'undefined'` 분기 + `getServerSnapshot` 을 ignore. 향후 SSR 확장 시 ignore 제거 + SSR 테스트 추가 경로 명시
-10. **useIndicatorPreferences 100% 커버 임계 활성화**: Cp 0 에서는 indicators 90% 만 걸고 hooks 임계는 Cp 2 예정 주석 → Cp 2α 에서 약속대로 복원 (100% lines/branches/functions/statements)
-11. **모듈 스코프 상수화**: 페이지의 `MA_COLORS` / `MA_TOGGLE_KEYS` 를 리뷰 지적 후 파일 상단으로 승격 — eslint-disable 제거
+7. **`stk_cd` Length=6 강제**: Excel R22 명시. `_NX`/`_AL` suffix 거부 (Pydantic regex `^\d{6}$`). ka10001(20자) 와 다름
+8. **`LookupStockUseCase.ensure_exists`**: Phase C 시계열 수집이 미지 종목 만났을 때 lazy fetch 안전망. ON CONFLICT 가 race 흡수
+9. **단건 endpoint 디액티베이션 안 함**: 활성화만 (응답에 등장한 종목 = 살아있음). 디액티베이션은 ka10099 의 시장 sync 책임
+10. **NormalizedStock + Stock ORM 100% 공유**: ka10099 가 정의, ka10100 은 추가 메서드만
+
+### ka10001 (펀더멘털) 결정
+
+11. **stk_cd Length=20 + suffix 허용**: Excel R22 "거래소별 종목코드 (KRX:039490,NXT:039490_NX,SOR:039490_AL)" 명시. `ExchangeType` enum + `build_stk_cd` helper
+12. **Phase B 호출 정책**: KRX only — 펀더멘털(C카테고리, PER/EPS/ROE) 은 외부 벤더 데이터로 거래소 무관. NXT 시세 분리는 Phase C 의 ka10086 위임
+13. **`stock_fundamental` UNIQUE = (stock_id, asof_date, exchange)**: 일별 스냅샷. 같은 날 여러 호출은 마지막 호출로 갱신 (멱등성)
+14. **`fundamental_hash` 컬럼 추가**: PER/EPS/ROE/PBR/EV/BPS 6 필드 MD5. 외부 벤더 갱신일 감지에 활용 (Phase F 시그널 단계). 본 Phase 에서는 계산만, 활용 미정
+15. **부호 포함 string 처리**: `_to_int("+181400") → 181400`, `_to_int("-91200") → -91200`, `_to_decimal("+0.08") → Decimal("0.08")`
+16. **Pydantic alias 매핑**: `250hgst` 같은 비-식별자 키 → `populate_by_name=True` + `Field(alias="250hgst")`
+17. **`strip_kiwoom_suffix` helper**: 응답 `stk_cd` 가 `005930_NX` / `005930` 어느 쪽으로 와도 base code 추출 안전망
+18. **partial 실패 정책**: < 1% 정상 / 1~10% warning / > 10% error+자격증명 점검 alert
+19. **active 3000 종목 sync 시간 추정**: Semaphore=4 + 250ms interval = 이론 3분, 실측 5~12분 추정. cron 17:45 KST + 30분 grace
+
+### Excel 명세서 발견 사항
+
+20. **Excel 응답 예시 의심**: ka10099 R46 의 5 row 가 모두 `code="005930"` + `marketCode="10"` (코스닥) — 요청 mrkt_tp="0"(코스피) 와 불일치. Excel 샘플 단순화 가능성. 운영 첫 호출에서 `marketCode` 응답값과 요청 `mrkt_tp` 일치 여부 검증 필수
+21. **단위 모호성** (DoD § 10.3): `mac="24352"`, `cap="1311"`, `flo_stk="25527"`, `dstr_stk` 단위 (백만원/억원/천주) 명시 안 됨. 운영 호출 후 `cur_prc × listed_shares = market_cap` 식으로 단위 도출 필요
+22. **부호 의미**: `oyr_hgst="+181400"`, `oyr_lwst="-91200"` 부호가 단순 표기인지 전일 대비인지 불명
+23. **외부 벤더 PER/ROE 갱신 주기**: Excel R41/R43 명시 — 주 1회 또는 실적발표 시즌. 일별 적재해도 같은 값 며칠 반복 → `fundamental_hash` 변경 감지가 갱신일 감별
+24. **PER/EPS/ROE/PBR/EV/BPS 빈값 가능**: ETF/ETN/ELW 종목은 모든 펀더멘털 빈값 추정 — 컬럼 NULL 허용 필수
 
 ## Known Issues
 
-### 이번 세션 중 발견 → 해결
-- 타입 가드 이중 cast (IndicatorPrefs → Record<string, unknown>) → `v is Record<string, unknown>` 으로 narrow target 완화로 해소 (1차 타입체크 에러)
-- Cp 2α 커버리지 위반 (useIndicatorPreferences.ts < 100%) → v8 ignore + 누락 검증 분기 테스트 추가로 임계 통과
-- 스켈레톤 placeholder 토글 수 7 → 8 (BB 추가로 CLS 플리커) → INFO 반영
+### 운영 검증 미완 (DoD § 10.3 모음 — 실 키움 호출 후 확정)
 
-### Known Issue (v1.1 이월)
-- **Perf 95 → 80 회귀** (`/stocks/005930`): aurora blob-4 transform 애니메이션 CLS 0.393. v1.2 에서 Lighthouse 재측정 Cp 4 예정
-- **2026-04-20 stock_price OHLCV 전 0값**: KRX 수집 배치 부분 실패 가능성. 차트 측 방어는 v1.1 에서 완료
+| Endpoint | 미확정 항목 | 영향 |
+|----------|------------|------|
+| ka10099 | `marketCode` 응답값 ↔ 요청 `mrkt_tp` 일치 여부 | requested_market_type 컬럼 분리 결정 |
+| ka10099 | `code` 6자리 가정의 정확성 (ETF/ELW 자릿수) | stock_code 길이 |
+| ka10099 | `listCount` zero-padding 자릿수 (16자 추정) | 파서 보강 필요 여부 |
+| ka10099 | `nxtEnable` "Y" 외 다른 값 등장 가능성 | upper() 매칭 충분 여부 |
+| ka10099 | 같은 종목이 여러 시장에 등장 시 (ETF) | UNIQUE 제약 위반 → market_code 갱신 정책 |
+| ka10099 | KOSPI ~900, KOSDAQ ~1700 추정의 정확성 | max_pages=100 충분 여부 |
+| ka10100 | 존재하지 않는 종목 응답 패턴 (return_code != 0 vs 200 빈값 vs 4xx) | 처리 분기 |
+| ka10100 | 응답 `code` 빈값 가능성 | min_length=1 검증 약화 필요 여부 |
+| ka10100 | mock 도메인 nxtEnable 응답 패턴 | 안전판 동작 검증 |
+| ka10001 | mac/cap/flo_stk/dstr_stk 단위 (백만원/억원/천주) | 컬럼 주석 + 백테스팅 계산 정확도 |
+| ka10001 | oyr_hgst/oyr_lwst 부호 의미 (단순 표기 vs 전일 대비) | year_high/low 컬럼 의미 |
+| ka10001 | 응답 stk_cd 의 suffix 보존/제거 (요청 _NX 시 응답이 어느 쪽) | strip_kiwoom_suffix 안전망 동작 |
+| ka10001 | NXT 호출 응답이 KRX 와 펀더멘털(C) 동일한지, 일중시세(E) 분리되는지 | KRX only 정책 검증 |
+| ka10001 | active 3000 종목 sync 실측 소요 시간 (5~12분 추정) | cron grace 조정 |
+| ka10001 | partial 실패 비율 (1주 모니터) | alert threshold 조정 |
+| ka10001 | 키움 과거 일자 펀더멘털 응답 가능성 | 백필 가능 여부 |
 
-### 미해결 (v1.2 후속)
-- **Cp 2β 편집 UI 이월**: 데이터 흐름은 완비 (prefs.params 사용자 편집값이 차트에 반영) 되지만 사용자가 직접 편집하는 UI 는 아직 없음 → DEFAULT_PARAMS 고정 상태
-- **Cp 3 DB 영속화**: 기기간 동기화 아직 없음, localStorage only
-- **Cp 4 CI FE job + Lighthouse**: CI 에 Vitest job 추가 + Lighthouse 재측정 대기
-- **BB 툴팁 + sr-only 표**: BB 활성 시 OHLCV 툴팁에 upper/middle/lower 3 값 추가 + sr-only 표에 BB 열 — Cp 4 예정
-- 이전 세션 이월 — 다른 서비스 DIP 확장, `Mapped[str]` → `Literal`, R-04~06
+### 알려진 위험 (계획 단계, 본 세션 추가)
+
+- **ka10099 페이지네이션 동작**: KOSPI/KOSDAQ 둘 다 페이지네이션 발생 추정. `call_paginated` 의 첫 본격 검증 케이스 — Phase A 의 ka10101 (단일 페이지 가능성 높음) 와 별개
+- **race condition** (ka10100): 같은 stock_code 동시 ensure_exists 시 ka10100 중복 호출. 빈도 낮으면 무시, Phase C 트래픽 측정 후 결정
+- **ka10001 lazy fetch RPS 폭주**: Phase F 순위 응답에 미지 종목 100건 등장 시 ka10100 100회 연속 호출 → master.md § 6.3 RPS 가드 필수
+- **fundamental_hash string 비교**: PER `"15.20"` vs `"15.2"` 면 hash 다름 — 정규화 필요 가능성
+- **stock 시간대**: ka10001 응답에 timestamp 없음. 호출 시점 KST 가 asof_date — 자정 직전 호출 주의
+- **partial 실패 누적**: 3000 종목 중 일부 실패가 다음 sync 에서 retry 큐로 운영되어야 — 본 endpoint 범위 외 (Phase F 모니터링 단계)
+
+### 이전 세션 잔존 (본 세션과 무관)
+
+- v1.2 Cp 2β 진행 중 — `IndicatorParametersDrawer.tsx` (신규) + 페이지/패널/차트 변경
+- v1.1 known issue: Aurora CLS 0.393, 2026-04-20 OHLCV 0값 추적
+- 백엔드 이월: 다른 서비스 DIP 확장, `Mapped[str]` → `Literal`, R-04~06
 
 ## Context for Next Session
 
-### 사용자의 원 목적 (본 세션 전체 흐름)
+### 사용자의 원 목적 (본 세션 흐름)
 
-세션 진입 시 사용자 요청은 "v1.2 착수 (Bollinger Bands + 지표 파라미터 편집 UI + DB 영속화 + Vitest 하네스)". 수행 과정:
+세션 진입 시 사용자가 던진 첫 요청은 "다음 작업 알려줘". 핸드오프 확인 후 4개 옵션 제시 (`AskUserQuestion`):
+1. Phase B 계획서 3건 작성 ← **선택**
+2. 본 세션 결과 커밋
+3. Phase A 코드화 착수
+4. Excel 파일 처리 결정
 
-1. 사용자에게 **진행 옵션 4 안 (α/β/γ/δ/β+γ) 제시** → α (완전 Discovery + 순차 Sprint) 선택
-2. `/plan` 스킬로 **Discovery 6 산출물 생성**. 사전 스파이크로 실스택 교정 (카카오 OAuth 미구현 확인 → 싱글톤 패턴 결정). Judge PASS 9.05
-3. **Cp 0 착수** — Vitest + RTL + MSW 설치 + 설정 + MSW mock + indicators 테스트 5 종 (39 케이스). typescript-reviewer APPROVE 후 커밋
-4. **Cp 1 착수** — Bollinger Bands 유틸 + 차트 overlay + 토글. lightweight-charts v5 의 band 채움 미지원 확인 (PoC 15 분). typescript-reviewer APPROVE (INFO/MEDIUM 3 건 반영) 후 커밋
-5. **Cp 2 분리 판단** — Judge 권고 3-split 보다 **2-split (2α + 2β)** 이 dead-code 구조 회피 측면에서 더 자연스러움을 제시 → 사용자 승인
-6. **Cp 2α 착수** — 훅 전면 재작성 (v2 스키마 + 마이그레이션), 35 훅 테스트, 페이지/차트/테이블/토글 end-to-end 배선. typescript-reviewer APPROVE (MEDIUM 2 건 반영: overbought>oversold 교차검증 + 모듈 스코프 상수화) 후 커밋
-7. **/handoff 로 세션 마감**
+수행 흐름:
+1. **Phase A 패턴 정독** — `endpoint-14-ka10101.md` 668줄 풀 read 로 11 섹션 템플릿 / Repository 패턴 / SAVEPOINT 격리 / DoD 구조 학습
+2. **Excel 시트 정독** — openpyxl 로 `종목정보 리스트(ka10099)` 46행, `종목정보 조회(ka10100)` 45행, `주식기본정보요청(ka10001)` 76행 풀 dump. mrkt_tp 16종, 응답 14/14/45 필드, NXT/벤더 메모 추출
+3. **endpoint-03-ka10099.md** — ~720줄. mrkt_tp 16종 enum, 시장 격리 SAVEPOINT, 디액티베이션 안전판, mock 강제 false, zero-padded 정규화
+4. **endpoint-04-ka10100.md** — ~510줄. stk_cd 6자리 강제, ensure_exists lazy fetch, ka10099 자산 100% 공유
+5. **endpoint-05-ka10001.md** — ~880줄. 45 필드 4 카테고리 분해, KRX only 정책, fundamental_hash, 부호 처리, alias 매핑, 3000 종목 sync 시간 추정
+6. **CHANGELOG prepend + HANDOFF overwrite** — 세션 마감
 
 ### 선택한 접근과 이유
 
-- **체크포인트 단위 커밋**: 각 체크포인트 하나가 "유효한 중간 상태" — 롤백 단위 명확 + 시각 검증 사이클 짧음 (v1.1 에서 검증된 리듬 재사용)
-- **테스트 선행 (Cp 0)**: 이후 체크포인트가 기존 indicators 를 수정/확장하는 위험 도장. 실제로 Cp 1/2α 에서 훅 재작성 시 기존 테스트가 회귀 조기 발견에 기여
-- **사전 스파이크로 PRD 교정**: 카카오 OAuth 가정을 실스택 조사로 뒤집음 → Cp 3 공수 추정 신뢰도 상승
-- **2-split 제안**: Judge 의 3-split 권고를 맹목 수용하지 않고 dead-code 문제를 언어화해 사용자 결정권 유지
+- **endpoint-14 패턴 100% 복제**: 11 섹션 통일 — DoD/위험/결정필요 표 형식 동일. Phase B 3건이 600~880줄로 비슷한 깊이
+- **자산 공유 명시**: §11.3 비교 표로 ka10099 vs ka10100 vs ka10001 의 책임 분담과 공유 자산(NormalizedStock, Stock ORM, KiwoomStkInfoClient) 명확화 — Repository/UseCase 구현 시 중복 작업 방지
+- **운영 검증 미확정 항목 명시 분리**: §11.1 결정 필요 표 + §10.3 DoD 운영 검증 항목 분리. 첫 호출 후 master.md § 12 결정 기록으로 승격 절차 통일
+- **단위·부호 모호성 명시**: ka10001 의 mac/cap/oyr_hgst 같은 모호 필드를 §11.2 알려진 위험 + §10.3 운영 검증으로 이중 명시 — 코드화 단계에서 forget 방지
+- **Phase 단위 권고 유지**: master.md § 11 의 "각 Phase 의 계획서를 모두 받은 후 그 Phase 만 코드화" 방식. 다음 세션은 Phase C 계획서 5건 (백테스팅 본체) 우선
+- **`fundamental_hash` 도입**: 외부 벤더 PER/ROE 주 1회 갱신 특성을 활용. Phase F 시그널 단계의 "실적 발표일 추정" 시그널 source
 
 ### 사용자 선호·제약 (재확인)
 
 - **한국어 커밋 메시지 + Co-Authored-By** (전역 CLAUDE.md)
-- **`git push` 는 명시 요청 시에만** — 이번 세션도 3 커밋 origin 반영 대기
-- **npm 기반** — yarn 사용 금지
-- **Gate 승인 루프** — 매 의사결정 지점에서 옵션 제시 후 사용자 선택 (α/β/γ 패턴 재사용)
-- **리뷰 후 CRITICAL/HIGH 즉시 반영, MEDIUM 도 trivial 하면 반영**
-- **pre-commit hook `--no-verify` 금지** — 훅 오탐 시 `-F` 파일 우회
-- **코드 주석 최소 (CLAUDE.md)** — Why 가 중요한 부분만 간결히
-- **실측 기반 검증** — typings.d.ts PoC, alembic 선례 파일, `require_admin_key` 실제 호출 지점 등 실코드로 가정 교정
+- **`git push` 명시 요청 시에만** — 본 세션도 커밋 없음 (사용자가 검토 후 커밋 결정)
+- **선택지 제시 후 사용자 결정** — 본 세션 `AskUserQuestion` 1건 (다음 작업 4 옵션)
+- **체크리스트 + 한 줄 현황** (memory: feedback_progress_visibility) — TaskCreate 5건 사용
+- **block-no-verify heredoc 오탐지 대응** (memory: project_block_no_verify_heredoc_pitfall) — 커밋 시 `git commit -F <file>` 우회
 
 ### 다음 세션에서 먼저 확인할 것
 
-1. **3 커밋 푸시 여부** — `e13e0e2 + 8ece65c + 45837fd`
-2. **브라우저 시각 검증** — `/stocks/005930` 에서 기존 토글 + BB on/off 동작 회귀 없는지. 파라미터 변경 체험은 Cp 2β 이후
-3. **Cp 2β 착수 판단** — `IndicatorParametersDrawer` (Drawer + Sheet 반응형, 폼 검증, focus trap, 컴포넌트 테스트). 예상 공수 ~2d
-4. **또는 Cp 2β 건너뛰고 Cp 3 착수** — 편집 UI 없이 DB 영속화만 먼저? (옵션이긴 하지만 UI 없이 DB 만 있으면 테스트 시나리오 제한적)
-5. **이월 과제 우선순위** — v1.1 known issue (Aurora CLS, OHLCV 0값 추적), 이전 세션 이월 (DIP 확장, Mapped Literal)
+1. **Phase A·B 6 endpoint + master.md + SPEC.md 일괄 커밋 여부** — 추천: `docs(kiwoom): backend_kiwoom 통합 계획서 + Phase A·B 6건 + backend_py SPEC.md`
+2. **Phase C 진입 합의** — `endpoint-06-ka10081.md` (일봉, **백테스팅 본체** ★) → `ka10082` → `ka10083` → `ka10094` → `ka10086`
+3. **Phase A 코드화 시점 합의** — 25개 모든 계획서 후 일괄 vs Phase 단위 교차. 후자 권장 (master.md § 11). Phase B 까지 코드 = stock + sector + stock_fundamental 영속화 완료
+4. **`키움 REST API 문서.xlsx` gitignore 결정** — 710KB 바이너리. 권장: (b) gitignore + 별도 보관
+5. **이전 세션 v1.2 Cp 2β 잔존** — 분리 커밋 또는 폐기 결정. 본 세션 키움 작업과 무관
+
+### Phase C 의 핵심 (다음 세션 준비)
+
+- **ka10081**: 주식일봉차트 — KRX/NXT 둘 다 호출 (`stk_cd=005930` + `stk_cd=005930_NX`). **백테스팅 코어**. `stock_price_krx` + `stock_price_nxt` 분리 적재
+- **ka10082/83/94**: 주봉/월봉/년봉 — ka10081 패턴 복제. UseCase `IngestPeriodicOhlcvUseCase` 가 4 endpoint 통합
+- **ka10086**: 일별주가 + **투자자별 + 신용비** — KRX/NXT 분리. `stock_daily_flow` 테이블 (ind_netprps/orgn_netprps/frgn_netprps + crd_rt 등)
+- **DB**: Migration 003 `ohlcv_krx.py` (stock_price_krx + 주/월/년) + Migration 004 `ohlcv_nxt.py` (NXT 분리 + stock.nxt_enable)
+- **Phase B 의존**: stock 테이블 + nxt_enable 필터로 NXT 호출 큐 생성 → Phase B 가 끝나면 Phase C 즉시 진입
 
 ### 가치 있는 발견 (본 세션)
 
-1. **2-split vs 3-split 의 구조적 차이**: 3-split 의 중간 커밋이 dead code 로 남을 수 있는 문제 → end-to-end 데이터 흐름 단위로 묶는 2-split 이 "유효한 중간 상태" 제공. 범용 원칙으로 재사용 가능
-2. **실스택 조사 ROI**: CLAUDE.md 의 "카카오 OAuth 2.0" 문구가 실제 구현 유무와 불일치 → 5 분 `grep kakao` 으로 전면 PRD 교정. 의존성 테이블도 동시에 검증 (`_deps.py:113`, `migrations/002`, `route.ts:17` 각각 실존 확인)
-3. **lightweight-charts v5 band 제약**: 두 선 사이 채움은 custom primitive 필요. v1.3 과제로 명확히 분리한 덕에 Cp 1 범위 고정
-4. **Vitest 4 + Next 16 + React 19 호환성**: 공식 Next vitest 가이드 그대로 따라 30 분 내 하네스 구동. `@testing-library/react@^16` 이 React 19 지원, `msw@2` + `setupServer` 는 jsdom 에서 무난
-5. **v8 ignore 의 합리적 사용**: SSR 분기처럼 jsdom 도달 불가 경로는 테스트 강제보다 ignore 가 정직. 향후 SSR 확장 시 ignore 제거 + 테스트 추가 경로 주석으로 명시 → 미래 자신/리뷰어에게 친절
-6. **스냅샷 캐시 키 확장**: `${source}:${raw}` 조합으로 v1/v2 전환 invalidate 동시에 React #185 방어 유지. 캐시 키를 단순 문자열이 아닌 "데이터 출처 + 값" 으로 둔 덕에 상태 전환이 자연스러움
-7. **훅 재작성 시 테스트 먼저 짜면 API 설계 질 상승**: setToggle/setParams/setPrefs 3 분할 API 를 테스트 관점에서 검토 → Cp 3 DB 어댑터용 setPrefs 가 자연스럽게 도출
-8. **리뷰 MEDIUM 중 trivial 건 즉시 반영의 가치**: overbought>oversold 교차검증은 한 줄. 모듈 스코프 상수화는 두 줄. 누적하면 코드 신뢰도 상승, 누적 부담 없음
+1. **Excel 시트 깊이 정독이 단위 모호성 발견에 결정적**: ka10001 의 mac="24352", cap="1311" 만 보면 무심코 KRW 가정 가능. Excel 명시 부재 → DoD 운영 검증 항목으로 승격
+2. **`mrkt_tp` 의미 endpoint 별 분리의 정합성**: ka10099(시장 16종, 0=KOSPI/10=KOSDAQ) vs ka10101(업종 5종, 0=KOSPI/1=KOSDAQ) — 같은 "0" 이 양쪽 다 KOSPI 지만, "1" 은 ka10101 에서 KOSDAQ 인 반면 ka10099 에서는 의미 없는 값. 3 enum 분리 결정의 근거
+3. **`_NX` suffix Length 차이의 의미**: ka10100(L=6, suffix 거부) 와 ka10001(L=20, suffix 허용) 의 차이가 design intent 명확화 — ka10100 은 종목 마스터(거래소 무관 메타), ka10001 은 거래소별 시세 포함
+4. **Excel 응답 예시의 의심 포인트**: ka10099 R46 의 5 row 가 모두 같은 종목 + 같은 marketCode + mrkt_tp 와 불일치 → 단순 샘플 문제로 추정하나 운영 검증 항목으로 승격
+5. **외부 벤더 PER/ROE 의 변경 감지**: Excel R41/R43 의 "주 1회" 메모를 fundamental_hash 컬럼으로 활용. 정적 메모를 운영 데이터 source 로 전환
+6. **3000 종목 sync 시간 산정**: Semaphore=4 + 250ms interval = 이론 3분 — 단순 곱셈 계산이 RPS 가드 설계의 sanity check. 실측 5~12분 예상은 키움 응답 시간 + 네트워크 변동성
+7. **lazy fetch 의 시스템 안전망 역할**: Phase C 의 ka10081 호출자가 미지 종목 만났을 때 ka10100 ensure_exists 가 INSERT — Phase B/C 의 분리된 책임이 단일 호출 흐름으로 이어짐
+8. **partial 실패의 정량적 임계**: 1%/10% 임계값을 alert 분기로 활용 — 자격증명/RPS/장애 의심 분기. 백테스팅 데이터 신뢰성 운영의 첫 가드
+9. **시장 단위 SAVEPOINT 격리**: `begin_nested` 가 outer 트랜잭션과 별개로 시장별 commit boundary 만들어 한 시장 실패가 다른 시장 적재를 막지 않음 — Phase A 의 ka10101 패턴이 Phase B 의 ka10099 에서 본격 활용
+10. **`strip_kiwoom_suffix` helper 의 공유성**: ka10001/ka10081/ka10082/... 모든 시계열 endpoint 가 응답 `stk_cd` 의 suffix 처리 필요 — 공통 helper 한 줄이 6+ endpoint 의 안전망
 
 ## Files Modified This Session
 
 ```
- CHANGELOG.md                                                   — ~120 prepend (3 커밋 섹션)
- HANDOFF.md                                                     — overwrite (본 문서)
- pipeline/state/current-state.json                              — ~65 (iterations.v1.2 블록 신설)
- pipeline/artifacts/00-input/user-request-v1.2-chart-params-db-vitest.md   — 신규
- pipeline/artifacts/01-requirements/requirements-v1.2-chart-params-db-vitest.md — 신규 (US 12 / FR 16 / NFR 10)
- pipeline/artifacts/02-prd/prd-v1.2-chart-params-db-vitest.md   — 신규 (8 섹션)
- pipeline/artifacts/02-prd/roadmap-v1.2-chart-params-db-vitest.md — 신규 (v1.1 delta 포함)
- pipeline/artifacts/02-prd/sprint-plan-v1.2-chart-params-db-vitest.md — 신규 (체크포인트 5 개)
- pipeline/decisions/discovery-v1.2-judge.md                     — 신규 (PASS 9.05)
+신규 파일 (untracked):
+src/backend_kiwoom/docs/plans/
+├ endpoint-03-ka10099.md         ~720 줄 신규
+├ endpoint-04-ka10100.md         ~510 줄 신규
+└ endpoint-05-ka10001.md         ~880 줄 신규
 
- src/frontend/package.json                                      — scripts + devDeps 10
- src/frontend/package-lock.json                                 — +2394
- src/frontend/vitest.config.ts                                  — 신규 (jsdom + coverage v8)
- src/frontend/src/test-setup.ts                                 — 신규 (jest-dom + MSW lifecycle)
- src/frontend/src/test/msw/handlers.ts                          — 신규 (GET/PUT + errorHandlers)
- src/frontend/src/test/msw/server.ts                            — 신규 (setupServer)
- src/frontend/src/test/msw/msw-smoke.test.ts                    — 신규 (3 sanity)
+기존 파일 갱신:
+CHANGELOG.md                     +85 줄 prepend (본 세션 항목)
+HANDOFF.md                       overwrite (본 문서)
 
- src/frontend/src/lib/indicators/sma.test.ts                    — 신규 (9)
- src/frontend/src/lib/indicators/rsi.test.ts                    — 신규 (9)
- src/frontend/src/lib/indicators/macd.test.ts                   — 신규 (9)
- src/frontend/src/lib/indicators/aggregate.test.ts              — 신규 (weekly/monthly)
- src/frontend/src/lib/indicators/index.test.ts                  — 신규 (barrel sanity)
- src/frontend/src/lib/indicators/bb.ts                          — 신규 (O(n) 슬라이딩)
- src/frontend/src/lib/indicators/bb.test.ts                     — 신규 (12)
- src/frontend/src/lib/indicators/index.ts                       — bb/BBResult barrel
+이전 세션 untracked 누적 (커밋 대기):
+src/backend_kiwoom/docs/plans/master.md
+src/backend_kiwoom/docs/plans/endpoint-01-au10001.md
+src/backend_kiwoom/docs/plans/endpoint-02-au10002.md
+src/backend_kiwoom/docs/plans/endpoint-14-ka10101.md
+src/backend_py/SPEC.md
+src/backend_kiwoom/docs/키움 REST API 문서.xlsx (710KB, gitignore 결정 미정)
+docs/research/kiwoom-rest-feasibility.md (M)
 
- src/frontend/src/lib/hooks/useIndicatorPreferences.ts          — 전면 재작성 (v2 스키마)
- src/frontend/src/lib/hooks/useIndicatorPreferences.test.ts     — 신규 (35 케이스, 100% coverage)
-
- src/frontend/src/components/charts/PriceAreaChart.tsx          — BBSeriesProp + BB useEffect + RSI 가이드 props
- src/frontend/src/components/charts/IndicatorTogglePanel.tsx    — bb 토글 + props { toggles, onToggle }
- src/frontend/src/components/charts/StockChartAccessibilityTable.tsx — { ma1, ma2 } + rsiPeriod 동적 레이블
-
- src/frontend/src/app/stocks/[code]/page.tsx                    — params 배선 + MA_COLORS/MA_TOGGLE_KEYS 모듈 스코프 + setToggle
+이전 세션 v1.2 Cp 2β 잔존 (분리 커밋 권장):
+src/frontend/src/components/charts/IndicatorParametersDrawer.tsx
+src/frontend/src/components/charts/IndicatorParametersDrawer.test.tsx
+src/frontend/src/app/stocks/[code]/page.tsx (M)
+src/frontend/src/components/charts/IndicatorTogglePanel.tsx (M)
+src/frontend/src/components/charts/PriceAreaChart.tsx (M)
 ```
 
-**3 commits total. Discovery + Cp 0 (1) + Cp 1 (1) + Cp 2α (1).**
+**0 commits, 3 docs new (Phase B) + 2 updated. Phase A·B 누적 = 6 endpoint 계획서 + master.md + SPEC.md.**
 
 ### Context to Load (다음 세션)
 
-Cp 2β 또는 Cp 3 착수 시 먼저 로드할 파일:
+Phase C 계획서 작성 시 먼저 로드할 파일:
 
 ```
-pipeline/artifacts/02-prd/sprint-plan-v1.2-chart-params-db-vitest.md  # 체크포인트 상세
-pipeline/artifacts/02-prd/prd-v1.2-chart-params-db-vitest.md          # 기능 스펙 (3.2 편집 UI, 3.3.2 DB 영속화)
-src/frontend/src/lib/hooks/useIndicatorPreferences.ts                 # 훅 v2 API 확인
-src/frontend/src/lib/hooks/useIndicatorPreferences.test.ts            # 기존 테스트 패턴
-src/backend_py/migrations/versions/002_notification_preference.py     # Cp 3 Alembic 선례
-src/backend_py/app/adapter/out/persistence/repositories/notification_preference.py  # Cp 3 Repository 선례
-src/frontend/src/app/api/admin/notifications/preferences/route.ts     # Cp 3 Route Handler 릴레이 선례
+src/backend_kiwoom/docs/plans/master.md                    # 25 endpoint 카탈로그 + Phase C 정의 + per-endpoint 템플릿
+src/backend_kiwoom/docs/plans/endpoint-03-ka10099.md       # Phase B 패턴 — NormalizedStock / Stock ORM / NXT enable 게이팅
+src/backend_kiwoom/docs/plans/endpoint-05-ka10001.md       # Phase B 패턴 — _NX/_AL suffix / ExchangeType / build_stk_cd / strip_kiwoom_suffix
+src/backend_kiwoom/docs/plans/endpoint-14-ka10101.md       # Phase A 패턴 — call_paginated / SAVEPOINT 격리
+src/backend_kiwoom/docs/키움 REST API 문서.xlsx             # ka10081/ka10082/ka10083/ka10094/ka10086 시트 정독 (R22 stk_cd Length, R28~ 응답 필드, R44~ 응답 예시)
 ```
+
+다음 세션 첫 명령 추천: `Phase C (ka10081/ka10082/ka10083/ka10094/ka10086) 계획서 5건 작성해줘` 또는 `Phase A·B 6 endpoint + master.md + SPEC.md 커밋 후 Phase A 코드화 착수`

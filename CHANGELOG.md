@@ -7,6 +7,140 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] docs(kiwoom): Phase B 계획서 3건 — 종목 마스터 + 펀더멘털 (uncommitted)
+
+`backend_kiwoom` Phase B (종목 마스터 — NXT enable 게이팅의 source) 계획서 3건 완성. 본 세션은 **계획서만 작성** (코드 0줄). Phase A(3건) + Phase B(3건) = 6 endpoint 계획서 누적, 총 ~5,200줄 문서.
+
+### Added — Phase B endpoint 계획서
+
+- `src/backend_kiwoom/docs/plans/endpoint-03-ka10099.md` — 종목정보 리스트 (P0, 백테스팅 진입점)
+  - **NXT 게이팅 source**: 응답 `nxtEnable="Y"` 필터로 Phase C `_NX` 호출 큐 생성
+  - 16종 `mrkt_tp` enum 분리 (`StockListMarketType` — 코스피/코스닥/K-OTC/코넥스/ETN/REIT/...)
+  - Phase B 수집 범위 5시장 (KOSPI/KOSDAQ/KONEX/ETN/REIT) 권장
+  - 시장 단위 트랜잭션 격리 (`begin_nested` SAVEPOINT) — 한 시장 실패가 다른 시장 적재를 막지 않음
+  - 디액티베이션 정책: **같은 market_code 범위 내** `is_active=false` 마킹 (KOSPI sync 가 KOSDAQ 종목 비활성화 차단)
+  - mock 환경 안전판: `nxtEnable` 응답 무시 강제 false
+  - zero-padded string (`listCount="0000000123759593"`) → BIGINT 정규화 + 부호 처리
+  - 단위 테스트 11 시나리오 + 통합 테스트 10 시나리오
+- `src/backend_kiwoom/docs/plans/endpoint-04-ka10100.md` — 종목정보 조회 단건 (P0, gap-filler)
+  - **stk_cd Length=6 강제** — `_NX`/`_AL` suffix 거부 (ka10001 과 다름)
+  - `LookupStockUseCase.ensure_exists` — DB miss 시 lazy fetch (Phase C 가 미지 종목 만났을 때 안전망)
+  - ka10099 의 `NormalizedStock` / `Stock` ORM 100% 공유, 단건 응답 Pydantic 모델만 분리
+  - INSERT/UPDATE 멱등성 — ON CONFLICT(stock_code) DO UPDATE
+  - 디액티베이션 안 함 (단건은 활성화만 — 디액티베이션은 ka10099 책임)
+  - race condition 흡수 — 동시 ensure_exists 호출 시 ON CONFLICT 가 처리
+- `src/backend_kiwoom/docs/plans/endpoint-05-ka10001.md` — 주식기본정보요청 펀더멘털 (P1, 45 필드)
+  - **stk_cd Length=20 + `_NX`/`_AL` 허용** — `ExchangeType` enum + `build_stk_cd` helper
+  - 응답 4 카테고리 분해: A.기본(3) / B.자본·시총(11) / C.펀더멘털(9) / D.250일통계(8) / E.일중시세(14)
+  - **외부 벤더 PER/ROE 주 1회 갱신** (Excel R41/R43) — `fundamental_hash` 컬럼으로 변경 감지
+  - Phase B 권장: KRX only 호출 (NXT 시세는 Phase C 의 ka10086 위임)
+  - `stock_fundamental` 테이블 — `(stock_id, asof_date, exchange)` UNIQUE 일별 스냅샷
+  - 부호 포함 string 처리 (`crd_rt="+0.08"`, `oyr_lwst="-91200"` → `_to_int`/`_to_decimal`)
+  - Pydantic alias 매핑 — `250hgst` 같은 비-식별자 키 처리 (`populate_by_name=True`)
+  - active 3000 종목 sync 추정 5~12분 (Semaphore=4 + 250ms interval)
+  - partial 실패 정책: < 1% 정상 / 1~10% warning / > 10% error+자격증명 점검
+
+### Phase B 의 핵심 설계 결정
+
+- **NXT 호출 큐 = `SELECT FROM stock WHERE nxt_enable=true AND is_active=true`** — 본 Phase 가 끝나면 Phase C 의 ka10081 NXT 수집이 즉시 시작 가능
+- **mrkt_tp 의미 분리 enum**: ka10099(시장) / ka10101(업종/지수) / ka10027(거래소) 의미 완전히 다름 → 3개 StrEnum 분리 (`StockListMarketType` / `SectorMarketType` / `RankingExchangeType`)
+- **단위 모호성**: `mac` (시가총액), `cap` (자본금), `flo_stk` (상장주식), `dstr_stk` (유통주식) 단위 (백만원/억원/천주) 운영 검증 필수 — DoD § 10.3 명시
+- **`stock_fundamental.fundamental_hash`**: PER/EPS/ROE/PBR/EV/BPS 6 필드 MD5 — 외부 벤더 갱신일 감지에 활용 (Phase F 시그널 단계)
+- **종목 코드 base 추출**: `strip_kiwoom_suffix("005930_NX") → "005930"` — 응답 `stk_cd` 가 suffix 보존/제거 어떤 형태로 와도 base FK 매핑 안전
+
+### Decided
+
+- **Phase B 수집 시장**: KOSPI(0) / KOSDAQ(10) / KONEX(50) / ETN(60) / REIT(6) — 5종 (P0+P1). ETF(8)/금현물(80)/ELW(3) 등 보류
+- **펀더멘털 호출 정책**: KRX only (Phase B). NXT 시세는 ka10086 (Phase C) 의 책임 — 펀더멘털 데이터(C카테고리)는 거래소 무관 외부 벤더 데이터
+- **lazy fetch**: ka10100 의 `ensure_exists` 가 Phase C 시계열 수집의 안전망 — 신규 상장 종목 무중단 흡수
+- **mock 환경 nxt_enable**: 응답값 무시 강제 false (mockapi.kiwoom.com 은 KRX 전용)
+- **디액티베이션 같은 market_code 한정**: 시장 단위 sync 가 다른 시장 종목을 비활성화하지 않도록 격리
+- **stock_fundamental 일별 스냅샷**: PER/ROE 가 외부 벤더 주 1회 갱신이라 같은 값 며칠 반복되더라도 일별 row 적재 (Phase F 의 hash 변경 감지에 활용)
+
+### Documentation
+
+- 각 계획서 11 섹션 (Excel R20~R76 명세 그대로 반영 + Pydantic/ORM/UseCase/Repository 코드 + DB schema + 테스트 시나리오 + DoD + 위험 메모)
+- §11.1 결정 필요 항목 표 + §11.2 알려진 위험 표 — 운영 검증 시점에 master.md § 12 결정 기록으로 승격 예정
+- §11.3 endpoint 간 비교 표 — ka10099 vs ka10100 vs ka10001 의 스키마/책임 분담
+- 각 계획서 600~1100줄 — Phase A 와 동일 깊이 유지
+
+### Uncommitted
+
+본 세션은 커밋 없음. 추가된 untracked:
+- `src/backend_kiwoom/docs/plans/endpoint-03-ka10099.md`
+- `src/backend_kiwoom/docs/plans/endpoint-04-ka10100.md`
+- `src/backend_kiwoom/docs/plans/endpoint-05-ka10001.md`
+
+이전 세션 untracked 누적 (커밋 대기):
+- `src/backend_kiwoom/docs/plans/master.md` + Phase A 3건 (`endpoint-01/02/14`)
+- `src/backend_py/SPEC.md`
+- `docs/research/kiwoom-rest-feasibility.md` (M)
+- 이전 세션 v1.2 Cp 2β: `src/frontend/src/components/charts/IndicatorParametersDrawer.tsx` 외 4건
+
+추천 커밋 분할:
+1. `docs(kiwoom): backend_kiwoom 통합 계획서 + Phase A·B 6건 + backend_py SPEC.md`
+2. (별도) v1.2 Cp 2β — `feat(v1.2): IndicatorParametersDrawer (편집 UI)`
+
+---
+
+## [2026-05-07] docs(kiwoom): 신규 독립 프로젝트 `backend_kiwoom` 착수 — 통합 계획서 + Phase A 3건 (uncommitted)
+
+키움 REST API 25 endpoint 로 백테스팅 데이터를 적재하는 신규 독립 백엔드 프로젝트 `src/backend_kiwoom/` 착수. 본 세션은 **계획서만 작성** (코드 0줄). 다음 세션부터 Phase B (NXT 종목 마스터) 진행 예정.
+
+### Added — 신규 프로젝트 디렉토리
+- `src/backend_kiwoom/docs/plans/master.md` (653줄) — 통합 작업 계획서 12 섹션
+  - 25 endpoint 카탈로그 (Tier 1~7, P0/P1/P2/P3 우선순위, 의존성)
+  - NXT 수집 전략 — KRX/NXT 물리 분리 테이블 + application 레이어 view 합성
+  - DB 스키마 초안 (별도 schema `kiwoom`, Alembic 8 migration 분할)
+  - Phase A~H 분할 (총 19~22일 추정)
+  - KiwoomClient 공통 트랜스포트 설계 (httpx + tenacity + Semaphore(4) + 250ms 인터벌)
+  - Per-Endpoint 계획서 11 섹션 템플릿
+- `src/backend_kiwoom/docs/plans/endpoint-01-au10001.md` (626줄) — 토큰 발급
+  - `KiwoomAuthClient.issue_token`, `IssueKiwoomTokenUseCase`, `TokenManager` (asyncio.Lock 중복 발급 합체)
+  - Fernet 자격증명 암호화 (`kiwoom_credential.appkey_cipher` BYTEA)
+  - structlog 마스킹 검증 시나리오 (appkey/secretkey/token 자동 스크럽)
+- `src/backend_kiwoom/docs/plans/endpoint-02-au10002.md` (586줄) — 토큰 폐기
+  - `revoke_by_alias` (캐시 hit 시) + `revoke_by_raw_token` (운영 사고 대응)
+  - Graceful shutdown hook — 활성 alias 전체 폐기 best-effort
+  - 멱등성 정책: 401/403 응답 → `RevokeResult(reason='already-expired')` 변환
+- `src/backend_kiwoom/docs/plans/endpoint-14-ka10101.md` (668줄) — 업종코드 리스트
+  - 5개 시장(`mrkt_tp` 0/1/2/4/7) 순회 + 시장별 트랜잭션 격리
+  - `is_active=false` 디액티베이션 정책 (hard delete 회피, FK 안전)
+  - 페이지네이션·재시도·로깅 마스킹의 첫 e2e 검증 케이스
+- `src/backend_py/SPEC.md` (885줄) — 기존 backend_py 종합 기술 명세서 (8 섹션 + 3 부록)
+
+### Changed
+- `docs/research/kiwoom-rest-feasibility.md` — §10 "2026-05-07 업데이트 — 결정 번복" 섹션 추가
+  - §1 결론 ("MVP 단계 미구현") 번복 — 데이터 품질 사유로 착수
+  - §2.3 미해결 항목 7건 해소 표 (Excel 명세서 입수로)
+  - §7 Go 조건 vs 현재 결정 비교 (3/3 미충족이지만 다른 동기로 착수)
+  - 신규 프로젝트 범위·의존성·산출물 메모
+
+### NXT 데이터 위치 확정 (Q&A)
+- **NXT 거래 가능 종목**: `ka10099`/`ka10100` 응답의 `nxtEnable` 필드 (`Y`=가능)
+- **NXT OHLCV**: 차트 API (`ka10079~ka10094`) + `ka10086` 의 `stk_cd` 에 `_NX` suffix (예: `005930_NX`)
+- **모의투자 한계**: `mockapi.kiwoom.com` 은 KRX 만 — NXT 데이터 수집은 운영 도메인 필수
+
+### Decided
+- **범위**: MVP 8 + 보조 6 + 분석/순위 11 = **25 endpoint** (ETF/ELW/금현물/주문/실시간웹소켓 제외)
+- **스택**: backend_py 동일 (FastAPI + SQLAlchemy 2.0 async + uv + Alembic + structlog + Fernet + APScheduler)
+- **코드 의존성**: `backend_py.app.*` 0 import — 패턴(structlog 마스킹 / Fernet / Hexagonal) 만 복제
+- **DB**: 별도 schema `kiwoom`, KRX/NXT 물리 분리 테이블 (`stock_price_krx`, `stock_price_nxt`)
+- **SOR `_AL`**: 정기 수집 안 함, 비교 PoC 만
+- **자격증명**: Fernet 암호화 후 `kiwoom_credential` BYTEA 저장 (운영 키는 DB only, Settings 미사용)
+- **RPS**: 초당 4회 + 250ms 인터벌 (공식 5회 안전 마진)
+
+### Uncommitted
+본 세션은 커밋 없음. untracked 항목:
+- `src/backend_kiwoom/` (디렉토리 전체 — 4 파일)
+- `src/backend_py/SPEC.md`
+- `src/backend_py/키움 REST API 문서.xlsx` (참조용, gitignore 검토 필요)
+
+기존 untracked (이전 세션 v1.2 작업):
+- `src/frontend/src/components/charts/IndicatorParametersDrawer.tsx` 외 2건 — Cp 2β 진행 중
+
+---
+
 ## [2026-04-24] feat(v1.2): Cp 2α — `useIndicatorPreferences` v2 스키마 + 파라미터 end-to-end 배선 (`45837fd`)
 
 v1.2 체크포인트 2α. 훅 전면 재작성 + v1→v2 자동 마이그레이션 + MA4/RSI/MACD/BB 파라미터를 사용자 편집 대상으로 전환. 편집 UI 는 Cp 2β 에서 별도 커밋으로.
