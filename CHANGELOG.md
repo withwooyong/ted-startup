@@ -7,6 +7,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] security(kiwoom): F1 — auth.py `__context__` leak 백포트 (이중 리뷰 1R, 285 tests / 91.0%)
+
+`backend_kiwoom` A3-α C-1 발견 (`__context__` leak via `from None`) 의 동일 패턴을 **`KiwoomAuthClient`** (au10001 / au10002) 에 백포트. 9개 raise site (`_do_issue_token` 4 + `expires_at_kst` 1 + `revoke_token` 4) 를 변수 캡처 + except 밖 raise 패턴으로 리팩토링. 보안 일관성 — backend_kiwoom 의 모든 외부 호출 어댑터 (`auth.py`, `_client.py`, `stkinfo.py`) 가 단일 예외 chain 정책으로 수렴.
+
+이중 리뷰 1R — **CRITICAL 0 / HIGH 0 PASS** (변경 범위 작음 — 패턴 백포트만, 새 로직 X).
+
+### Changed — `app/adapter/out/kiwoom/auth.py`
+
+- **`_do_issue_token`** (au10001) 4개 `from None` → 변수 캡처 + except 밖 raise:
+  - `request_validation_failed` — TokenIssueRequest Pydantic 검증
+  - `network_error_type` + `resp_or_none` — httpx.HTTPError / OSError 네트워크 오류
+  - `json_parse_error_type` + `body_json` (try-else 안 dict guard 보너스 추가) — resp.json() ValueError
+  - `response_validation_failed` + `validated` — TokenIssueResponse Pydantic 검증 (input 에 토큰 평문, H5 핵심)
+- **`TokenIssueResponse.expires_at_kst()`** — strptime ValueError → `parse_failed` 변수 캡처 패턴
+- **`revoke_token`** (au10002) 4개 `from None` — `_do_issue_token` 과 동일 패턴 (request 검증 / 네트워크 / JSON 파싱 / 응답 검증)
+- **JSON dict guard 보너스** — `try-except-else: if not isinstance(parsed, dict): raise KiwoomUpstreamError("응답이 dict 아님")` 추가 (`_client.py:271-279` 일관)
+- 모듈 docstring 갱신 — F1 백포트 정책 명시 (`__context__` 와 `__cause__` 둘 다 None 보장)
+
+### Added — `tests/test_kiwoom_auth_client.py` (회귀 테스트 +8)
+
+`__context__` leak 회귀 차단 — `from None` 으로 회귀 시 `__context__ != None` 으로 즉시 fail:
+
+1. `test_issue_token_network_error_context_is_cleared` — au10001 httpx.ConnectError
+2. `test_issue_token_401_context_is_cleared` — au10001 401 응답
+3. `test_issue_token_json_parse_error_context_is_cleared` — au10001 JSON 파싱 실패
+4. `test_issue_token_pydantic_validation_error_context_is_cleared` — au10001 Pydantic 검증 실패 (input 에 토큰 평문)
+5. `test_expires_at_kst_invalid_date_context_is_cleared` — strptime ValueError 매핑
+6. `test_revoke_token_network_error_context_is_cleared` — au10002 네트워크 오류
+7. `test_revoke_token_401_context_is_cleared` — au10002 401 응답
+8. `test_revoke_token_json_parse_error_context_is_cleared` — au10002 JSON 파싱 실패
+
+각 테스트가 `assert err.__cause__ is None` + `assert err.__context__ is None` 검증.
+
+### Added — `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 9
+
+- § 9.1 ~ 9.5 (5 결정 + 결과 + 보안 일관성 종결 섹션)
+- § 8.4 의 F1 상태를 "다음 PR" → "✅ 적용" 으로 갱신
+
+### 검증
+
+- 285 passed (이전 277, +8) / coverage **91.0%** (이전 90.36%, +0.64%)
+- ruff check 0 / ruff format 0 / mypy strict 0 / bandit 0
+- `auth.py` 자체 커버리지 91% (이전 ~88%)
+- 보안 일관성 종결: backend_kiwoom 의 `from None` 0건 (코드) — A3-α 4건 + F1 8건 = **12 회귀 테스트** 가 패턴 회귀 시 즉시 fail
+
+---
+
 ## [2026-05-07] feat(kiwoom): Phase A3-α — KiwoomClient 공통 트랜스포트 + ka10101 어댑터 (이중 리뷰 1R, 277 tests / 90.36%)
 
 `backend_kiwoom` Phase A3 의 첫 chunk (α). **KiwoomClient 공통 트랜스포트** (모든 후속 endpoint B~G 22개의 기반) + KiwoomStkInfoClient.fetch_sectors (ka10101) + 단위 테스트만. β (Migration 002 + Repository + UseCase + 라우터) / γ (APScheduler weekly) 별도 PR.

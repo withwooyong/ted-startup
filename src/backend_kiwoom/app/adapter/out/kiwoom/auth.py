@@ -86,11 +86,23 @@ class TokenIssueResponse(BaseModel):
 
         regex 가 `^\\d{14}$` 만 검증 — 논리상 잘못된 날짜(99991399999999) 는 strptime 이 ValueError.
         도메인 예외로 매핑 — 라우터에서 502 fail-fast (M2).
+
+        F1 백포트: `from None` 은 `__suppress_context__=True` 만 set — `__context__` 는
+        currently-raised exception 으로 자동 채워져 Sentry/structlog `walk_tb` leak 가능.
+        변수 캡처 후 except 밖 raise 로 PEP 3134 자동 chaining 차단.
         """
+        parse_failed = False
+        parsed: datetime | None = None
         try:
-            return datetime.strptime(self.expires_dt, "%Y%m%d%H%M%S").replace(tzinfo=KST)
+            parsed = datetime.strptime(self.expires_dt, "%Y%m%d%H%M%S").replace(tzinfo=KST)
         except ValueError:
-            raise KiwoomResponseValidationError("au10001 expires_dt 파싱 실패") from None
+            parse_failed = True
+
+        if parse_failed:
+            raise KiwoomResponseValidationError("au10001 expires_dt 파싱 실패")
+        if parsed is None:  # pragma: no cover — parse_failed 와 mutex
+            raise RuntimeError("unreachable: parsed None without parse_failed")
+        return parsed
 
 
 class TokenRevokeRequest(BaseModel):
@@ -137,10 +149,14 @@ class KiwoomAuthClient:
     - KiwoomBusinessError (return_code != 0) → 재시도 금지 (비즈니스 거부)
     - KiwoomResponseValidationError (Pydantic) → 재시도 금지
 
-    예외 cause 정책 (H5 적대적 리뷰):
+    예외 cause/context 정책 (H5 + F1 백포트):
     - Pydantic ValidationError 의 `errors()` / `input` 에 응답 본문(토큰 포함) 평문 들어 있음.
       Kiwoom 토큰은 plain alphanumeric 이라 structlog 패턴 매칭으로 마스킹 미보장.
-      → `from None` 으로 cause chain 차단. 디버깅 정보는 별도 scrubbed 로그로 분리.
+    - F1 백포트 이전: `from None` 사용 → `__suppress_context__=True` 만 set, `__context__`
+      는 currently-raised exception 으로 자동 채워져 Sentry/structlog `walk_tb(__context__)`
+      가 토큰 평문 노출 위험 (A3-α C-1 발견 — _client.py 와 동일 패턴).
+    - F1 백포트 후: 변수 캡처 + except 밖 raise — PEP 3134 자동 chaining 차단.
+      `__context__ is None` + `__cause__ is None` 둘 다 보장.
     """
 
     def __init__(
@@ -187,25 +203,44 @@ class KiwoomAuthClient:
         raise RuntimeError("unreachable")  # pragma: no cover
 
     async def _do_issue_token(self, credentials: KiwoomCredentials) -> TokenIssueResponse:
+        # F1: `from None` → 변수 캡처 + except 밖 raise (PEP 3134 자동 chaining 차단).
+        # 이유: `from None` 은 `__suppress_context__=True` 만 set, `__context__` 는 살아있어
+        # Sentry/structlog `walk_tb(__context__)` 가 토큰/평문 노출 가능.
+        # _client.py / stkinfo.py 패턴 일관.
+
         # Pydantic 사전 검증 — wire 전에 appkey/secretkey 형식 강제 (HIGH 1차 리뷰)
+        request_validation_failed = False
+        request_body: dict[str, Any] = {}
         try:
             request_body = TokenIssueRequest(
                 appkey=credentials.appkey,
                 secretkey=credentials.secretkey,
             ).model_dump()
         except ValidationError:
-            raise KiwoomResponseValidationError("au10001 요청 검증 실패") from None
+            request_validation_failed = True
+
+        if request_validation_failed:
+            raise KiwoomResponseValidationError("au10001 요청 검증 실패")
 
         headers = {
             "Content-Type": "application/json;charset=UTF-8",
             "api-id": "au10001",
         }
+
+        # 네트워크 호출 — 변수 캡처 후 except 밖 raise
+        network_error_type = ""
+        resp_or_none: httpx.Response | None = None
         try:
-            resp = await self._client.post("/oauth2/token", json=request_body, headers=headers)
+            resp_or_none = await self._client.post("/oauth2/token", json=request_body, headers=headers)
         except (httpx.HTTPError, OSError) as exc:
             # OSError 포함 — ssl.SSLError, 일부 transport 가 raw OSError 를 raise (M4)
-            exc_type = type(exc).__name__
-            raise KiwoomUpstreamError(f"au10001 네트워크 오류: {exc_type}") from None
+            network_error_type = type(exc).__name__
+
+        if network_error_type:
+            raise KiwoomUpstreamError(f"au10001 네트워크 오류: {network_error_type}")
+        if resp_or_none is None:  # pragma: no cover — network_error_type 와 mutex
+            raise RuntimeError("unreachable: resp_or_none None without network error")
+        resp = resp_or_none
 
         # 응답 본문은 어떤 경로로도 메시지/로그에 포함 안 됨 — Kiwoom 토큰 plain alphanumeric 마스킹 미보장
         if resp.status_code in (401, 403):
@@ -219,11 +254,20 @@ class KiwoomAuthClient:
             logger.debug("au10001 status=%d", resp.status_code)
             raise KiwoomUpstreamError(f"au10001 발급 실패: HTTP {resp.status_code}")
 
+        # JSON 파싱 — 변수 캡처 후 except 밖 raise
+        json_parse_error_type = ""
+        body_json: dict[str, Any] = {}
         try:
-            body_json: dict[str, Any] = resp.json()
+            parsed = resp.json()
         except ValueError as exc:
-            exc_type = type(exc).__name__
-            raise KiwoomUpstreamError(f"au10001 응답 JSON 파싱 실패: {exc_type}") from None
+            json_parse_error_type = type(exc).__name__
+        else:
+            if not isinstance(parsed, dict):
+                raise KiwoomUpstreamError(f"au10001 응답이 dict 아님 — {type(parsed).__name__}")
+            body_json = parsed
+
+        if json_parse_error_type:
+            raise KiwoomUpstreamError(f"au10001 응답 JSON 파싱 실패: {json_parse_error_type}")
 
         return_code = body_json.get("return_code", 0)
         if not isinstance(return_code, int):
@@ -235,12 +279,21 @@ class KiwoomAuthClient:
                 message=str(body_json.get("return_msg", "")),
             )
 
+        # Pydantic 응답 검증 — 변수 캡처 후 except 밖 raise (input 에 토큰 평문 보존, H5)
+        response_validation_failed = False
+        validated: TokenIssueResponse | None = None
         try:
-            return TokenIssueResponse.model_validate(body_json)
+            validated = TokenIssueResponse.model_validate(body_json)
         except ValidationError:
-            # 본문 미포함 + cause chain 차단 — Pydantic ValidationError input 에 토큰 평문 (H5)
+            response_validation_failed = True
+
+        if response_validation_failed:
+            # 본문 미포함 + cause/context chain 차단 — Pydantic ValidationError input 에 토큰 평문
             logger.debug("au10001 response validation failed — body suppressed")
-            raise KiwoomResponseValidationError("au10001 응답 검증 실패") from None
+            raise KiwoomResponseValidationError("au10001 응답 검증 실패")
+        if validated is None:  # pragma: no cover — response_validation_failed 와 mutex
+            raise RuntimeError("unreachable: validated None without validation failure")
+        return validated
 
     # =========================================================================
     # au10002 — revoke_token (β chunk)
@@ -257,8 +310,13 @@ class KiwoomAuthClient:
         - 멱등성 보장이 키움 측에서 안 되므로 caller 가 swallow/throw 결정
         - 자동 재시도 시 "이미 폐기됨" 응답에 대한 동작이 모호해짐
         - 401/403 은 UseCase 가 idempotent (already-expired) 변환 책임
+
+        F1 백포트: 모든 `from None` 위치를 변수 캡처 + except 밖 raise 패턴으로
+        리팩토링 (PEP 3134 자동 `__context__` chaining 차단 — _client.py 일관).
         """
         # Pydantic 사전 검증 — appkey/secretkey/token 형식 강제 (au10001 과 동일 패턴)
+        request_validation_failed = False
+        request_body: dict[str, Any] = {}
         try:
             request_body = TokenRevokeRequest(
                 appkey=credentials.appkey,
@@ -266,18 +324,30 @@ class KiwoomAuthClient:
                 token=token,
             ).model_dump()
         except ValidationError:
-            raise KiwoomResponseValidationError("au10002 요청 검증 실패") from None
+            request_validation_failed = True
+
+        if request_validation_failed:
+            raise KiwoomResponseValidationError("au10002 요청 검증 실패")
 
         headers = {
             "Content-Type": "application/json;charset=UTF-8",
             "api-id": "au10002",
             "authorization": f"Bearer {token}",
         }
+
+        # 네트워크 호출 — 변수 캡처 후 except 밖 raise
+        network_error_type = ""
+        resp_or_none: httpx.Response | None = None
         try:
-            resp = await self._client.post("/oauth2/revoke", json=request_body, headers=headers)
+            resp_or_none = await self._client.post("/oauth2/revoke", json=request_body, headers=headers)
         except (httpx.HTTPError, OSError) as exc:
-            exc_type = type(exc).__name__
-            raise KiwoomUpstreamError(f"au10002 네트워크 오류: {exc_type}") from None
+            network_error_type = type(exc).__name__
+
+        if network_error_type:
+            raise KiwoomUpstreamError(f"au10002 네트워크 오류: {network_error_type}")
+        if resp_or_none is None:  # pragma: no cover — network_error_type 와 mutex
+            raise RuntimeError("unreachable: resp_or_none None without network error")
+        resp = resp_or_none
 
         if resp.status_code in (401, 403):
             logger.debug("au10002 status=%d", resp.status_code)
@@ -289,11 +359,20 @@ class KiwoomAuthClient:
             logger.debug("au10002 status=%d", resp.status_code)
             raise KiwoomUpstreamError(f"au10002 폐기 실패: HTTP {resp.status_code}")
 
+        # JSON 파싱 — 변수 캡처 후 except 밖 raise
+        json_parse_error_type = ""
+        body_json: dict[str, Any] = {}
         try:
-            body_json: dict[str, Any] = resp.json()
+            parsed = resp.json()
         except ValueError as exc:
-            exc_type = type(exc).__name__
-            raise KiwoomUpstreamError(f"au10002 응답 JSON 파싱 실패: {exc_type}") from None
+            json_parse_error_type = type(exc).__name__
+        else:
+            if not isinstance(parsed, dict):
+                raise KiwoomUpstreamError(f"au10002 응답이 dict 아님 — {type(parsed).__name__}")
+            body_json = parsed
+
+        if json_parse_error_type:
+            raise KiwoomUpstreamError(f"au10002 응답 JSON 파싱 실패: {json_parse_error_type}")
 
         return_code = body_json.get("return_code", 0)
         if not isinstance(return_code, int):
@@ -305,11 +384,20 @@ class KiwoomAuthClient:
                 message=str(body_json.get("return_msg", "")),
             )
 
+        # Pydantic 응답 검증 — 변수 캡처 후 except 밖 raise
+        response_validation_failed = False
+        validated: TokenRevokeResponse | None = None
         try:
-            return TokenRevokeResponse.model_validate(body_json)
+            validated = TokenRevokeResponse.model_validate(body_json)
         except ValidationError:
+            response_validation_failed = True
+
+        if response_validation_failed:
             logger.debug("au10002 response validation failed — body suppressed")
-            raise KiwoomResponseValidationError("au10002 응답 검증 실패") from None
+            raise KiwoomResponseValidationError("au10002 응답 검증 실패")
+        if validated is None:  # pragma: no cover — response_validation_failed 와 mutex
+            raise RuntimeError("unreachable: validated None without validation failure")
+        return validated
 
     async def close(self) -> None:
         await self._client.aclose()

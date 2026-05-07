@@ -322,10 +322,49 @@ A3 chunk 분할: α (KiwoomClient + ka10101 어댑터 단위) → β (Migration 
 
 | # | 항목 | 출처 | 우선순위 |
 |---|------|------|------|
-| F1 | **auth.py (α/β) 의 동일 `__context__` leak 백포트** — 모든 `from None` 패턴을 변수-캡처 except 밖 raise 로 리팩토링 | A3-α 적대적 C-1 | **다음 PR** (보안 일관성) |
+| F1 | **auth.py (α/β) 의 동일 `__context__` leak 백포트** — 모든 `from None` 패턴을 변수-캡처 except 밖 raise 로 리팩토링 | A3-α 적대적 C-1 | ✅ **적용** (§ 9 — 다음 커밋) |
 | F2 | KiwoomBusinessError.message attribute scrub — `from app.observability.logging import _scrub_string` 적용 | A3-α 적대적 M-3 | low |
 | F3 | KiwoomMaxPagesExceededError 라우터 매핑 (503 + Retry-After) — 무한 페이지네이션 부분 데이터 폐기 시 metric | A3-α 적대적 M-1 | A3-β |
 | F4 | KiwoomClient instance 단일성 강제 (factory + lock) | A3-α 적대적 F2 | Phase D 사용자 trigger 도입 시 |
 | F5 | next-key 응답 헤더 cont-yn=Y 인데 next-key 없는 edge case 명시 처리 (현재는 빈 헤더로 다음 호출) | A3-α 1차 LOW-1 | 운영 검증 후 |
 
 **다음 chunk**: A3-β — Migration 002 (sector 테이블) + Sector ORM + SectorRepository + SyncSectorMasterUseCase + GET/POST `/api/kiwoom/sectors` + GET `/api/kiwoom/sectors/sync` (admin). γ chunk 의 APScheduler 는 그 다음.
+
+---
+
+## 9. F1 — auth.py `__context__` leak 백포트 (2026-05-07)
+
+### 9.1 결정
+
+**A3-α C-1 발견 (`__context__` leak via `from None`) 을 auth.py (α / β) 의 모든 `from None` 위치에 백포트.** 기존 보안 사고 1건 (A3-α C-1) 의 동일 패턴이 인증 클라이언트 (au10001 / au10002) 에 9곳 존재 — 보안 일관성을 위해 단독 PR 로 정리.
+
+### 9.2 핵심 설계 결정
+
+| # | 결정 | 근거 |
+|---|------|------|
+| 1 | **백포트 범위** | au10001 (`_do_issue_token` 4 + `expires_at_kst` 1) + au10002 (`revoke_token` 4) = 총 **9개 raise site** | A3-α 의 C-1 패턴이 그대로 적용 — Pydantic ValidationError / httpx exception / strptime ValueError 모두 `__context__` 에 currently-handling exception 자동 보존 |
+| 2 | **패턴 선택** | 변수 캡처 + except 밖 raise (`network_error_type` / `parse_failed` / `request_validation_failed` / `response_validation_failed`) | `_client.py:212-251` / `stkinfo.py:105-117` 와 100% 일관. `_clear_chain()` helper 호출 대신 동일한 **언어 수준** 패턴 — Python 동작 자체가 예외 chain 안 만듦 |
+| 3 | **JSON dict guard 보너스** | `try-except-else: if not isinstance(parsed, dict): raise KiwoomUpstreamError("응답이 dict 아님")` 추가 | `_client.py:271-279` 와 일관. 기존 auth.py 에 부재했던 가드 — 키움 응답이 JSON list/scalar 인 edge case 방어 |
+| 4 | **회귀 테스트 8개** | 모든 raise site 에 `assert err.__cause__ is None` + `assert err.__context__ is None` | `from None` 으로 회귀 시 `__context__ != None` 으로 즉시 fail. A3-α `test_call_exception_context_is_cleared_*` 와 동형 |
+| 5 | **try-else 안 raise 안전성** | `dict guard` 의 raise 는 try-else 블록 안 — Python 의미상 예외 처리 중이 아니라 `__context__` 자동 설정 안 됨 | PEP 3134 — `__context__` 는 "the exception that was being handled" 로만 설정. try 가 성공한 else 절은 처리 중 X |
+
+### 9.3 결과
+
+- 변경 파일 2개 (`app/adapter/out/kiwoom/auth.py` + `tests/test_kiwoom_auth_client.py`)
+- 테스트 +8 → **285 passed / coverage 91.0%** (이전 277 / 90.36%)
+- 이중 리뷰 1라운드 — **CRITICAL 0 / HIGH 0 PASS** (변경 범위 작음 — 패턴 백포트만, 새 로직 X)
+- ruff lint 0 / format 0 / mypy strict 0 / bandit 0
+- `auth.py` 파일 자체 커버리지 91% (이전 ~88%)
+
+### 9.4 보안 일관성 종결 (A2 + A3-α + F1)
+
+본 백포트로 **backend_kiwoom 의 모든 외부 호출 어댑터** (`auth.py`, `_client.py`, `stkinfo.py`) 가 **단일 예외 chain 정책** 으로 수렴:
+
+- 모든 `raise Kiwoom*Error` 는 except 블록 **밖에서** 실행
+- `from None` 사용 0건 (코드) — docstring/주석 설명만 잔존 (의도)
+- `__context__` 와 `__cause__` 둘 다 None 보장 — Sentry/structlog `walk_tb` leak 차단
+- 회귀 테스트: A3-α 4건 + F1 8건 = **총 12 회귀 테스트** 가 패턴 회귀 시 즉시 fail
+
+### 9.5 다음 chunk
+
+A3-β — Migration 002 (sector 테이블) + Sector ORM + SectorRepository + SyncSectorMasterUseCase + 라우터 + KiwoomMaxPagesExceededError 라우터 매핑 (F3 통합).

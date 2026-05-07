@@ -590,3 +590,212 @@ def test_token_issue_response_extra_field_ignored() -> None:
     """키움 응답에 신규 필드 추가 시 호환 — extra='ignore'."""
     resp = TokenIssueResponse.model_validate({**_VALID_TOKEN_BODY, "new_kiwoom_field": "future"})
     assert resp.token == _VALID_TOKEN_BODY["token"]
+
+
+# =============================================================================
+# F1 백포트 — `__context__` leak 차단 회귀 (A3-α C-1 패턴 일관)
+# =============================================================================
+#
+# `from None` 은 `__suppress_context__=True` 만 set, `__context__` 는 currently-raised
+# exception 으로 자동 채워져 Sentry/structlog `walk_tb(__context__)` 가 토큰 평문 노출 가능.
+# 변수 캡처 + except 밖 raise 패턴으로 PEP 3134 자동 chaining 차단.
+# 모든 raise 사이트에서 __context__ 와 __cause__ 둘 다 None 인지 확인.
+
+
+@pytest.mark.asyncio
+async def test_issue_token_network_error_context_is_cleared() -> None:
+    """F1: au10001 네트워크 오류 wrap 시 `__context__` 가 None.
+
+    httpx.ConnectError 메시지에 토큰 평문 포함 가능성 — `__context__` leak 시 Sentry
+    `walk_tb` 가 노출.
+    """
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused: TOKEN_LEAK_HINT")
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomUpstreamError) as exc_info:
+            await client.issue_token(_VALID_CREDS)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None, "au10001 network error __context__ leak — F1 회귀"
+
+
+@pytest.mark.asyncio
+async def test_issue_token_401_context_is_cleared() -> None:
+    """F1: au10001 401 raise 시도 `__context__` 정리 (자격증명 거부 — chain 없음 보장)."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        # body 에 토큰 평문 흉내 — context 로 leak 안 되어야 함
+        return httpx.Response(401, json={"return_msg": "leaked-context-marker"})
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomCredentialRejectedError) as exc_info:
+            await client.issue_token(_VALID_CREDS)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_issue_token_json_parse_error_context_is_cleared() -> None:
+    """F1: au10001 JSON 파싱 실패 시 `__context__` 가 None.
+
+    ValueError 메시지가 본문 일부를 포함할 수 있어 chain leak 시 위험.
+    """
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        # 200 + 비-JSON 본문 → resp.json() ValueError
+        return httpx.Response(200, content=b"not-json-{TOKEN_LEAK_HINT}")
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomUpstreamError) as exc_info:
+            await client.issue_token(_VALID_CREDS)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None, "au10001 JSON parse error __context__ leak — F1 회귀"
+
+
+@pytest.mark.asyncio
+async def test_issue_token_pydantic_validation_error_context_is_cleared() -> None:
+    """F1: au10001 응답 Pydantic 검증 실패 시 `__context__` 가 None.
+
+    ValidationError.errors() 의 `input` 에 토큰 평문이 보존됨 → chain leak 차단 핵심.
+    """
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        # return_code=0 통과 + 필수 필드 누락 → Pydantic 검증 실패
+        return httpx.Response(200, json={"return_code": 0, "expires_dt": "INVALID"})
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomResponseValidationError) as exc_info:
+            await client.issue_token(_VALID_CREDS)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None, "au10001 ValidationError __context__ leak — F1 회귀 핵심"
+
+
+def test_expires_at_kst_invalid_date_context_is_cleared() -> None:
+    """F1: TokenIssueResponse.expires_at_kst() 의 strptime ValueError 매핑 시 `__context__` None.
+
+    `99991399999999` 같은 regex 통과하지만 논리상 잘못된 날짜에 대해 chain 차단.
+    """
+    # regex `^\d{14}$` 통과 + strptime 실패 케이스
+    resp = TokenIssueResponse(
+        expires_dt="99991399999999",
+        token_type="bearer",
+        token="X" * 100,
+        return_code=0,
+        return_msg="",
+    )
+
+    with pytest.raises(KiwoomResponseValidationError) as exc_info:
+        resp.expires_at_kst()
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None, "expires_at_kst ValueError __context__ leak — F1 회귀"
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_network_error_context_is_cleared() -> None:
+    """F1: au10002 네트워크 오류 wrap 시 `__context__` 가 None.
+
+    revoke 는 헤더에 Bearer 토큰 평문 — exc 메시지에 포함될 수 있어 chain 차단 필수.
+    """
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused: BEARER_TOKEN_HINT")
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomUpstreamError) as exc_info:
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None, "au10002 network error __context__ leak — F1 회귀"
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_401_context_is_cleared() -> None:
+    """F1: au10002 401 raise 시도 `__context__` 정리."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"return_msg": "leaked-context-marker"})
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomCredentialRejectedError) as exc_info:
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_token_json_parse_error_context_is_cleared() -> None:
+    """F1: au10002 JSON 파싱 실패 시 `__context__` 가 None."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not-json-{TOKEN_LEAK_HINT}")
+
+    client = KiwoomAuthClient(
+        base_url="https://api.kiwoom.com",
+        transport=_mock_transport(handler),
+        max_attempts=1,
+        retry_min_wait=0.0,
+        retry_max_wait=0.0,
+    )
+    async with client:
+        with pytest.raises(KiwoomUpstreamError) as exc_info:
+            await client.revoke_token(_VALID_CREDS, "X" * 100)
+
+    err = exc_info.value
+    assert err.__cause__ is None
+    assert err.__context__ is None, "au10002 JSON parse error __context__ leak — F1 회귀"
