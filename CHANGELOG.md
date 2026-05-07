@@ -7,6 +7,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase A3-β — sector 도메인 영속화 + UseCase + 라우터 (이중 리뷰 1R, 332 tests / 91%)
+
+ka10101 의 도메인 풀 체인 단일 PR. `KiwoomStkInfoClient.fetch_sectors` (A3-α 완료) → `SyncSectorMasterUseCase` (시장 단위 격리) → `SectorRepository` (PG ON CONFLICT upsert + 디액티베이션 정책 B) → DB. 라우터 `GET/POST /api/kiwoom/sectors` 까지 포함. APScheduler weekly 는 A3-γ 로 분리.
+
+이중 리뷰 1R — **CRITICAL 0 / HIGH 0 / MEDIUM 3 PASS** (모두 정합성 OK, 추가 적용 없음).
+
+### Added — Migration
+
+- `migrations/versions/002_kiwoom_sector.py` — `kiwoom.sector` 테이블 (id/market_code/sector_code/sector_name/group_no/is_active/fetched_at/created_at/updated_at)
+  - `UNIQUE(market_code, sector_code)` — upsert 키
+  - `CHECK(market_code IN ('0','1','2','4','7'))` — 무효값 차단
+  - `idx_sector_market` + `idx_sector_active` (partial WHERE is_active=TRUE)
+  - downgrade 안전가드 — sector 데이터 있으면 차단
+
+### Added — ORM / Repository
+
+- `app/adapter/out/persistence/models/sector.py` — Sector ORM (BigInteger id, String(2/10/100/10), Boolean, TZ-aware DateTime, TimestampMixin)
+- `app/adapter/out/persistence/repositories/sector.py` — SectorRepository:
+  - `list_by_market(market_code, only_active)` — populate_existing=True 로 stale 객체 회피
+  - `list_all(only_active)` — 5 시장 통합 + (market_code, sector_code) 정렬
+  - `upsert_many(rows)` — PG ON CONFLICT (market_code, sector_code) → set sector_name / group_no / is_active=TRUE / fetched_at / updated_at
+  - `deactivate_missing(market_code, present_codes)` — 시장 단위 격리 (다른 시장 row 영향 없음). 빈 set 시 그 시장 전체 비활성화 (안전장치)
+
+### Added — UseCase / DTO
+
+- `app/application/service/sector_service.py`:
+  - `SyncSectorMasterUseCase` — 5 시장 순회 + 시장 단위 트랜잭션 (`session_provider` 패턴, TokenManager 와 일관)
+  - `MarketSyncOutcome` (frozen + slots) — `succeeded` property
+  - `SectorSyncResult` (frozen + slots) — `all_succeeded` property
+  - `MarketCode = Literal["0","1","2","4","7"]` + `SUPPORTED_MARKETS: tuple[MarketCode, ...]` mypy strict 정합
+
+### Added — 라우터 / DTO
+
+- `app/adapter/web/routers/sectors.py`:
+  - GET `/api/kiwoom/sectors?market_code=&only_active=` — DB read only (admin 불필요), Literal 422 차단
+  - POST `/api/kiwoom/sectors/sync?alias=` — admin only, KiwoomClient sync 마다 close 보장
+  - F3 통합 — outcome.error 에 "MaxPages" 흔적 시 응답 헤더 `Retry-After: 60` (모니터링 hint)
+  - SectorOut / MarketSyncOutcomeOut / SectorSyncResultOut Pydantic (from_attributes=True)
+- `app/adapter/web/_deps.py` 확장 — `SyncSectorUseCaseFactory` (alias → AsyncContextManager[UseCase]) + getter/setter
+- `app/main.py` 확장 — sector router include + lifespan 의 sync_sector_factory 등록 (KiwoomClient 빌드 + close 보장)
+
+### Tests +47 — 5 신규 파일 + test_models.py 확장
+
+- `tests/test_migration_002.py` (6 케이스) — 테이블 / UNIQUE / CHECK / 인덱스 / 컬럼 타입 / downgrade-upgrade 멱등성
+- `tests/test_models.py` (+5 케이스) — Sector ORM CRUD / UNIQUE / CHECK / 시장별 동일 sector_code 허용 / group_no nullable
+- `tests/test_sector_repository.py` (13 케이스) — upsert / list / deactivate_missing 시장 격리 / 멱등성 / 재등장 복원
+- `tests/test_sector_service.py` (11 케이스) — 5 시장 정상 / Upstream 격리 / Credential 격리 / Business 격리 / 모두 실패 / 멱등성 / 폐지 / 재등장 / 시장명 변경 / DTO property
+- `tests/test_sector_router.py` (11 케이스) — admin guard 3 / 부분 성공 / F3 hint 헤더 / 4xx 매핑
+- `tests/test_sector_router_integration.py` (1 케이스) — 라우터 → 실 UseCase factory → MockTransport → testcontainers DB 풀 체인
+
+### 검증
+
+- 332 passed (이전 285, +47) / coverage **91%** (이전 91% — 신규 코드 91% 유지)
+- 핵심 파일: sector_service 94% / sector_router 95% / sector_repository 100% / sector_model 100%
+- ruff check 0 / format 0 / mypy strict 0 (38 source files) / bandit 0
+
+### 문서
+
+- ADR-0001 § 10 추가 (16 결정 + 결과 + 운영 dry-run 보류 + 후속 PR)
+
+### 다음 chunk
+
+A3-γ — APScheduler weekly cron (KST 일 03:00) + scheduler 모듈 + lifespan 통합 (β graceful shutdown 충돌 검증).
+
+---
+
 ## [2026-05-07] security(kiwoom): F1 — auth.py `__context__` leak 백포트 (이중 리뷰 1R, 285 tests / 91.0%)
 
 `backend_kiwoom` A3-α C-1 발견 (`__context__` leak via `from None`) 의 동일 패턴을 **`KiwoomAuthClient`** (au10001 / au10002) 에 백포트. 9개 raise site (`_do_issue_token` 4 + `expires_at_kst` 1 + `revoke_token` 4) 를 변수 캡처 + except 밖 raise 패턴으로 리팩토링. 보안 일관성 — backend_kiwoom 의 모든 외부 호출 어댑터 (`auth.py`, `_client.py`, `stkinfo.py`) 가 단일 예외 chain 정책으로 수렴.

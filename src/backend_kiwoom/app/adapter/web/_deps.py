@@ -1,21 +1,36 @@
-"""FastAPI 의존성 — admin guard + TokenManager singleton.
+"""FastAPI 의존성 — admin guard + TokenManager / RevokeUseCase / SyncSectorUseCase factory.
 
-설계: endpoint-01-au10001.md § 7.1 / master.md § 6.5.
+설계: endpoint-01-au10001.md § 7.1 / endpoint-14-ka10101.md § 7.1 / master.md § 6.5.
 
 보안:
 - `require_admin_key` — `hmac.compare_digest` 로 timing-safe 비교
 - `admin_api_key` 미설정 (`""`) 시 fail-closed (401) — 운영 실수 방어
 - `X-API-Key` 헤더 부재 시 401
+
+Singleton 패턴 (모두 `lifespan` 에서 set):
+- TokenManager (α)
+- RevokeKiwoomTokenUseCase (β)
+- SyncSectorUseCaseFactory (A3-β) — alias → AsyncContextManager[UseCase], sync 마다
+  새 KiwoomClient 빌드 + close 보장
 """
 
 from __future__ import annotations
 
 import hmac
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 
 from fastapi import Depends, Header, HTTPException, status
 
+from app.application.service.sector_service import SyncSectorMasterUseCase
 from app.application.service.token_service import RevokeKiwoomTokenUseCase, TokenManager
 from app.config.settings import Settings, get_settings
+
+SyncSectorUseCaseFactory = Callable[[str], AbstractAsyncContextManager[SyncSectorMasterUseCase]]
+"""alias → AsyncContextManager[SyncSectorMasterUseCase] factory.
+
+`async with factory(alias) as use_case:` 패턴 — exit 시 KiwoomClient.close 보장.
+"""
 
 
 def get_settings_dep() -> Settings:
@@ -43,16 +58,18 @@ async def require_admin_key(
         )
 
 
+# =============================================================================
+# Singletons — lifespan 에서 set
+# =============================================================================
+
 _token_manager_singleton: TokenManager | None = None
+_revoke_use_case_singleton: RevokeKiwoomTokenUseCase | None = None
+_sync_sector_factory: SyncSectorUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
-    """TokenManager 싱글톤. lifespan 에서 set 하거나 dependency_overrides 로 테스트 주입.
-
-    α chunk 에서는 placeholder — main.py lifespan 이 set_token_manager 로 등록.
-    """
+    """TokenManager 싱글톤. lifespan 에서 set 하거나 dependency_overrides 로 테스트 주입."""
     if _token_manager_singleton is None:
-        # 운영 코드에서는 main.py 가 lifespan 에서 set_token_manager 호출. 미설정은 즉시 fail.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="TokenManager 미초기화",
@@ -64,16 +81,6 @@ def set_token_manager(manager: TokenManager) -> None:
     """lifespan 시작 시 호출 — TokenManager 주입."""
     global _token_manager_singleton
     _token_manager_singleton = manager
-
-
-def reset_token_manager() -> None:
-    """테스트 전용 — 싱글톤 리셋."""
-    global _token_manager_singleton, _revoke_use_case_singleton
-    _token_manager_singleton = None
-    _revoke_use_case_singleton = None
-
-
-_revoke_use_case_singleton: RevokeKiwoomTokenUseCase | None = None
 
 
 def get_revoke_use_case() -> RevokeKiwoomTokenUseCase:
@@ -92,12 +99,46 @@ def set_revoke_use_case(use_case: RevokeKiwoomTokenUseCase) -> None:
     _revoke_use_case_singleton = use_case
 
 
+def get_sync_sector_factory() -> SyncSectorUseCaseFactory:
+    """alias → AsyncContextManager[UseCase] factory. lifespan 에서 set."""
+    if _sync_sector_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sector UseCase factory 미초기화",
+        )
+    return _sync_sector_factory
+
+
+def set_sync_sector_factory(factory: SyncSectorUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — KiwoomClient 빌드 + UseCase 결합 factory."""
+    global _sync_sector_factory
+    _sync_sector_factory = factory
+
+
+def reset_token_manager() -> None:
+    """테스트 전용 — 모든 싱글톤 리셋."""
+    global _token_manager_singleton, _revoke_use_case_singleton, _sync_sector_factory
+    _token_manager_singleton = None
+    _revoke_use_case_singleton = None
+    _sync_sector_factory = None
+
+
+def reset_sync_sector_factory() -> None:
+    """테스트 전용 — sector factory 만 리셋."""
+    global _sync_sector_factory
+    _sync_sector_factory = None
+
+
 __all__ = [
+    "SyncSectorUseCaseFactory",
     "get_revoke_use_case",
     "get_settings_dep",
+    "get_sync_sector_factory",
     "get_token_manager",
     "require_admin_key",
+    "reset_sync_sector_factory",
     "reset_token_manager",
     "set_revoke_use_case",
+    "set_sync_sector_factory",
     "set_token_manager",
 ]

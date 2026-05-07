@@ -27,10 +27,18 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.kiwoom._client import KiwoomClient
 from app.adapter.out.kiwoom.auth import KiwoomAuthClient
+from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
 from app.adapter.out.persistence.session import get_engine, get_sessionmaker
-from app.adapter.web._deps import set_revoke_use_case, set_token_manager
+from app.adapter.web._deps import (
+    set_revoke_use_case,
+    set_sync_sector_factory,
+    set_token_manager,
+)
 from app.adapter.web.routers.auth import router as auth_router
+from app.adapter.web.routers.sectors import router as sectors_router
+from app.application.service.sector_service import SyncSectorMasterUseCase
 from app.application.service.token_service import (
     RevokeKiwoomTokenUseCase,
     TokenManager,
@@ -94,6 +102,35 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     set_token_manager(manager)
     set_revoke_use_case(revoke_uc)
 
+    # A3-β: SyncSectorUseCaseFactory — alias 단위 KiwoomClient 빌드 + close 보장.
+    # `async with factory(alias) as use_case:` 패턴으로 라우터에서 사용.
+    @asynccontextmanager
+    async def _sync_sector_factory(alias: str) -> AsyncIterator[SyncSectorMasterUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        # alias 의 환경 (prod/mock) 결정 — 자격증명 row 의 env 컬럼 기반
+        # 현재는 settings 의 default base_url_prod 사용 (mock 사용은 운영 dry-run 후 결정)
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            yield SyncSectorMasterUseCase(
+                session_provider=_session_provider,
+                stkinfo_client=stkinfo,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    set_sync_sector_factory(_sync_sector_factory)
+
     try:
         yield
     finally:
@@ -138,6 +175,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
     app.include_router(auth_router)
+    app.include_router(sectors_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

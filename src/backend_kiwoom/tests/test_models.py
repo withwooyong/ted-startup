@@ -19,6 +19,7 @@ from app.adapter.out.persistence.models import (
     KiwoomCredential,
     KiwoomToken,
     RawResponse,
+    Sector,
 )
 
 
@@ -163,3 +164,70 @@ async def test_raw_response_query_by_api_id(session: AsyncSession) -> None:
 
     rows = (await session.execute(select(RawResponse).where(RawResponse.api_id == "ka10086"))).scalars().all()
     assert len(rows) == 3
+
+
+# =============================================================================
+# Sector — Migration 002 / ka10101 업종 마스터
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_sector_table_columns(session: AsyncSession) -> None:
+    sec = Sector(
+        market_code="0",
+        sector_code="001",
+        sector_name="종합(KOSPI)",
+        group_no="1",
+    )
+    session.add(sec)
+    await session.flush()
+    await session.refresh(sec)
+
+    assert sec.id is not None
+    assert sec.market_code == "0"
+    assert sec.sector_code == "001"
+    assert sec.sector_name == "종합(KOSPI)"
+    assert sec.group_no == "1"
+    assert sec.is_active is True  # server_default true
+    assert sec.fetched_at is not None
+    assert sec.created_at is not None
+    assert sec.updated_at is not None
+
+
+@pytest.mark.asyncio
+async def test_sector_unique_market_code_sector_code(session: AsyncSession) -> None:
+    """동일 (market_code, sector_code) 중복 INSERT 시 IntegrityError."""
+    session.add(Sector(market_code="0", sector_code="dup", sector_name="첫번째"))
+    await session.flush()
+    session.add(Sector(market_code="0", sector_code="dup", sector_name="중복"))
+    with pytest.raises(IntegrityError):
+        await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_sector_market_code_check_constraint(session: AsyncSession) -> None:
+    """market_code 는 ('0','1','2','4','7') 만 허용 — '3' 거부."""
+    session.add(Sector(market_code="3", sector_code="001", sector_name="무효시장"))
+    with pytest.raises(IntegrityError):
+        await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_sector_same_code_across_different_markets_allowed(session: AsyncSession) -> None:
+    """동일 sector_code 라도 market_code 가 다르면 OK — UNIQUE 는 (market_code, sector_code) 복합."""
+    session.add(Sector(market_code="0", sector_code="001", sector_name="KOSPI 종합"))
+    session.add(Sector(market_code="1", sector_code="001", sector_name="KOSDAQ 종합"))
+    await session.flush()  # 예외 X
+
+    rows = (await session.execute(select(Sector).where(Sector.sector_code == "001"))).scalars().all()
+    assert len(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_sector_group_no_nullable(session: AsyncSession) -> None:
+    """group_no 는 NULL 허용 — 응답에 group 필드가 빈 문자열일 때 None 매핑."""
+    sec = Sector(market_code="0", sector_code="002", sector_name="대형주", group_no=None)
+    session.add(sec)
+    await session.flush()
+    await session.refresh(sec)
+    assert sec.group_no is None

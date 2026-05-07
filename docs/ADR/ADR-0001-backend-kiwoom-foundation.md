@@ -368,3 +368,73 @@ A3 chunk 분할: α (KiwoomClient + ka10101 어댑터 단위) → β (Migration 
 ### 9.5 다음 chunk
 
 A3-β — Migration 002 (sector 테이블) + Sector ORM + SectorRepository + SyncSectorMasterUseCase + 라우터 + KiwoomMaxPagesExceededError 라우터 매핑 (F3 통합).
+
+---
+
+## 10. Phase A3-β — sector 도메인 영속화 + UseCase + 라우터 (2026-05-08)
+
+### 10.1 결정
+
+ka10101 의 도메인 풀 체인을 단일 PR 로 구축. `KiwoomStkInfoClient.fetch_sectors` (A3-α 완료) → `SyncSectorMasterUseCase` (시장 단위 격리) → `SectorRepository` (PG ON CONFLICT upsert + 디액티베이션) → DB. 라우터 (`GET/POST /api/kiwoom/sectors`) 까지 포함. APScheduler weekly cron 은 A3-γ 로 분리.
+
+### 10.2 핵심 설계 결정
+
+| # | 결정 | 근거 |
+|---|------|------|
+| 1 | **시장 단위 격리** — UseCase 가 `for mrkt_tp in SUPPORTED_MARKETS` 순회, KiwoomError catch 시 `MarketSyncOutcome.error` 기록 + 다음 시장 진행 | 한 시장 호출 실패가 4 시장 적재를 막지 않음 (계획서 § 8.1) |
+| 2 | **시장 단위 트랜잭션** — `async with session_provider() as session, session.begin():` 으로 시장마다 새 세션 + 자체 commit | 시장 N DB 실패 시 그 시장만 rollback, 시장 1~N-1 변경 보존. session_provider 패턴은 TokenManager 와 일관 |
+| 3 | **디액티베이션 정책 B** (is_active=FALSE marking) | hard DELETE 회피 — FK 참조 안전 + 과거 데이터 보존. 응답 재등장 시 upsert 가 is_active=TRUE 복원 |
+| 4 | **upsert ON CONFLICT 갱신 필드** — sector_name / group_no / is_active=TRUE / fetched_at / updated_at | 응답에 등장하면 무조건 활성화 (재등장 복원) — 이름/group 변경도 자동 반영 |
+| 5 | **`populate_existing=True`** — list_by_market / list_all SELECT 시 ORM identity map 의 stale 객체 회피 | 같은 세션에서 bulk update 후 SELECT 시 캐싱된 객체가 DB 상태와 mismatch — 회귀 테스트 1건 (`test_upsert_many_reactivates_inactive_row`) 으로 잡힘 |
+| 6 | **`MarketCode = Literal["0","1","2","4","7"]`** + `SUPPORTED_MARKETS: tuple[MarketCode, ...]` | UseCase 의 hardcoded tuple 이 fetch_sectors 의 Literal 시그니처와 mypy strict 정합 |
+| 7 | **DB CHECK constraint** — `market_code IN ('0','1','2','4','7')` | Pydantic Literal + ORM CheckConstraint + DB CHECK 3중 방어. 무효값 INSERT 차단 (회귀 테스트 1건) |
+| 8 | **UNIQUE(market_code, sector_code)** 복합키 | upsert 키. 동일 sector_code 가 시장마다 다르게 등장 가능 — 단일 컬럼 UNIQUE 불가 |
+| 9 | **F3 통합** (가벼운 hint) — outcome.error 에 "MaxPages" 흔적 시 응답 헤더 `Retry-After: 60` 추가 | KiwoomMaxPagesExceededError 는 KiwoomError 자식이라 UseCase 가 outcome 으로 격리. 라우터는 200 + hint 헤더로 oncall 알람. 응답 코드/본문 변경 X |
+| 10 | **alias query 파라미터** (POST /sync) — admin 이 명시적으로 자격증명 alias 선택 | hardcoded alias 회피 — 운영 dry-run 시점에 자격증명 종류 결정. 다중 자격증명 운영 환경 호환 |
+| 11 | **SyncSectorUseCaseFactory** — `alias → AsyncContextManager[UseCase]`, `lifespan` 에서 set | sync 마다 새 KiwoomClient + close 보장 (Semaphore 상태 격리). dependency_overrides 로 테스트 주입 가능 |
+| 12 | **GET /sectors admin 불필요** — 조회만 / DB only | 키움 호출 없음. 외부 BFF 가 DB read 직접 — 부담 최소 |
+| 13 | **POST /sectors/sync admin 필요** | 키움 호출 발생 + DB 변경 — admin guard 강제 |
+| 14 | **`SectorOut.from_attributes=True`** — ORM Sector → API 응답 안전 매핑 | id 노출 — BIGSERIAL fingerprint 미미. 운영 페이징에 미사용 |
+| 15 | **`MarketSyncOutcomeOut.from_attributes=True`** — dataclass slots → Pydantic | 풀 체인 통합 테스트 (`test_router_post_sync_full_chain_writes_to_db`) 로 매핑 회귀 검증 |
+| 16 | **APScheduler 분리** — A3-γ 별도 PR | β graceful shutdown hook 과 충돌 검증 필요 + scheduler 모듈 새 도입 — chunk 단일 PR 1,500줄 이내 유지 |
+
+### 10.3 결과
+
+- 신규 파일 7개 + 확장 2개:
+  - `migrations/versions/002_kiwoom_sector.py` (신규)
+  - `app/adapter/out/persistence/models/sector.py` (신규) + `__init__.py` 등록
+  - `app/adapter/out/persistence/repositories/sector.py` (신규)
+  - `app/application/service/sector_service.py` (신규 — UseCase + 2 dataclass)
+  - `app/adapter/web/routers/sectors.py` (신규 — 2 라우터 + 3 Pydantic DTO)
+  - `app/adapter/web/_deps.py` (확장 — SyncSectorUseCaseFactory + getter/setter)
+  - `app/main.py` (확장 — sector router include + lifespan factory)
+  - 테스트: `test_migration_002.py`, `test_sector_repository.py`, `test_sector_service.py`, `test_sector_router.py`, `test_sector_router_integration.py` + `test_models.py` 확장
+- 테스트 +47 → **332 passed / coverage 91%** (이전 285 / 91%)
+- 핵심 파일 커버리지: sector_service 94% / sector_router 95% / sector_repository 100% / sector_model 100%
+- 이중 리뷰 1라운드 — **CRITICAL 0 / HIGH 0 / MEDIUM 3** (모두 정합성 OK, 추가 적용 없음) → PASS
+- ruff lint 0 / format 0 / mypy strict 0 (38 source files) / bandit 0
+- 5관문 verification 통과 (라우터 → 실 UseCase factory → MockTransport → testcontainers DB 풀 체인 1 케이스)
+
+### 10.4 운영 dry-run 보류 (DoD § 10.3)
+
+A3-α + F1 + A3-β 합산 코드 검증만. 운영 자격증명 1쌍 등록 후 일괄 검증 (DoD § 10.3):
+1. 5 시장 호출 성공 + 각 시장 row 수 (KOSPI ~30~50 추정)
+2. `code` 길이 분포 (3자리 가정 검증)
+3. `marketCode` String 가정 검증 (스펙 LIST 표기 → String 으로 fallback OK 인지)
+4. 페이지네이션 발생 여부 (KOSPI 50 미만이면 단일 페이지)
+5. 같은 sync 두 번 멱등성 (`total_upserted` 동일, `total_deactivated=0`)
+6. F3 hint 동작 — max_pages 한도 초과 케이스 (강제 max_pages=1 로 검증 가능)
+
+### 10.5 별도 후속 PR
+
+| # | 항목 | 우선순위 |
+|---|------|------|
+| **A3-γ** | APScheduler weekly cron (KST 일 03:00) — `fire_sector_sync` 콜백 + scheduler 모듈 + lifespan 통합 (β graceful shutdown 충돌 검증) | 다음 PR |
+| 운영 dry-run | DoD § 10.3 일괄 검증 | 자격증명 등록 후 |
+| F2 | KiwoomBusinessError.message scrub | low |
+| F4 | KiwoomClient instance 단일성 강제 (factory + lock) | Phase D |
+| F5 | next-key 없이 cont-yn=Y edge case | 운영 검증 후 |
+
+### 10.6 다음 chunk
+
+A3-γ — APScheduler weekly + scheduler 모듈 + lifespan 통합. 그 다음 운영 dry-run.
