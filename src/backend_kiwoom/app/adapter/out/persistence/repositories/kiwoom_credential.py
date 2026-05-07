@@ -43,9 +43,7 @@ class KiwoomCredentialRepository:
         self._session = session
         self._cipher = cipher
 
-    async def upsert(
-        self, *, alias: str, env: KiwoomEnv, credentials: KiwoomCredentials
-    ) -> KiwoomCredential:
+    async def upsert(self, *, alias: str, env: KiwoomEnv, credentials: KiwoomCredentials) -> KiwoomCredential:
         """alias UNIQUE 기반 upsert. 기존 row 있으면 ciphertext + key_version + is_active 갱신.
 
         env 는 Literal 로 도메인 계층에서 검증 — DB CheckConstraint 도달 전 차단.
@@ -95,6 +93,13 @@ class KiwoomCredentialRepository:
         row = await self.find_by_alias(alias)
         if row is None:
             return None
+        return self.decrypt_row(row)
+
+    def decrypt_row(self, row: KiwoomCredential) -> KiwoomCredentials:
+        """이미 fetch 된 row 를 평문으로 복호화. 추가 DB 쿼리 없음.
+
+        UseCase 가 find_by_alias() 로 row 검증 후 decrypt_row() 로 복호화 — 단일 쿼리 보장.
+        """
         appkey = self._cipher.decrypt(row.appkey_cipher, row.key_version)
         secretkey = self._cipher.decrypt(row.secretkey_cipher, row.key_version)
         return KiwoomCredentials(appkey=appkey, secretkey=secretkey)

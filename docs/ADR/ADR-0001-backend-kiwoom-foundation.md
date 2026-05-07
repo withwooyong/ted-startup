@@ -170,3 +170,53 @@ A2 — KiwoomClient 공통 트랜스포트 + KiwoomAuthClient (au10001/au10002) 
 3. SQLAlchemy `before_insert` event listener 로 raw_response scrub 자동 적용
 4. CI grep 룰 — f-string 내 평문 secret/token 삽입 PR 차단
 5. 자잘한 정리 — deepcopy memo 변조 방어, `expires_dt` 마스킹, `_capture_stdlib_log` 헬퍼 IndexError 가드
+
+---
+
+## 6. Phase A2-α — au10001 발급 경로 (2026-05-07)
+
+### 6.1 결정
+
+**A2 chunk 분할** — α (issue) 먼저, β (revoke + lifespan graceful shutdown) 별도 PR. 이유:
+- 작업계획서 1,212줄 (au10001 626 + au10002 586) + 인프라 7~10 신규 파일 + 테스트 4 신규 → 단일 PR 시 리뷰 부담 과다
+- 발급 경로만으로 운영 dry-run (DoD § 10.3 — expires_dt timezone 등) 검증 가능
+- β 의 graceful shutdown 은 lifespan 에 hook 만 추가 — α 토큰 발급 검증 후 빠르게 적층
+
+### 6.2 핵심 설계 결정
+
+| # | 항목 | 결정 | 이유 |
+|---|------|------|------|
+| 1 | 401/403 재시도 | **금지** | 자격증명 무차별 시도 timing leak 방어 (계획 §11.2) |
+| 2 | 429 재시도 | **금지** | 적대적 리뷰 H3 — RPS overrun + 자격증명 wrong key 가 같은 응답 → timing oracle |
+| 3 | tenacity retry 대상 | KiwoomUpstreamError 만 (5xx + 네트워크 + 파싱) | 4xx 는 즉시 fail-fast |
+| 4 | 토큰 캐시 | 메모리 only (`TokenManager`) | MVP 단일 워커. 다중 워커는 Phase H 결정 |
+| 5 | alias 별 동시 발급 합체 | `asyncio.Lock` + `dict.setdefault` (atomic) | defaultdict race 회피 (적대적 리뷰 H2) |
+| 6 | `TokenManager.max_aliases` | 1024 (default) | 적대적 리뷰 H1 — alias 폭증 lock proliferation DoS 방어 |
+| 7 | 무효 alias lock cleanup | 즉시 정리 | H1 — `CredentialNotFoundError` 발생 시 `_locks.pop(alias)` |
+| 8 | 세션 라이프사이클 | TokenManager 가 `session_provider` 주입 받아 매 발급 시 open + close | 적대적 리뷰 H4 — DB 풀 누수 차단 |
+| 9 | DB 쿼리 횟수 | `find_by_alias` + `decrypt_row` 1쿼리 | 1차 리뷰 HIGH — 이중 SELECT 회귀 차단 |
+| 10 | Pydantic ValidationError cause chain | `from None` | 적대적 리뷰 H5 — `ValidationError.input` 에 토큰 평문 보존 → cause 노출 차단 |
+| 11 | KiwoomBusinessError 메시지 | `super().__init__` 에 `message` 미포함 (attribute only) | 적대적 리뷰 M1 — Kiwoom `return_msg` attacker-influenced 누설 차단 |
+| 12 | expires_dt 잘못된 날짜 | `expires_at_kst()` 가 `KiwoomResponseValidationError` 매핑 | M2 — 라우터 500 stack trace 노출 방어 |
+| 13 | 응답 토큰 마스킹 | `mask_token` (tail 6, 25% cap) | L1 — 짧은 opaque 토큰 fallback 도 안전 |
+| 14 | 응답 expires_at 정밀도 | 분 단위 절단 | M5 — 발급 시각 fingerprint 차단 |
+| 15 | admin guard | `hmac.compare_digest` + `admin_api_key=""` fail-closed | timing-safe + 운영 실수 방어 |
+| 16 | 라우터 detail | alias / appkey / `return_msg` 평문 미포함 | M1 — HTTPException detail 비식별화 |
+
+### 6.3 결과
+
+- 신규 파일 8개 (코드) + 4개 (테스트, 1개 기존 확장)
+- 테스트 +43 → **204 passed / coverage 88.07%** (이전 161)
+- 이중 리뷰 사이클 1라운드 — CRITICAL 0 / HIGH 0 (적용 후)
+- ruff lint 0 / mypy strict 0 (app + new tests) / bandit 0 / pip-audit 0 CVE
+- 5관문 verification 통과 (compile / static / test / security / runtime smoke)
+
+### 6.4 운영 검증 보류 (β 시점에 일괄)
+
+DoD § 10.3 (운영 dry-run 필요) — α 단독 시점에 미수행:
+- [ ] `expires_dt` timezone (KST/UTC)
+- [ ] `authorization` 헤더 빈 문자열 vs 생략
+- [ ] DEBUG 로그로 응답 본문 확인 → JWT/hex/Kiwoom 평문 토큰 마스킹 회귀 검증
+- [ ] 자격증명 1쌍 등록 후 실제 토큰 발급/폐기 (β 와 함께)
+
+**β chunk 작업**: au10002 + lifespan graceful shutdown + RevokeKiwoomTokenUseCase + DELETE/POST 폐기 라우터 + revoke-by-raw-token + audit 로그 + 운영 dry-run.

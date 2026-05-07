@@ -15,7 +15,6 @@ from pydantic import ValidationError
 
 from app.config.settings import Settings, get_settings
 
-
 _KIWOOM_ENV_VARS = (
     "APP_NAME",
     "APP_ENV",

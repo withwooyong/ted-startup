@@ -74,9 +74,7 @@ class KiwoomCredentialCipher:
     def decrypt(self, cipher: bytes, key_version: int) -> str:
         fernet = self._fernets.get(key_version)
         if fernet is None:
-            raise UnknownKeyVersionError(
-                f"key_version={key_version} 미등록 — 마스터키 회전 상태 확인 필요"
-            )
+            raise UnknownKeyVersionError(f"key_version={key_version} 미등록 — 마스터키 회전 상태 확인 필요")
         try:
             return fernet.decrypt(cipher).decode("utf-8")
         except InvalidToken as exc:

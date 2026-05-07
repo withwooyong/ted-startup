@@ -7,6 +7,105 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] feat(kiwoom): Phase A2-α — au10001 KiwoomAuthClient 발급 경로 (이중 리뷰 1R / 204 tests / 88.07%)
+
+`backend_kiwoom` Phase A2 의 첫 chunk (α). au10001 접근토큰 발급 + KiwoomAuthClient + IssueKiwoomTokenUseCase + TokenManager + admin POST 라우터 + FastAPI 진입점. β chunk (au10002 폐기 + lifespan graceful shutdown) 는 별도 PR. 외부 호출 0 — `httpx.MockTransport` + testcontainers PG16. 운영 dry-run (DoD §10.3) 은 β 와 일괄.
+
+ted-run 풀 파이프라인 + 적대적 이중 리뷰. 1R 에서 CRITICAL/HIGH 4 + MEDIUM 5 (세션 누수 / lock 폭증 / ValidationError 토큰 누설 / 429 timing oracle / 이중 SELECT 등) → 전부 수정 후 CRITICAL/HIGH 0 PASS.
+
+### Added — `app/adapter/out/kiwoom/`
+
+- **`_exceptions.py`** (신규) — 5개 도메인 예외 + 베이스
+  - `KiwoomError` 베이스 / `KiwoomUpstreamError` (5xx · 네트워크 · 파싱) / `KiwoomCredentialRejectedError` (401/403) / `KiwoomBusinessError` (api_id+return_code, message attribute only — M1 적대적 리뷰) / `KiwoomRateLimitedError` (429) / `KiwoomResponseValidationError` (Pydantic)
+- **`auth.py`** (신규) — `KiwoomAuthClient` + `TokenIssueRequest`/`TokenIssueResponse` Pydantic 모델
+  - `httpx.AsyncClient` + tenacity `AsyncRetrying` (KiwoomUpstreamError 만 재시도 — 401/403/429/Pydantic 4xx 즉시 fail-fast)
+  - `expires_at_kst()` strptime ValueError 도메인 매핑 (M2)
+  - Pydantic `ValidationError` cause chain 차단 (`from None`) — `ValidationError.input` 에 토큰 평문 보존 (H5 적대적 리뷰)
+  - 응답 본문 어떤 경로로도 logger/예외 메시지에 미포함 — Kiwoom 평문 토큰은 패턴 매칭 마스킹 미보장
+  - `OSError` 포함 broader exception catch — ssl.SSLError 등 (M4)
+  - 테스트용 `max_attempts` / `retry_min_wait` / `retry_max_wait` 인자 (속도)
+
+### Added — `app/application/service/`
+
+- **`token_service.py`** (신규)
+  - `IssueKiwoomTokenUseCase.execute(alias)` — `find_by_alias` + `decrypt_row` 1쿼리 (이중 SELECT 회귀 차단, HIGH 1차 리뷰)
+  - `TokenManager.get(alias)` — alias 별 `asyncio.Lock` + `dict.setdefault` atomic + double-check pattern
+  - `TokenManager` `session_provider` 주입 — 매 발급마다 `async with session_provider() as session` 세션 lifecycle 보장 (H4 적대적 리뷰: DB 풀 누수 차단)
+  - `max_aliases` (default 1024) 캡 — alias 폭증 lock proliferation DoS 방어 (H1)
+  - 무효 alias (`CredentialNotFoundError`) 발생 시 `_locks.pop(alias)` 정리 (H1)
+  - `CredentialNotFoundError` / `CredentialInactiveError` / `AliasCapacityExceededError` 도메인 예외
+
+### Added — `app/adapter/web/`
+
+- **`_deps.py`** (신규) — admin guard + TokenManager 싱글톤
+  - `require_admin_key` — `hmac.compare_digest` timing-safe + `admin_api_key=""` fail-closed (401)
+  - `get_token_manager` / `set_token_manager` / `reset_token_manager`
+- **`routers/auth.py`** (신규) — `POST /api/kiwoom/auth/tokens` (admin only)
+  - `IssueTokenResponse` — 평문 토큰 미반환 (`mask_token` tail 6, 25% cap — L1)
+  - `expires_at` 분 단위 절단 — fingerprint 차단 (M5)
+  - HTTPException detail 비식별화 — alias / `return_msg` / appkey 평문 미포함 (M1)
+
+### Added — `app/main.py` (신규, α 최소 스켈레톤)
+
+- FastAPI `lifespan` — `setup_logging` + `KiwoomCredentialCipher` + `TokenManager` 싱글톤 등록 + engine dispose
+- session_provider 패턴 — `async_sessionmaker()` 호출이 AsyncSession 자체 async context manager 반환
+- `/health` 엔드포인트 + auth_router 등록
+- β 에서 graceful shutdown hook 추가 예정
+
+### Added — `app/application/dto/kiwoom_auth.py`
+
+- `mask_token(token, tail=6)` — 25% 자동 축소로 짧은 opaque 토큰 fallback 안전 (L1)
+
+### Added — `app/adapter/out/persistence/repositories/kiwoom_credential.py`
+
+- `decrypt_row(row)` — 이미 fetch 된 row 를 sync 복호화. 추가 DB 쿼리 회피 (HIGH 1차 리뷰)
+
+### Tests — 신규 4 파일 / +43 케이스
+
+- `tests/test_kiwoom_auth_client.py` (신규) — 14 케이스
+  - 정상 발급 / return_code != 0 / 빈 토큰 / expires_dt 형식 오류
+  - 401·403 재시도 금지 (1회만 호출 검증)
+  - 429 재시도 금지 검증 (H3 회귀)
+  - 5xx · 네트워크 오류 tenacity 3회 재시도
+  - 응답 본문 (Kiwoom 평문 토큰 모양) 어떤 경로로도 로그 미노출 (F3)
+  - `KiwoomBusinessError.__str__` attacker-influenced message 미포함 (M1)
+  - `expires_at_kst` 잘못된 날짜 → 도메인 예외 (M2)
+- `tests/test_token_service.py` (신규) — 12 케이스
+  - UseCase 정상 / 미등록 / 비활성 / 401 전파 / prod URL / 단일 SELECT 회귀
+  - TokenManager 캐시 hit / 만료 재발급 / 동시 5코루틴 → 1회 합체 (real async yield, H2)
+  - invalidate / 다중 alias 격리
+  - `max_aliases=2` capacity 초과 시 `AliasCapacityExceededError`
+  - 무효 alias 10회 후 `_locks` 정리 검증 (H1)
+- `tests/test_kiwoom_auth_router.py` (신규) — 10 케이스
+  - admin key 미지정 / 잘못 / 미설정 시 401 (fail-closed, monkeypatch fixture — M3)
+  - 정상 발급 — 응답에 토큰 평문 미포함 + expires_at 분 단위 절단 검증
+  - 404 alias 평문 detail 미포함
+  - 비활성 400 / 자격증명 거부 400 / 강제 갱신 (매번 invalidate)
+  - F5 회귀 — 응답에 appkey/secretkey 평문 미노출
+  - F5 회귀 — KiwoomBusinessError 시 `return_msg` 평문 detail 미포함
+- `tests/test_logging_masking.py` (확장) — au10001 회귀 3건
+  - 응답 dict token 키 [MASKED]
+  - 응답 본문 string interpolated JWT 자동 마스킹
+  - 요청 body appkey/secretkey 키 [MASKED]
+
+### Verification
+
+```
+Tests:     204 passed (이전 161 → +43)
+Coverage:  88.07% (목표 80% 초과; token_service 100%, _exceptions 100%, auth 91%)
+Lint:      ruff 0 / mypy strict 0 (app 32 files + new tests 4 files)
+Security:  bandit 0 issues (B105 nosec 1 기존) / pip-audit 0 CVE
+Compile:   py_compile 32 files clean
+Runtime:   uvicorn 기동 smoke OK — /health 200 + admin guard 401
+Reviews:   1R 이중 리뷰 (sonnet python-reviewer + opus security-reviewer 병렬 독립) — CRITICAL/HIGH 모두 적용
+```
+
+### β chunk 작업 (다음 PR)
+
+au10002 폐기 + lifespan graceful shutdown + `RevokeKiwoomTokenUseCase` + `TokenManager.peek/invalidate_all/alias_keys` + DELETE/POST 폐기 라우터 + revoke-by-raw-token + 운영 dry-run (DoD §10.3 일괄 검증).
+
+---
+
 ## [2026-05-07] security(kiwoom): Phase A2 사전 보안 PR — ADR-0001 § 3 #1·#2·#3 적용 (3-Round 이중 리뷰)
 
 `backend_kiwoom` Phase A2 (KiwoomAuthClient) 진입 전 보안 사각지대 차단. ADR-0001 § 3 미적용 4건 중 3건 (#1 정규식 보강 / #2 DTO 직렬화 차단 / #3 raw_response 토큰 scrub) 사전 적용. #4 마스터키 회전 자동화는 Phase B 후반 지연. 외부 호출 0.

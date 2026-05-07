@@ -161,9 +161,5 @@ async def test_raw_response_query_by_api_id(session: AsyncSession) -> None:
         )
     await session.flush()
 
-    rows = (
-        (await session.execute(select(RawResponse).where(RawResponse.api_id == "ka10086")))
-        .scalars()
-        .all()
-    )
+    rows = (await session.execute(select(RawResponse).where(RawResponse.api_id == "ka10086"))).scalars().all()
     assert len(rows) == 3

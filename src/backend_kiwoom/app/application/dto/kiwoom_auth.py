@@ -43,16 +43,10 @@ class KiwoomCredentials:
     def __reduce__(self) -> NoReturn:
         # __reduce_ex__ 가 항상 먼저 호출 — 도달 불가하지만 명시적 방어 (서브클래스가
         # __reduce_ex__ 를 미정의하는 경우에도 차단).
-        raise TypeError(
-            "KiwoomCredentials serialization is blocked — "
-            "pickle 직렬화는 secretkey 평문 노출 위험."
-        )
+        raise TypeError("KiwoomCredentials serialization is blocked — pickle 직렬화는 secretkey 평문 노출 위험.")
 
     def __reduce_ex__(self, protocol: SupportsIndex) -> NoReturn:
-        raise TypeError(
-            "KiwoomCredentials serialization is blocked — "
-            "pickle 직렬화는 secretkey 평문 노출 위험."
-        )
+        raise TypeError("KiwoomCredentials serialization is blocked — pickle 직렬화는 secretkey 평문 노출 위험.")
 
     def __getstate__(self) -> NoReturn:
         # Python 3.10+ slots dataclass 자동 생성 차단 — jsonpickle/dill 등 우회 방어.
@@ -62,10 +56,7 @@ class KiwoomCredentials:
         )
 
     def __setstate__(self, state: object) -> NoReturn:
-        raise TypeError(
-            "KiwoomCredentials state restoration is blocked — "
-            "역직렬화 경로의 객체 재구성 차단."
-        )
+        raise TypeError("KiwoomCredentials state restoration is blocked — 역직렬화 경로의 객체 재구성 차단.")
 
     def __copy__(self) -> KiwoomCredentials:
         """copy.copy 명시 정의 — `__reduce_ex__` raise 우회. 도메인 내부 복제는 정당."""
@@ -133,3 +124,16 @@ def mask_appkey(value: str, *, keep: int = 4) -> str:
 def mask_secretkey(value: str) -> str:
     """secretkey 는 전체 마스킹 — 어떤 글자도 노출 금지. 고정 길이 출력."""
     return "•" * 16
+
+
+def mask_token(token: str, *, tail: int = 6) -> str:
+    """토큰 평문 → tail 자리만 노출. tail 이 토큰의 25% 초과면 자동 축소 (L1 적대적 리뷰).
+
+    Kiwoom 토큰은 통상 150+ 자라 tail=6 안전. 짧은 opaque 형식 fallback 까지 방어.
+    """
+    if len(token) == 0:
+        return "•" * 4
+    safe_tail = min(tail, max(1, len(token) // 4))
+    if len(token) <= safe_tail:
+        return "•" * len(token)
+    return "••••" + token[-safe_tail:]

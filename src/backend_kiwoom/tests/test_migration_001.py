@@ -74,9 +74,7 @@ async def test_kiwoom_token_credential_id_unique(engine: AsyncEngine) -> None:
             uniques = insp.get_unique_constraints("kiwoom_token", schema="kiwoom")
             unique_idx = insp.get_indexes("kiwoom_token", schema="kiwoom")
             has_uq = any("credential_id" in u["column_names"] for u in uniques)
-            has_idx = any(
-                idx.get("unique") and "credential_id" in idx.get("column_names", []) for idx in unique_idx
-            )
+            has_idx = any(idx.get("unique") and "credential_id" in idx.get("column_names", []) for idx in unique_idx)
             return has_uq or has_idx
 
         assert await conn.run_sync(_check)

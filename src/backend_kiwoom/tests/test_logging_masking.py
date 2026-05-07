@@ -350,9 +350,7 @@ def test_stdlib_logger_extra_fields_dropped_by_default() -> None:
 
 def test_stdlib_logger_integration_scrubs_jwt_in_message() -> None:
     jwt_ish = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZWQifQ.abcdefghijklmnop"
-    output = _capture_stdlib_log(
-        lambda: logging.getLogger("app.test").warning("토큰 응답: %s (만료 86400s)", jwt_ish)
-    )
+    output = _capture_stdlib_log(lambda: logging.getLogger("app.test").warning("토큰 응답: %s (만료 86400s)", jwt_ish))
     assert jwt_ish not in output
     assert "[MASKED_JWT]" in output
 
@@ -389,3 +387,45 @@ def test_setup_logging_is_idempotent() -> None:
     logging.getLogger().addHandler(foreign_handler)
     setup_logging(log_level="DEBUG", json_output=False)
     assert foreign_handler in logging.getLogger().handlers
+
+
+# -----------------------------------------------------------------------------
+# au10001 회귀 — 응답 본문 token/expires_dt 마스킹
+# -----------------------------------------------------------------------------
+
+
+def test_au10001_response_token_key_masked_in_dict() -> None:
+    """au10001 응답 dict 에 logger 가 노출하면 token 키는 [MASKED]."""
+    body = {
+        "expires_dt": "20260507083713",
+        "token_type": "bearer",
+        "token": "WQJCwyqInphKnR3bSRtB9NE1lv",
+        "return_code": 0,
+        "return_msg": "ok",
+    }
+    masked = _scan(body)
+    assert masked["token"] == "[MASKED]"
+    assert "WQJCwyqInphKnR3bSRtB9NE1lv" not in json.dumps(masked)
+
+
+def test_au10001_response_jwt_in_message_masked_at_logger() -> None:
+    """au10001 응답이 잘못 string interpolated 돼 event 에 들어가도 JWT 패턴 자동 마스킹."""
+    jwt_ish = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZWQifQ.abcdefghijklmnopqrstuvwxyz"
+    output = _capture_stdlib_log(
+        lambda: logging.getLogger("app.test").info("au10001 response: token=%s expires=20260507083713", jwt_ish)
+    )
+    assert jwt_ish not in output
+    assert "[MASKED_JWT]" in output
+
+
+def test_au10001_request_body_appkey_secretkey_masked() -> None:
+    """au10001 요청 body 가 dict 로 logger 에 들어가면 appkey/secretkey 키 [MASKED]."""
+    request_body = {
+        "grant_type": "client_credentials",
+        "appkey": "AxserEsdcredca1234567890",
+        "secretkey": "SEefdcwcforehDre2fdvc1234567890",
+    }
+    masked = _scan(request_body)
+    assert masked["appkey"] == "[MASKED]"
+    assert masked["secretkey"] == "[MASKED]"
+    assert masked["grant_type"] == "client_credentials"  # 중립 키 보존
