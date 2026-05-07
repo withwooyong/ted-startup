@@ -7,6 +7,87 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] feat(kiwoom): Phase A1 — 기반 인프라 코드화 첫 chunk
+
+`backend_kiwoom` Phase A 의 A1 chunk (기반 인프라) 코드화. 외부 키움 API 호출 0 — Settings + Fernet Cipher + structlog 마스킹 + Migration 001 (3 테이블) + Repository + 117 테스트. 25 endpoint 계획서 완성 후 첫 코드. ADR-0001 기록.
+
+### Added — backend_kiwoom 신규 프로젝트
+
+- **프로젝트 골격**
+  - `pyproject.toml` (uv lock 기반, Python 3.12+, ruff + mypy strict + pytest + bandit)
+  - `Dockerfile` (multi-stage builder/runtime, uv 0.11 digest pin, appuser uid 1001)
+  - `alembic.ini` (path_separator=os, version_table_schema=kiwoom)
+  - `.env.example` (8 env field)
+  - `README.md` (상태 + 디렉토리 + 보안 원칙)
+- **Settings** (`app/config/settings.py`)
+  - Pydantic v2 BaseSettings — 8 KIWOOM_* 필드
+  - `kiwoom_default_env: Literal["prod", "mock"]`
+  - `kiwoom_credential_master_key` 빈 값 → fail-fast 로 cipher 초기화 차단
+- **KiwoomCredentialCipher** (`app/security/kiwoom_credential_cipher.py`)
+  - Fernet (AES-128-CBC + HMAC-SHA256) 대칭 암호화
+  - `key_version` 다중 관리 — 회전 대비
+  - 4 예외 계층: `KiwoomCredentialCipherError` / `MasterKeyNotConfiguredError` / `UnknownKeyVersionError` / `DecryptionFailedError`
+  - 외부 `InvalidToken` 누출 차단 (메시지에 ciphertext/plaintext 미포함)
+- **structlog 마스킹** (`app/observability/logging.py`)
+  - 2층 방어: 키 매칭 (SENSITIVE_KEYS 17개 + SUFFIXES 19개) + JWT/40+hex 정규식 scrub
+  - `_scan` 재귀: dict/list/tuple/**set/frozenset**/str
+  - stdlib `logging` 통합 — `logger.info()` 호출도 자동 마스킹
+- **DTO** (`app/application/dto/kiwoom_auth.py`)
+  - `KiwoomCredentials` (frozen, secretkey `__repr__` 마스킹)
+  - `IssuedToken` (`__post_init__` tz-aware 강제 — KST 응답 파싱 시 9시간 오차 차단)
+  - `MaskedKiwoomCredentialView` (외부 응답용)
+  - `mask_appkey` (tail 4자 노출) / `mask_secretkey` (전체 마스킹 16자 고정)
+- **ORM 모델** (`app/adapter/out/persistence/models/`)
+  - `KiwoomCredential` (alias UNIQUE, env CHECK ('prod'|'mock'), BYTEA cipher 컬럼, key_version)
+  - `KiwoomToken` (credential_id UNIQUE → 자격증명당 1, BYTEA token_cipher, expires_at TZ)
+  - `RawResponse` (api_id/request_hash 인덱스, JSONB request/response_payload)
+- **Repository** (`app/adapter/out/persistence/repositories/kiwoom_credential.py`)
+  - `upsert(*, alias, env: Literal["prod", "mock"], credentials)` — ON CONFLICT DO UPDATE + `func.now()` (excluded.updated_at NULL 주입 방어)
+  - `find_by_alias` / `get_decrypted` / `get_masked_view` / `delete`
+  - `deactivate(alias)` — 소프트 비활성화 + 멱등성 (`is_active.is_(True)` 필터)
+  - `list_active_by_env(env)` — 배치/스케줄러용
+  - `_helpers.rowcount_of()` — `result.rowcount` mypy attr-defined 우회
+- **Migration 001** (`migrations/versions/001_init_kiwoom_schema.py`)
+  - `CREATE SCHEMA IF NOT EXISTS kiwoom`
+  - 3 테이블 + 인덱스 6개 + UNIQUE/CHECK 제약
+  - `migrations/env.py` — asyncpg → psycopg2 URL 자동 치환
+  - downgrade 안전판: `kiwoom_credential` row 0 보장. 데이터 있으면 `RAISE EXCEPTION`
+
+### Added — 테스트 (117 passed / coverage 94.61%)
+
+- `tests/conftest.py` — testcontainers PG16 세션 픽스처 + master_key + 트랜잭션 격리 session
+- `tests/test_kiwoom_credential_cipher.py` (12) — round-trip + 회전 + 빈/잘못된 마스터키 + 누출 검증
+- `tests/test_settings.py` (9) — Literal 검증 + env override + 환경 격리 monkeypatch
+- `tests/test_logging_masking.py` (53) — _scan / _scrub_string / mask_sensitive / setup_logging stdlib 통합 + set/frozenset 추가
+- `tests/test_kiwoom_auth_dto.py` (14) — IssuedToken tz-aware + mask_appkey/secretkey + KiwoomCredentials repr
+- `tests/test_models.py` (7) — ORM schema + UNIQUE/CHECK 제약 + JSONB
+- `tests/test_kiwoom_credential_repository.py` (15) — upsert/find/get_decrypted/masked_view/delete/deactivate/list_active_by_env
+- `tests/test_migration_001.py` (7) — schema/테이블/인덱스/BYTEA/JSONB + upgrade/downgrade 멱등성
+
+### Quality — ted-run 풀 파이프라인 검증
+
+- **Step 0 TDD**: 8 파일 / 117 테스트 작성 (red 확인)
+- **Step 1 구현**: 38 파일 / ~1,500줄
+- **Step 2a 1차 리뷰** (sonnet): HIGH 1건 (`excluded.updated_at` NULL) + MEDIUM 5건 → 즉시 수정 + 재리뷰 PASS
+- **Step 2b 적대적 리뷰** (opus, 보안 민감 분류): CRITICAL/HIGH 0건 PASS
+- **Step 3 Verification**: ruff 0 / mypy strict 0 / pytest 117 passed / coverage 94.61% / bandit 0 / pip-audit 0 CVE / alembic 양방향 OK
+- **Step 4 E2E**: 자동 생략 (UI 변경 없음)
+
+### Decision Records
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` — 스택/구조/보안 결정 + Phase B 진입 전 결정 4건 명시 (secretkey 정규식 보강 / DTO 직렬화 우회 방어 / raw_response 토큰 평문 차단 / 마스터키 회전 자동화)
+
+### Pending — A2 (인증 클라이언트) 진입 시 처리
+
+ADR-0001 § 3 의 4건은 A2 코드 작성 **직전** 결정 권고:
+
+1. secretkey 정규식 보강 (logging.py) — 키움 자격증명 형식 매칭 가능한 패턴 추가
+2. KiwoomCredentials 직렬화 차단 (`__reduce__`/SecretStr) — DTO 사용처 늘기 전 가드
+3. raw_response 의 au10001 응답 토큰 필드 제거 정책 — UseCase 레이어 분기
+4. 마스터키 회전 자동화 (`scripts/rotate_master_key.py`) — Settings 다중 키 필드
+
+---
+
 ## [2026-05-07] docs(kiwoom): Phase E·F·G 계획서 11건 — 25 endpoint 100% 완성 (uncommitted)
 
 `backend_kiwoom` Phase E (시그널 보강 — 공매도/대차) 3건 + Phase F (순위 — 5종) 5건 + Phase G (투자자별 매매) 3건 = **11 endpoint 계획서** 일괄 완성. 본 세션도 **계획서만 작성** (코드 0줄). **25 endpoint 계획서 100% 완성** (~25,500줄 누적). 다음 단계는 Phase A 부터 코드화 착수.
