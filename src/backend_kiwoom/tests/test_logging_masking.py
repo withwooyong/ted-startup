@@ -56,6 +56,150 @@ def test_scrub_string_ignores_short_hex() -> None:
     assert _scrub_string("alias=prod-main") == "alias=prod-main"
 
 
+# -----------------------------------------------------------------------------
+# ADR-0001 § 3 #1 — 키움 secretkey/token 정규식 보강 (prefix-aware)
+# 적대적 리뷰 Round 2 (HIGH-A) 반영: 운영 식별자 (trace_id, correlation_id, PascalCase) 보존
+# 위해 prefix-aware 매칭으로 좁힘. `secret=/token=/appkey=` 등 명시 prefix 뒤의 value 만 매칭.
+# 1차 방어는 dict 키 매칭 (`SENSITIVE_KEYS`). 본 정규식은 f-string 평문 삽입 보조 안전망.
+# -----------------------------------------------------------------------------
+
+
+# ----- prefix-aware 매칭 (secret/token 평문 f-string) -----
+
+
+def test_scrub_string_masks_secretkey_with_prefix_min_16chars() -> None:
+    """`secretkey=Abc...` (16자 value) — prefix-aware 매칭."""
+    secret = "Abc123Def456Ghi7"  # 16자
+    assert _scrub_string(f"secretkey={secret}") == "secretkey=[MASKED_SECRET]"
+
+
+def test_scrub_string_masks_token_prefix_150chars() -> None:
+    """token=... 150자 운영 토큰 형식."""
+    token = "WQJCwyqInph" + "ABCdef0123" * 13 + "X" * 9  # 150자
+    out = _scrub_string(f"token={token}")
+    assert "[MASKED_SECRET]" in out
+    assert token not in out
+
+
+def test_scrub_string_masks_appkey_prefix_with_colon() -> None:
+    """`appkey: value` — `:` 구분도 매칭."""
+    secret = "AbCdEfGhIjKlMnOp"  # 16자
+    out = _scrub_string(f"appkey: {secret}")
+    assert "[MASKED_SECRET]" in out
+    assert secret not in out
+
+
+def test_scrub_string_masks_password_prefix() -> None:
+    """일반 password 도 매칭."""
+    out = _scrub_string("password=SuperPassword12345")
+    assert "[MASKED_SECRET]" in out
+    assert "SuperPassword12345" not in out
+
+
+def test_scrub_string_masks_access_token_prefix() -> None:
+    """`access_token=value` 매칭."""
+    secret = "AbCdEfGhIjKlMnOp"  # 16자
+    out = _scrub_string(f"access_token={secret}")
+    assert "[MASKED_SECRET]" in out
+
+
+def test_scrub_string_masks_base64_padding_in_value() -> None:
+    """base64 padding `==` 직전 본체만 매칭 (padding 자체는 비밀 아님)."""
+    secret = "AbCdEfGhIjKl+MnOpQr/StUvWxYz1234567890"  # 38자 base64
+    out = _scrub_string(f"token={secret}==")
+    assert "[MASKED_SECRET]" in out
+    assert secret not in out
+
+
+def test_scrub_string_prefix_match_case_insensitive() -> None:
+    """prefix 케이스 변경 (`SecretKey`/`TOKEN`) 도 매칭."""
+    out_pascal = _scrub_string("SecretKey=Abc123Def456Ghi7")
+    out_upper = _scrub_string("TOKEN=Abc123Def456Ghi7")
+    assert "[MASKED_SECRET]" in out_pascal
+    assert "[MASKED_SECRET]" in out_upper
+
+
+# ----- 운영 식별자 보존 (HIGH-A 회귀 방지) -----
+
+
+def test_scrub_string_preserves_trace_id() -> None:
+    """trace_id 32자 hex 는 디버깅에 필수 — prefix 가 secret/token 아니면 통과."""
+    s = "trace_id=0123456789abcdef0123456789abcdef"
+    assert _scrub_string(s) == s
+
+
+def test_scrub_string_preserves_correlation_id() -> None:
+    """correlation_id 보존."""
+    s = "correlation_id=req1234567890abcdef"
+    assert _scrub_string(s) == s
+
+
+def test_scrub_string_preserves_pascal_case_class_name() -> None:
+    """PascalCase 클래스명 보존 — 운영 로그·스택트레이스 가독성."""
+    assert _scrub_string("class=KiwoomCredentialsRepository") == "class=KiwoomCredentialsRepository"
+    assert _scrub_string("ConcreteRepositoryImpl") == "ConcreteRepositoryImpl"
+
+
+def test_scrub_string_preserves_build_id() -> None:
+    """build_id/version_id 보존 — secret/token prefix 아니면 통과."""
+    s = "build_id=abc123def4567890"
+    assert _scrub_string(s) == s
+
+
+def test_scrub_string_preserves_user_id() -> None:
+    """user_id 같은 식별자 보존."""
+    s = "user_id=USER1234567890ABCDEF"
+    assert _scrub_string(s) == s
+
+
+# ----- JWT/HEX 패턴 우선 + 일반 보존 -----
+
+
+def test_scrub_string_jwt_pattern_takes_precedence() -> None:
+    """JWT 형식이면 [MASKED_JWT] 로 우선 처리."""
+    jwt_ish = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZWQifQ.abcdefghijklmnopqrstuvwxyz0123456789"
+    out = _scrub_string(jwt_ish)
+    assert "[MASKED_JWT]" in out
+
+
+def test_scrub_string_hex_pattern_still_works() -> None:
+    """40자 hex digest — `[MASKED_HEX]`."""
+    hex_str = "a" * 40
+    out = _scrub_string(hex_str)
+    assert "[MASKED_HEX]" in out
+
+
+def test_scrub_string_does_not_mask_iso_timestamp() -> None:
+    """ISO 타임스탬프 보존."""
+    ts = "2026-05-07T09:00:00+09:00"
+    assert _scrub_string(ts) == ts
+
+
+def test_scrub_string_does_not_mask_long_dotted_path() -> None:
+    """dot path 보존."""
+    s = "app.adapter.out.kiwoom.persistence.repositories.credential_repository"
+    assert _scrub_string(s) == s
+
+
+def test_scrub_string_does_not_mask_alias() -> None:
+    """alias 형식 보존."""
+    s = "alias=prod-main-001"
+    assert _scrub_string(s) == s
+
+
+def test_scrub_string_does_not_mask_uuid() -> None:
+    """UUID 보존."""
+    uuid = "550e8400-e29b-41d4-a716-446655440000"
+    assert _scrub_string(uuid) == uuid
+
+
+def test_scrub_string_does_not_mask_bare_alphanum_without_prefix() -> None:
+    """prefix 없는 영숫자 16자 이상은 매칭 안 됨 — secret 인지 알 수 없음.
+    1차 방어는 dict 키 매칭. caller 가 f-string 평문 삽입 시 prefix 명시 책임."""
+    bare = "Abc123Def456Ghi789"  # 18자, prefix 없음
+    assert _scrub_string(bare) == bare
+
+
 def test_scrub_string_preserves_non_sensitive() -> None:
     original = "키움 토큰 발급 성공 (expires_dt=20251107083713)"
     assert _scrub_string(original) == original

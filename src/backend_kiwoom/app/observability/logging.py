@@ -98,16 +98,37 @@ def _is_sensitive_key(key: str) -> bool:
 _JWT_PATTERN = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
 # 40+ hex — SHA-1/SHA-256 digest, 일부 토큰 형식. 6자리 stock_code 는 매칭 안 됨.
 _HEX_PATTERN = re.compile(r"\b[0-9a-fA-F]{40,}\b")
+# 키움 secretkey/appkey/token prefix-aware 매칭 (ADR-0001 § 3 #1, 적대적 리뷰 Round 2 HIGH-A 반영):
+# - 운영 식별자 (trace_id, correlation_id, PascalCase, build_id) 광범위 false positive 차단.
+# - prefix 화이트리스트: secretkey/appkey/token/access_token/refresh_token/password 등 명시 prefix 뒤에
+#   `=` 또는 `:` 로 구분된 16~1024자 영숫자+base64(`+/`) value 만 매칭.
+# - `\b` word boundary + `[:=]\s*` 구분자 강제로 변수 prefix 가 비밀 의도일 때만 마스킹.
+# - 1차 방어는 dict 키 매칭 (`SENSITIVE_KEYS`). 본 정규식은 f-string 평문 삽입 보조 안전망.
+# - prefix 없는 영숫자 평문 (`bare`) 은 매칭 안 됨 — caller 가 f-string 작성 시 prefix 명시 책임.
+_KIWOOM_SECRET_PATTERN = re.compile(
+    r"(\b(?:secretkey|secret_key|secret|appkey|app_key|access_token|refresh_token|token|password)"
+    r"\s*[:=]\s*)[A-Za-z0-9+/]{16,1024}\b",
+    re.IGNORECASE,
+)
 
 _MASKED = "[MASKED]"
 _MASKED_JWT = "[MASKED_JWT]"
 _MASKED_HEX = "[MASKED_HEX]"
+_MASKED_SECRET = "[MASKED_SECRET]"  # nosec B105 — 마스킹 라벨, 실제 secret 아님
 
 
 def _scrub_string(s: str) -> str:
-    """문자열 내부의 JWT/hex 패턴 치환."""
+    """문자열 내부의 JWT/hex/키움 secretkey 패턴 치환.
+
+    적용 순서:
+    1. JWT (`eyJ` 접두 + 3-segment) — 가장 특수한 형태부터
+    2. 40+자 hex — SHA digest 계열
+    3. 키움 prefix-aware secret/token (prefix 보존, value 만 [MASKED_SECRET])
+    """
     s = _JWT_PATTERN.sub(_MASKED_JWT, s)
     s = _HEX_PATTERN.sub(_MASKED_HEX, s)
+    # group 1 = prefix+separator 보존, value 부분만 [MASKED_SECRET] 로 치환
+    s = _KIWOOM_SECRET_PATTERN.sub(rf"\g<1>{_MASKED_SECRET}", s)
     return s
 
 

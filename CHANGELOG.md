@@ -7,6 +7,63 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] security(kiwoom): Phase A2 사전 보안 PR — ADR-0001 § 3 #1·#2·#3 적용 (3-Round 이중 리뷰)
+
+`backend_kiwoom` Phase A2 (KiwoomAuthClient) 진입 전 보안 사각지대 차단. ADR-0001 § 3 미적용 4건 중 3건 (#1 정규식 보강 / #2 DTO 직렬화 차단 / #3 raw_response 토큰 scrub) 사전 적용. #4 마스터키 회전 자동화는 Phase B 후반 지연. 외부 호출 0.
+
+ted-run 풀 파이프라인 + 3-Round 적대적 이중 리뷰 사이클. R1 에서 CRITICAL 3 + HIGH 4 발견 → R2 에서 5건 수정 + HIGH-A (정규식 운영 식별자 false positive) 신규 발견 → R3 에서 prefix-aware 정규식으로 수정 → CRITICAL/HIGH 0건 PASS.
+
+### Added — `app/security/scrub.py` (신규)
+
+- **`scrub_token_fields(payload, api_id) → dict`** helper
+  - 화이트리스트 기반: `au10001` → `{token, expires_dt}` / `au10002` → `{token, appkey, secretkey}`
+  - api_id `.strip().lower()` 정규화 + 인증 endpoint(`au*`) 미등록 시 ValueError fail-closed
+  - 비인증 endpoint(`ka*` 등) 통과
+  - key 매칭 case-insensitive (`Token`/`TOKEN` 우회 방어)
+  - 원본 dict 보존 — 새 dict 반환 (caller 가 token 다른 경로 사용 가능)
+  - `[SCRUBBED]` 치환 (필드 삭제 X)
+
+### Changed — `app/observability/logging.py`
+
+- **`_KIWOOM_SECRET_PATTERN`** prefix-aware 정규식 도입 (R3)
+  - Before: 부재 → After: `(\b(?:secretkey|secret_key|secret|appkey|app_key|access_token|refresh_token|token|password)\s*[:=]\s*)[A-Za-z0-9+/]{16,1024}\b` (re.IGNORECASE)
+  - `_scrub_string` 적용 순서: JWT → HEX → 키움 prefix-aware secret/token
+  - group 1 (prefix+separator) 보존 + value 만 `[MASKED_SECRET]` 치환
+  - 운영 식별자 (trace_id / correlation_id / PascalCase 클래스명 / build_id) 보존
+- `_MASKED_SECRET = "[MASKED_SECRET]"` 추가 (`# nosec B105` — 마스킹 라벨)
+
+### Changed — `app/application/dto/kiwoom_auth.py`
+
+- **`KiwoomCredentials` 직렬화 차단** (다층 방어)
+  - `__reduce__` / `__reduce_ex__(protocol: SupportsIndex)` raise — pickle 직접 차단
+  - `__getstate__` / `__setstate__` raise — Python 3.10+ slots dataclass 자동 생성 우회 차단 (jsonpickle/dill/cloudpickle)
+  - `__copy__` / `__deepcopy__` 명시 정의 — 도메인 내부 복제 허용 (`memo[id(self)] = result`)
+- Known limitation: `copyreg.dispatch_table[KiwoomCredentials]` 등록 시 type-level 우회 가능 (Python 본질). 회귀 표시 테스트로 명시.
+
+### Tests — +44 케이스 (총 161 passed / coverage 94.94%)
+
+- `tests/test_scrub.py` (신규) — 16 케이스 (au10001/au10002 normal + edge + 정규화 + case-insensitive + fail-closed)
+- `tests/test_kiwoom_auth_dto.py` — pickle/asdict→logger/copy/json/vars/getstate/setstate/copyreg 회귀 6 케이스 추가
+- `tests/test_logging_masking.py` — prefix-aware 매칭 14 케이스 + 운영 식별자 보존 6 케이스 추가
+
+### Verification (5관문)
+
+- 3-1 컴파일 import smoke OK
+- 3-2 ruff 0 / mypy strict 0
+- 3-3 161 passed / coverage 94.94% (목표 80% 초과)
+- 3-4 bandit 0 (B105 nosec) / pip-audit 0 CVE
+- 3-5 마이그레이션 변경 없음 (skip)
+
+### Known Limitations (별도 후속 PR)
+
+- `_KIWOOM_SECRET_PATTERN` 화이트리스트 확장 (`client_secret`/`bearer`/`apikey`/`private_key`)
+- `_TOKEN_FIELDS_BY_API` allow-list 전환 (R1 HIGH-4)
+- SQLAlchemy `before_insert` event listener 로 raw_response scrub 자동 적용
+- CI grep 룰 — f-string 내 평문 secret/token 삽입 PR 차단
+- `_capture_stdlib_log` 헬퍼 IndexError 가드, deepcopy memo 변조 방어, `expires_dt` 마스킹
+
+---
+
 ## [2026-05-07] feat(kiwoom): Phase A1 — 기반 인프라 코드화 첫 chunk
 
 `backend_kiwoom` Phase A 의 A1 chunk (기반 인프라) 코드화. 외부 키움 API 호출 0 — Settings + Fernet Cipher + structlog 마스킹 + Migration 001 (3 테이블) + Repository + 117 테스트. 25 endpoint 계획서 완성 후 첫 코드. ADR-0001 기록.

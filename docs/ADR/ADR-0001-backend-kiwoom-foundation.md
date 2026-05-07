@@ -66,25 +66,107 @@ downgrade 안전판: `kiwoom_credential` row 0 보장. 데이터 보존 시 `RAI
 
 `__post_init__` 에서 `expires_at.tzinfo is None` → `ValueError`. 키움 응답 `expires_dt` 가 KST 문자열이라 파싱 시 tzinfo 누락 시 만료 판정 9시간 오차 위험 차단.
 
-## 3. 의도적으로 미적용 (Phase B 진입 전 결정)
+## 3. 의도적으로 미적용 (Phase B 진입 전 결정) — **2026-05-07 후속 PR 에서 #1·#2·#3 적용 완료**
 
-| 항목 | 사유 | 결정 시점 |
-|------|------|-----------|
-| **secretkey 정규식 보강 (M1)** | 키움 secretkey 형식 (40~50자 영숫자) 이 JWT/40+hex 패턴에 매칭 안 됨. f-string 으로 평문 logger 삽입 시 키 매칭 우회 가능 | A2 진입 전 — KiwoomAuthClient 작성 직전 |
-| **DTO 직렬화 우회 방어 (M2)** | `dataclasses.asdict(creds)` 로 dict 변환 후 키 rename 하면 secretkey 노출 가능. SecretStr wrapper 또는 `__reduce__` 차단 | A2 진입 전 |
-| **raw_response 토큰 평문 저장 차단 (M4)** | au10001 응답을 raw_response 에 저장하면 access_token 평문 BYTEA 가 아닌 JSONB 에 보관됨. UseCase 레이어에서 api_id == "au10001" 응답은 raw_response skip 또는 토큰 필드 제거 후 저장 | A2 진입 전 (au10001 코드 작성 직전) |
-| **마스터키 회전 자동화** | `_fernets[2] = Fernet(new_key)` 다중 버전 구조는 있지만 실제 회전 마이그레이션 스크립트 부재. Settings 다중 키 필드 (`KIWOOM_CREDENTIAL_MASTER_KEY_V1`, `_V2`) 도 미정의 | Phase B 후반 |
-| **assert → raise 적용** | A1 에서 `upsert` 에 적용 완료. 다른 경로는 발견 시 적용 | 발견 시 즉시 |
+| 항목 | 사유 | 결정 시점 | 상태 |
+|------|------|-----------|------|
+| **secretkey 정규식 보강 (#1)** | 키움 secretkey 형식이 JWT/40+hex 패턴에 매칭 안 됨. f-string 으로 평문 logger 삽입 시 키 매칭 우회 가능 | A2 진입 전 | ✅ **적용** — `_KIWOOM_SECRET_PATTERN` prefix-aware 매칭 도입 (§ 3.1) |
+| **DTO 직렬화 우회 방어 (#2)** | `dataclasses.asdict(creds)` / `pickle.dumps(creds)` / `__getstate__()` 등 직렬화 경로 secretkey 평문 노출 위험 | A2 진입 전 | ✅ **적용** — `__reduce__`/`__reduce_ex__`/`__getstate__`/`__setstate__` raise (§ 3.2) |
+| **raw_response 토큰 평문 저장 차단 (#3)** | au10001/au10002 응답·요청 본문이 raw_response JSONB 에 평문 저장 위험 | A2 진입 전 | ✅ **적용** — `app/security/scrub.py` 의 `scrub_token_fields(payload, api_id)` helper (§ 3.3) |
+| **마스터키 회전 자동화 (#4)** | `_fernets[2] = Fernet(new_key)` 다중 버전 구조는 있지만 실제 회전 마이그레이션 스크립트 부재 | Phase B 후반 | ⏸️ **지연** — 운영 자격증명 발급 후 회전 시점에 결정 (§ 3.4) |
+| **assert → raise 적용** | A1 에서 `upsert` 에 적용 완료. 다른 경로는 발견 시 적용 | 발견 시 즉시 | ✅ A1 적용 |
+
+### 3.1 secretkey 정규식 prefix-aware 매칭 (#1 적용 — 2026-05-07)
+
+**최종 형태** (`app/observability/logging.py`):
+
+```python
+_KIWOOM_SECRET_PATTERN = re.compile(
+    r"(\b(?:secretkey|secret_key|secret|appkey|app_key|access_token|refresh_token|token|password)"
+    r"\s*[:=]\s*)[A-Za-z0-9+/]{16,1024}\b",
+    re.IGNORECASE,
+)
+```
+
+**진화 과정** (3-Round 적대적 리뷰 사이클):
+1. **Round 1 초기**: `\b[A-Za-z0-9]{40,50}\b` — 키움 secretkey 16~256자 / token 20~1000자 미커버 (CRITICAL-2 발견)
+2. **Round 2 확장**: `\b[A-Za-z0-9+/]{16,1024}\b` — 길이/charset 확장. 그러나 trace_id/correlation_id/PascalCase 운영 식별자 광범위 false positive (HIGH-A 발견)
+3. **Round 3 prefix-aware**: `secretkey=value` 등 명시 prefix 뒤 value 만 매칭. 운영 식별자 보존 + secret/token 평문 보호 양립
+
+**1차 방어**: dict 키 매칭 (`SENSITIVE_KEYS`). dict 형태 logger 호출은 자동 마스킹 — 운영 코드 80% 처리.
+**2차 방어 (본 정규식)**: f-string 평문 prefix 명시 시 보조 안전망.
+
+**Known Limitations** (별도 PR 권장):
+- 한국어 prefix (`f"키 {value}"`) / 자연어 변형 (`f"secret is {x}"`) 미매칭 — CI grep 룰로 caller 측 책임 강제 권장
+- `client_secret`/`bearer`/`apikey`/`private_key` 등 OAuth 표준 prefix 미포함 — 1차 방어가 커버 중. 별도 PR 에서 화이트리스트 확장
+
+### 3.2 KiwoomCredentials 직렬화 차단 (#2 적용 — 2026-05-07)
+
+**다층 방어** (`app/application/dto/kiwoom_auth.py`):
+
+| 메서드 | 동작 | 차단 대상 |
+|--------|------|-----------|
+| `__reduce__` | TypeError raise | pickle.dumps (서브클래스 fallback) |
+| `__reduce_ex__` | TypeError raise | pickle.dumps |
+| `__getstate__` | TypeError raise | jsonpickle/dill/cloudpickle 우회 (Python 3.10+ slots dataclass 자동 생성) |
+| `__setstate__` | TypeError raise | 역직렬화 경로 객체 재구성 |
+| `__copy__` / `__deepcopy__` | 정상 작동 | 도메인 내부 복제 허용 (`memo[id(self)] = result` 갱신) |
+| slots=True | `vars(creds)` TypeError | `__dict__` 자연 차단 |
+
+`dataclasses.asdict(creds)` 는 호출 가능 — 결과를 logger 로 흘리면 `_scan` 의 `secretkey` 키 매칭으로 [MASKED] 처리. 2층 방어.
+
+**Known Limitations**:
+- `copyreg.dispatch_table[KiwoomCredentials] = ...` 등록 시 type-level 우회 가능 (Python pickle 본질적 한계). 운영 코드의 의도적 등록은 코드 리뷰에서 차단. 회귀 표시 테스트 `test_kiwoom_credentials_copyreg_dispatch_table_known_limitation` 로 명시.
+- `object.__getstate__(creds)` 직접 호출 (Python 3.11+ 의 default `__getstate__`) 우회. 외부 디버거/프로파일러 영역 — 본 PR 책임 영역 외.
+
+### 3.3 raw_response 토큰 scrub helper (#3 적용 — 2026-05-07)
+
+**`app/security/scrub.py`** — `scrub_token_fields(payload, api_id) → dict`
+
+| 동작 | 설계 |
+|------|------|
+| 화이트리스트 | au10001 → {token, expires_dt}, au10002 → {token, **appkey, secretkey**} |
+| api_id 정규화 | `.strip().lower()` — `AU10001`/`au10001 ` 등 동일 처리 |
+| 인증 endpoint 미등록 | ValueError raise (fail-closed) — caller 오타·신규 endpoint 누락 차단 |
+| 비인증 (`ka*` 등) | 통과 — token 키 의미 다를 수 있음 |
+| key 매칭 | case-insensitive (`Token`/`TOKEN` 우회 방어) |
+| 원본 보존 | 새 dict 반환 — caller 가 token 다른 경로 사용 가능 |
+| 치환 형태 | `[SCRUBBED]` (필드 삭제 X) — 디버깅 시 "있었음" 확인 가능 |
+
+**au10002 의 핵심**: revoke request body 에 appkey/secretkey/token **모두 평문 포함** (계획서 endpoint-02-au10002.md § 3.1) — Fernet 으로 암호화된 `kiwoom_credential` 의 보호가 raw_response JSONB 평문 저장으로 무력화되는 사각지대 차단. 적대적 리뷰 R1 의 CRITICAL-3 발견.
+
+**Known Limitations** (별도 PR 권장):
+- `startswith("au")` 가정 — 키움이 향후 `oauth_token` 등 다른 prefix 인증 endpoint 추가 시 누락 위험. allow-list 전환은 별도 PR (R1 의 HIGH-4).
+- helper 호출 강제 메커니즘 부재 — UseCase 가 호출 누락 시 평문 저장. SQLAlchemy `before_insert` event listener 추가는 별도 PR.
+
+### 3.4 마스터키 회전 자동화 (#4 지연 — Phase B 후반)
+
+**현황**: `_fernets[v]` 다중 버전 구조는 있지만 실제 회전 미구현.
+**지연 사유**: 운영 자격증명 미발급 단계라 회전 시나리오 검증 어려움. Phase B 종목 마스터 적재 완료 + 운영 키움 자격증명 발급 후 회전 시점에 결정.
 
 ## 4. 결과
 
+### Phase A1 초기 (2026-05-07, commit 12f46aa)
 - 38 파일 / ~1,500줄 (테스트 ~600줄 포함)
 - 테스트 117 passed / coverage 94.61% (목표 80% 초과)
 - ruff lint 0 / mypy strict 0 / bandit 0 / pip-audit 0 CVE
 - alembic upgrade/downgrade 양방향 검증
 
+### Phase A2 사전 보안 PR (2026-05-07, 후속 커밋)
+- 4 파일 (logging/kiwoom_auth/scrub) 변경 + 1 파일 신규 (`app/security/scrub.py`)
+- 회귀 테스트 +44 (28 + 16) → **161 passed / coverage 94.94%**
+- 3-Round 적대적 리뷰 사이클 통과 — CRITICAL 0 / HIGH 0
+- ruff lint 0 / mypy strict 0 / bandit 0 (B105 nosec 1) / pip-audit 0 CVE
+
 ## 5. 다음 chunk
 
 A2 — KiwoomClient 공통 트랜스포트 + KiwoomAuthClient (au10001/au10002) + IssueKiwoomToken/RevokeKiwoomToken UseCase + TokenManager + auth router + lifespan graceful shutdown.
 
-본 ADR 의 § 3 미적용 항목 4건은 A2 진입 전 결정.
+본 ADR § 3 미적용 4건 중 #1·#2·#3 은 본 PR 에서 적용 완료. #4 (마스터키 회전 자동화) 는 Phase B 후반.
+
+별도 후속 PR 권장 (보안 강화 PR 의 R1·R2·R3 리뷰 발견):
+1. `_KIWOOM_SECRET_PATTERN` 화이트리스트 확장 (`client_secret`/`bearer`/`apikey`/`private_key`)
+2. `_TOKEN_FIELDS_BY_API` allow-list 전환 (deny-list → allow-list, R1 HIGH-4)
+3. SQLAlchemy `before_insert` event listener 로 raw_response scrub 자동 적용
+4. CI grep 룰 — f-string 내 평문 secret/token 삽입 PR 차단
+5. 자잘한 정리 — deepcopy memo 변조 방어, `expires_dt` 마스킹, `_capture_stdlib_log` 헬퍼 IndexError 가드

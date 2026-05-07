@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import NoReturn, SupportsIndex
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
@@ -21,6 +22,15 @@ class KiwoomCredentials:
     """평문 자격증명. __repr__ 가 secretkey 마스킹.
 
     원칙: caller 가 dict() 로 변환해 logger 에 넘기지 않음. dataclass 자체로만 전달.
+
+    직렬화 차단 (ADR-0001 § 3 #2, 적대적 리뷰 CRITICAL-1 반영):
+    - `__reduce__`/`__reduce_ex__` raise → pickle.dumps 차단
+    - `__getstate__`/`__setstate__` raise → Python 3.10+ slots dataclass 자동 생성 메서드 우회 차단.
+      jsonpickle/dill/cloudpickle/Celery 등 외부 라이브러리가 `__getstate__()` 를 직접 호출해도 차단.
+    - `__copy__`/`__deepcopy__` 는 허용 (도메인 내부 복제는 정당)
+    - dataclasses.asdict 는 호출 가능 — 결과를 logger 로 넘기면 structlog `_scan` 이 secretkey 키를
+      [MASKED] 처리. 2층 방어.
+    - slots=True 로 vars()/__dict__ 는 자연 차단
     """
 
     appkey: str
@@ -29,6 +39,43 @@ class KiwoomCredentials:
     def __repr__(self) -> str:
         tail = self.appkey[-4:] if len(self.appkey) >= 4 else "****"
         return f"KiwoomCredentials(appkey=••••{tail}, secretkey=<masked>)"
+
+    def __reduce__(self) -> NoReturn:
+        # __reduce_ex__ 가 항상 먼저 호출 — 도달 불가하지만 명시적 방어 (서브클래스가
+        # __reduce_ex__ 를 미정의하는 경우에도 차단).
+        raise TypeError(
+            "KiwoomCredentials serialization is blocked — "
+            "pickle 직렬화는 secretkey 평문 노출 위험."
+        )
+
+    def __reduce_ex__(self, protocol: SupportsIndex) -> NoReturn:
+        raise TypeError(
+            "KiwoomCredentials serialization is blocked — "
+            "pickle 직렬화는 secretkey 평문 노출 위험."
+        )
+
+    def __getstate__(self) -> NoReturn:
+        # Python 3.10+ slots dataclass 자동 생성 차단 — jsonpickle/dill 등 우회 방어.
+        raise TypeError(
+            "KiwoomCredentials state extraction is blocked — "
+            "secretkey 평문 누설 위험 (pickle/jsonpickle/dill 우회 차단)."
+        )
+
+    def __setstate__(self, state: object) -> NoReturn:
+        raise TypeError(
+            "KiwoomCredentials state restoration is blocked — "
+            "역직렬화 경로의 객체 재구성 차단."
+        )
+
+    def __copy__(self) -> KiwoomCredentials:
+        """copy.copy 명시 정의 — `__reduce_ex__` raise 우회. 도메인 내부 복제는 정당."""
+        return KiwoomCredentials(appkey=self.appkey, secretkey=self.secretkey)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> KiwoomCredentials:
+        """copy.deepcopy 명시 정의 — str 은 immutable. memo 갱신 (deepcopy 표준 컨트랙트)."""
+        result = KiwoomCredentials(appkey=self.appkey, secretkey=self.secretkey)
+        memo[id(self)] = result
+        return result
 
 
 @dataclass(frozen=True, slots=True)
