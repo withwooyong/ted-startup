@@ -7,6 +7,84 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] feat(kiwoom): Phase A3-α — KiwoomClient 공통 트랜스포트 + ka10101 어댑터 (이중 리뷰 1R, 277 tests / 90.36%)
+
+`backend_kiwoom` Phase A3 의 첫 chunk (α). **KiwoomClient 공통 트랜스포트** (모든 후속 endpoint B~G 22개의 기반) + KiwoomStkInfoClient.fetch_sectors (ka10101) + 단위 테스트만. β (Migration 002 + Repository + UseCase + 라우터) / γ (APScheduler weekly) 별도 PR.
+
+ted-run 풀 파이프라인 + 적대적 이중 리뷰 1R. **CRITICAL 1 (C-1: `__context__` 토큰 leak) + HIGH 4 (token / 헤더 인젝션 / Semaphore-Lock 직렬화 / AsyncGenerator break 계약) + MEDIUM 7** 발견 → 전부 적용 → CRITICAL/HIGH 0 PASS.
+
+### Added — `app/adapter/out/kiwoom/_client.py` (신규)
+
+- **`KiwoomClient`** 공통 트랜스포트 — httpx + tenacity + Semaphore + paginated
+  - `token_provider: Callable[[], Awaitable[str]]` 의존성 주입 (캐시는 provider 책임 = TokenManager)
+  - tenacity AsyncRetrying — `KiwoomUpstreamError` + `KiwoomRateLimitedError` 만 재시도 (α 정책 일관)
+  - `_throttle()` H-2 보강 — `_next_slot_ts` lock 안에서 atomic 갱신, sleep 은 lock 밖 → 4 코루틴이 0/250/500/750ms 분산 sleep (의도된 동시성 + RPS)
+  - **C-1 토큰 헤더 인젝션 차단** — `_VALID_TOKEN_PATTERN` (`^[A-Za-z0-9._\-+/=]+$`) wire 전 정규식 검증
+  - **C-1 `__context__` leak 차단** — `raise` 를 `except` 블록 밖에서 실행 (변수 캡처 패턴). `from None` 은 `__suppress_context__=True` 만 set, `__context__` 는 살아있어 Sentry/structlog `walk_tb` leak 가능
+  - **H-1 페이지네이션 헤더 인젝션 차단** — `cont_yn` 화이트리스트 (`Y/N`) + `next_key` 정규식 검증 (request + response 양쪽)
+  - 응답 본문 어떤 경로로도 logger / 예외 메시지에 미포함 (α 정책 일관)
+- **`call_paginated`** AsyncGenerator — `cont-yn=Y` 동안 반복, `max_pages` hard cap → `KiwoomMaxPagesExceededError`
+- **`KiwoomResponse`** dataclass (frozen + slots) — body + cont_yn + next_key + status_code
+- **`KiwoomMaxPagesExceededError`** — 무한 cont-yn=Y DoS 방어
+
+### Added — `app/adapter/out/kiwoom/stkinfo.py` (신규)
+
+- **`KiwoomStkInfoClient.fetch_sectors`** (ka10101) — 단일 시장 업종 리스트 + 페이지네이션 자동 합쳐짐
+  - **M-2 mrkt_tp 시그니처** `Literal["0","1","2","4","7"]` — mypy strict 가 caller 까지 강제. 런타임 가드 belt-and-suspenders 유지
+  - SectorListRequest Pydantic — wire 직전 검증
+  - SectorListResponse Pydantic — `items` attribute + `list` alias (builtin shadowing 회피)
+  - SectorRow Pydantic — camelCase 유지 (키움 응답 그대로, `# noqa: N815`)
+  - max_pages=20 (어댑터 보수적 cap)
+
+### Tests — 신규 2 파일 / +38 케이스
+
+- `tests/test_kiwoom_client.py` (신규) — 24 케이스
+  - 정상 호출 + 헤더 자동 설정 (api-id / authorization / Content-Type)
+  - cont_yn / next_key 응답 헤더 추출 (KiwoomResponse)
+  - 페이지네이션 헤더 caller 전달 / 미전달 / 응답 헤더 None 처리
+  - token_provider 매 호출 시 호출 (3회 → 3 token)
+  - 401/403 재시도 0회 / 429 tenacity 재시도 / 5xx 재시도 / 네트워크 재시도
+  - JSON 파싱 실패 → KiwoomUpstreamError
+  - return_code != 0 → KiwoomBusinessError
+  - call_paginated — 단일 / 다중 / max_pages 한도 초과
+  - 응답 본문 (Kiwoom 평문 토큰 모양) 어떤 경로로도 로그 미노출
+  - **C-1 회귀 4건** — 토큰 \r\n / control char reject / `__context__` None on network error / `__context__` None on 401
+  - **H-1 회귀 3건** — caller cont_yn invalid / next_key \r\n / 응답 cont-yn invalid
+  - **M2 회귀** — KiwoomClient max_pages=2 동작 검증
+- `tests/test_kiwoom_stkinfo_client.py` (신규) — 14 케이스
+  - 정상 호출 (Excel 11 rows) / 페이지네이션 합쳐짐 / 빈 list / Pydantic 검증 누락
+  - mrkt_tp 사전 검증 (5 invalid + non-digit) — Literal 우회 (`cast(Any, ...)`) 안전망 검증
+  - business / credential rejected 전파
+  - SectorListResponse alias `list` 양방향
+  - **M2 회귀** — 어댑터 max_pages=20 hard cap 도달
+  - **C-1 회귀** — Pydantic ValidationError 시 `__context__` None
+
+### Verification
+
+```
+Tests:     277 passed (이전 239 → +38)
+Coverage:  90.36% (목표 80% 초과; _client.py 96%, stkinfo.py 97%)
+Lint:      ruff 0 / mypy strict 0 (app 34 files + new tests 2 files)
+Security:  bandit 0 (B101 assert 제거 — explicit raise 패턴) / pip-audit 0 CVE
+Compile:   py_compile clean
+Runtime:   KiwoomClient + KiwoomStkInfoClient 인스턴스 smoke OK
+Reviews:   1R 이중 리뷰 (sonnet + opus 병렬 독립) — CRITICAL 1 + HIGH 4 + MEDIUM 7 → 전부 적용
+```
+
+### A3-α follow-up (별도 PR)
+
+- **F1 (다음 PR — 보안 일관성)**: auth.py (α/β) 의 동일 `__context__` leak 백포트 — 모든 `from None` 패턴을 변수-캡처 except 밖 raise 로 리팩토링
+- F2: `KiwoomBusinessError.message` scrub 적용
+- F3: `KiwoomMaxPagesExceededError` 라우터 매핑 (503 + Retry-After) — A3-β
+- F4: KiwoomClient instance 단일성 강제 — Phase D
+- F5: next-key 없이 cont-yn=Y edge case — 운영 검증 후
+
+### 다음 chunk
+
+A3-β: Migration 002 (sector 테이블) + Sector ORM + SectorRepository + SyncSectorMasterUseCase + GET/POST `/api/kiwoom/sectors` + GET `/api/kiwoom/sectors/sync` (admin) + 통합 테스트.
+
+---
+
 ## [2026-05-07] feat(kiwoom): Phase A2-β — au10002 폐기 + lifespan graceful shutdown (이중 리뷰 1R, 239 tests / 89.95%)
 
 `backend_kiwoom` Phase A2 의 두 번째 chunk (β). au10002 접근토큰 폐기 + RevokeKiwoomTokenUseCase + TokenManager 확장 (peek/invalidate_all/alias_keys) + DELETE/revoke-raw 라우터 + FastAPI lifespan graceful shutdown. 외부 호출 0 — `httpx.MockTransport` + testcontainers PG16. 운영 dry-run (α+β 일괄)은 코드 완료 후 보류.

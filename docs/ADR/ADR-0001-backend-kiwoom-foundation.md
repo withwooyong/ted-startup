@@ -280,3 +280,52 @@ A2-β 적대적 리뷰의 FOLLOW-UP — defer-able:
 | F5 | shutdown metric (`kiwoom_shutdown_revoke_attempts_total`) | β 적대적 F-5 |
 
 **다음 chunk**: A3 — KiwoomStkInfoClient (ka10101) + Migration 002 (sector 테이블) + SectorRepository + SyncSectorMasterUseCase + APScheduler weekly job.
+
+---
+
+## 8. Phase A3-α — KiwoomClient 공통 트랜스포트 + KiwoomStkInfoClient (ka10101) (2026-05-07)
+
+### 8.1 결정
+
+A3 chunk 분할: α (KiwoomClient + ka10101 어댑터 단위) → β (Migration 002 + Repository + UseCase + 라우터) → γ (APScheduler weekly cron) 별도 PR. KiwoomClient 가 모든 후속 endpoint(B~G 22개)의 기반이라 단독 검증 후 적층.
+
+### 8.2 핵심 설계 결정
+
+| # | 항목 | 결정 | 이유 |
+|---|------|------|------|
+| 1 | 토큰 캐시 책임 | `token_provider: Callable[[], Awaitable[str]]` 의존성 주입 | KiwoomClient 는 stateless — TokenManager 가 캐시 책임 (의존성 역전) |
+| 2 | token_provider 호출 빈도 | 매 호출마다 호출 | provider 가 캐시 hit 시 fast path. KiwoomClient 가 stale 토큰 캐시 안 함 |
+| 3 | Semaphore 의도 | N 동시 in-flight + 1/N RPS | 4 동시 + 250ms 인터벌 = 4 RPS (키움 공식 5 RPS 안전 마진) |
+| 4 | `_throttle` lock 정책 | lock 안에서 `_next_slot_ts` atomic 갱신만, sleep 은 lock 밖 | 적대적 리뷰 H2 — 4 코루틴이 0/250/500/750ms 분산 sleep, 의도된 동시성 보장 |
+| 5 | tenacity 재시도 대상 | KiwoomUpstreamError + KiwoomRateLimitedError | 401/403/4xx/Pydantic 즉시 fail (α 정책 일관) |
+| 6 | 401/403 정책 | 재시도 X | timing leak 방어 (α 정책) |
+| 7 | 429 정책 | 재시도 (RPS 회복 대기) | 운영상 합리적 — 토큰 발급은 별도 KiwoomAuthClient 라 timing oracle 우려 없음 |
+| 8 | `call_paginated` max_pages | hard cap (어댑터 20, 클라이언트 기본 50) → KiwoomMaxPagesExceededError | 무한 cont-yn=Y DoS 방어 |
+| 9 | `call_paginated` break 정책 | caller `break` 시 generator finalize OK | 외부 리소스 미보유 — 안전 |
+| 10 | **C-1 토큰 헤더 인젝션** | wire 전 `_VALID_TOKEN_PATTERN` (`^[A-Za-z0-9._\-+/=]+$`) 정규식 검증 | 적대적 리뷰 — 토큰에 \r\n / control char 시 헤더 인젝션 → h11 LocalProtocolError 메시지에 토큰 평문 박혀 leak |
+| 11 | **C-1 `__context__` leak 차단** | `raise` 를 except 블록 밖에서 실행 (변수 캡처 패턴) | `from None` 은 `__suppress_context__=True` 만 set. `__context__` 는 살아있어 Sentry/structlog `walk_tb` leak 가능. except 밖 raise 는 PEP 3134 자동 chaining 차단 |
+| 12 | **H-1 페이지네이션 헤더 검증** | cont_yn `("Y","N")` 외 reject + next_key 정규식 검증 | 키움 응답이 변조되어 next-key 에 \r\n 인젝션 시 다음 호출 헤더 인젝션 차단 (request 시 + response 시 둘 다) |
+| 13 | **M-2 mrkt_tp 시그니처** | `Literal["0","1","2","4","7"]` + 런타임 가드 (belt-and-suspenders) | mypy strict 가 caller (라우터) 까지 강제. SectorListRequest Pydantic 도 wire 직전 검증 |
+| 14 | Pydantic 응답 alias | `SectorListResponse.items` (attribute) ↔ `list` (alias). `populate_by_name=True` | builtin `list` shadowing 회피. 키움 JSON 키는 그대로 |
+| 15 | KiwoomResponse | frozen + slots dataclass — body + cont_yn + next_key + status_code | 페이지네이션 메타 + 디버깅용 status_code |
+| 16 | 응답 본문 보호 일관성 | logger / 예외 메시지 / cause / context 모두 미포함 | α 정책 100% 일관 — Kiwoom 평문 토큰 패턴 마스킹 미보장 가정 |
+
+### 8.3 결과
+
+- 신규 파일 2개 (코드: `_client.py`, `stkinfo.py`) + 2개 (테스트)
+- 테스트 +38 → **277 passed / coverage 90.36%** (이전 239)
+- 이중 리뷰 사이클 1라운드 — **CRITICAL 1 (C-1) + HIGH 4 (H-1/H-2 + 1차 HIGH-1/HIGH-2) + MEDIUM 7** 발견 → 전부 적용 → CRITICAL/HIGH 0 PASS
+- ruff lint 0 / mypy strict 0 (app + new tests) / bandit 0 / pip-audit 0 CVE
+- 5관문 verification 통과 (KiwoomClient 인스턴스 + fetch_sectors smoke)
+
+### 8.4 별도 후속 PR (A3-α follow-up)
+
+| # | 항목 | 출처 | 우선순위 |
+|---|------|------|------|
+| F1 | **auth.py (α/β) 의 동일 `__context__` leak 백포트** — 모든 `from None` 패턴을 변수-캡처 except 밖 raise 로 리팩토링 | A3-α 적대적 C-1 | **다음 PR** (보안 일관성) |
+| F2 | KiwoomBusinessError.message attribute scrub — `from app.observability.logging import _scrub_string` 적용 | A3-α 적대적 M-3 | low |
+| F3 | KiwoomMaxPagesExceededError 라우터 매핑 (503 + Retry-After) — 무한 페이지네이션 부분 데이터 폐기 시 metric | A3-α 적대적 M-1 | A3-β |
+| F4 | KiwoomClient instance 단일성 강제 (factory + lock) | A3-α 적대적 F2 | Phase D 사용자 trigger 도입 시 |
+| F5 | next-key 응답 헤더 cont-yn=Y 인데 next-key 없는 edge case 명시 처리 (현재는 빈 헤더로 다음 호출) | A3-α 1차 LOW-1 | 운영 검증 후 |
+
+**다음 chunk**: A3-β — Migration 002 (sector 테이블) + Sector ORM + SectorRepository + SyncSectorMasterUseCase + GET/POST `/api/kiwoom/sectors` + GET `/api/kiwoom/sectors/sync` (admin). γ chunk 의 APScheduler 는 그 다음.
