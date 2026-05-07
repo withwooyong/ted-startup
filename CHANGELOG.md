@@ -7,6 +7,98 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-07] docs(kiwoom): Phase C 계획서 5건 — 백테스팅 OHLCV + 일별 수급 (uncommitted)
+
+`backend_kiwoom` Phase C (백테스팅 본체) 계획서 5건 완성. 본 세션은 **계획서만 작성** (코드 0줄). Phase A(3) + Phase B(3) + Phase C(5) = 11 endpoint 계획서 누적, 약 ~8,400줄 문서. 25 endpoint 중 11 완성 (44%).
+
+### Added — Phase C endpoint 계획서
+
+- `src/backend_kiwoom/docs/plans/endpoint-06-ka10081.md` — **주식일봉차트 (★ 백테스팅 코어, P0)**
+  - reference 계획서 (1,172줄) — Phase C 의 다른 chart endpoint 가 본 패턴 복제
+  - **KRX/NXT 동시 호출** + `stock_price_krx` / `stock_price_nxt` 물리 분리 적재
+  - `_DailyOhlcvMixin` SQLAlchemy mixin — 4 (일/주/월/년) × 2 (KRX/NXT) = 8 테이블 컬럼 공유
+  - `KiwoomChartClient.fetch_daily` + `IngestDailyOhlcvUseCase` + `IngestDailyOhlcvBulkUseCase` + `BackfillDailyOhlcvUseCase`
+  - `upd_stkpc_tp=1` 수정주가 모드 — 백테스팅 액면분할/배당락 자동 보정
+  - active 3000 + NXT 1500 = 4500 호출, 30~60분 sync 추정 (Semaphore=4 + 250ms interval)
+  - cron KST mon-fri 18:30 (장 마감 + 청산 + 펀더멘털 후 안정 시점)
+  - bulk batch 50 commit + SAVEPOINT 시장 격리 + lazy fetch (LookupStockUseCase.ensure_exists) 의존성
+- `src/backend_kiwoom/docs/plans/endpoint-07-ka10082.md` — 주식주봉차트 (P1)
+  - ka10081 패턴 복제 — 응답 list 키만 다름 (`stk_stk_pole_chart_qry`)
+  - `StockPricePeriodicRepository` + `IngestPeriodicOhlcvUseCase` 통합 (주/월/년봉 공유)
+  - `Period` StrEnum 분기 (WEEKLY/MONTHLY/YEARLY)
+  - cron 금 KST 19:00 (주 마감 후)
+  - 백필 1 페이지로 충분 (~156 주봉)
+- `src/backend_kiwoom/docs/plans/endpoint-08-ka10083.md` — 주식월봉차트 (P1)
+  - ka10081/82 패턴 복제 — list 키 `stk_mth_pole_chart_qry`
+  - cron 매월 1일 KST 03:00
+  - `dt` 의미: 달의 첫 거래일 (운영 검증)
+- `src/backend_kiwoom/docs/plans/endpoint-09-ka10094.md` — 주식년봉차트 (P2)
+  - ka10081 패턴 복제 + **응답 7 필드만** (pred_pre/pred_pre_sig/trde_tern_rt 누락)
+  - **NXT 호출 skip 정책** — 부분 년 데이터 의미 약 (NXT 운영 ~2025-03 시작 가정)
+  - cron 매년 1월 5일 KST 03:00
+  - 30년 백필도 1 페이지 (~30 row)
+- `src/backend_kiwoom/docs/plans/endpoint-10-ka10086.md` — **일별주가 (★ 시그널, P0, 22 필드)**
+  - URL **`/api/dostk/mrkcond`** (chart 가 아님!) — 별도 카테고리
+  - 22 필드 5 카테고리 분해: A.시점(1) / B.OHLCV(8) / C.신용(2) / D.투자자별(4) / E.외인+순매수(7)
+  - **OHLCV 중복 적재 안 함** — ka10081 가 정답. 본 endpoint 는 C+D+E = 13 필드만 영속화
+  - `KiwoomMarketCondClient.fetch_daily_market` + `stock_daily_flow` 별도 테이블 (Migration 005)
+  - **이중 부호 처리** (`--714`): `_strip_double_sign_int` helper. Excel 예시상 모호 → 운영 검증 필수
+  - **외인순매수 단위 mismatch**: Excel R15 "외국인순매수는 indc_tp 무시 항상 수량" → 컬럼 분리 + 정규화 무시
+  - `indc_tp` 기본 = QUANTITY (백테스팅 시그널 단위 일관성)
+  - cron KST mon-fri 19:00 (ka10081 18:30 직후, OHLCV 적재 후 cross-check 가능)
+
+### Phase C 의 핵심 설계 결정
+
+- **물리 분리 OHLCV 테이블 8개**: stock_price_{krx,nxt} × {daily, weekly, monthly, yearly} — `_DailyOhlcvMixin` 으로 컬럼 공유, ON CONFLICT 정책 통일
+- **Migration 003 (KRX OHLCV) / 004 (NXT OHLCV) 분리 적용**: 운영 중 NXT 활성화 토글 가능
+- **Migration 005 (stock_daily_flow)**: ka10086 만의 별도 마이그레이션. OHLCV 와 수급 데이터의 책임 분리
+- **NXT 년봉 호출 skip**: 부분 년 데이터의 의미 약 + RPS 절약 — Phase D 후반에 운영 1년 후 재검토
+- **OHLCV 중복 처리 정책**: ka10081 = 정답, ka10086 의 OHLCV = 적재 안 함. cross-check 는 raw_response 테이블에 보관된 JSON 으로
+- **수정주가 강제** (`upd_stkpc_tp=1`): 백테스팅 일관성 — raw 모드는 비교 검증용
+- **bulk batch 50 commit**: SAVEPOINT 패턴 + 50건 단위 commit — 중간 오류 격리
+- **`indc_mode=QUANTITY` 기본**: 다른 종목 비교 시 가격 변동 무관, 시그널 단위 일관성
+
+### Phase C 코드 공유 비율
+
+| 자산 | 4 chart endpoint 공유 | ka10086 | 누적 줄수 |
+|------|----------------------|---------|-----------|
+| `KiwoomChartClient` 클래스 | reference + 메서드 4개 | (별도 `KiwoomMarketCondClient`) | ~600 |
+| `_DailyOhlcvMixin` ORM mixin | 8 테이블 공유 | (사용 안 함) | ~80 |
+| `NormalizedDailyOhlcv` dataclass | 4 endpoint 공유 | (별도 `NormalizedDailyFlow`) | ~30 |
+| `_to_int` / `_to_decimal` / `_parse_yyyymmdd` | (Phase B helper 재사용) | 동일 | 0 |
+| `IngestPeriodicOhlcvUseCase` | 3 endpoint 공유 (W/M/Y) | (별도 `IngestDailyFlowUseCase`) | ~250 |
+| Repository | StockPriceRepository (일봉 hot) + StockPricePeriodicRepository (주/월/년) | StockDailyFlowRepository | ~400 |
+
+→ Phase C 의 chart 4 endpoint **실제 구현 줄수**는 ka10081 reference (~700줄) + 나머지 3 endpoint 합쳐 ~300줄 = ~1,000줄. ka10086 별도 ~700줄. **Phase C 전체 코드 ~1,700줄 추정**.
+
+### Decided
+
+- **이중 부호 (`--714`) 처리 가설 B 채택** (현재): `--` prefix 1개 제거 후 `_to_int`. 운영 첫 호출 raw 측정 후 가설 수정 가능 (master.md § 12 승격 후보)
+- **외인순매수 단위 항상 수량** (Excel R15 가정): `indc_tp` 무시. R15 가정이 틀리면 수십% 시그널 오차 → 운영 검증 1순위
+- **Phase C 호출 큐 의존성**: ka10099 응답의 `nxt_enable=true` 종목만 NXT 호출 큐. Phase B 가 끝나야 Phase C 진입 가능
+- **trading_date timezone 가정**: KST 거래일. DATE 컬럼 timezone-naive — UTC 변환 안 함
+- **백필 페이지네이션**: 일봉 3년 = 1~12 페이지, 주/월/년봉은 1 페이지 충분. 운영 측정 후 master.md § 12 에 페이지 row 수 기록
+
+### Documentation
+
+- ka10081 reference (1,172줄) + 짧은 형식 3건 (415/324/413줄, ka10081 패턴 복제로 차이점만) + ka10086 (847줄, 별도 카테고리)
+- 각 계획서 11 섹션 (Excel R20~R56 명세 그대로 + Pydantic/ORM/UseCase/Repository + DB schema + 테스트 + DoD + 위험 메모)
+- §11.3 endpoint 간 비교 표 — 4 chart endpoint 공유 / ka10086 와 ka10081 의 책임 분리
+- §11.4 향후 확장 — 데이터 품질 리포트 (Phase H), 분봉/틱 (Phase D), 백테스팅 read API 의 batch read
+
+### Uncommitted
+
+본 세션은 커밋 없음. 추가된 untracked:
+- `src/backend_kiwoom/docs/plans/endpoint-06-ka10081.md`
+- `src/backend_kiwoom/docs/plans/endpoint-07-ka10082.md`
+- `src/backend_kiwoom/docs/plans/endpoint-08-ka10083.md`
+- `src/backend_kiwoom/docs/plans/endpoint-09-ka10094.md`
+- `src/backend_kiwoom/docs/plans/endpoint-10-ka10086.md`
+
+추천 커밋 메시지: `docs(kiwoom): Phase C 5건 — 백테스팅 OHLCV (KRX/NXT 분리) + 일별 수급 시그널`
+
+---
+
 ## [2026-05-07] docs(kiwoom): Phase B 계획서 3건 — 종목 마스터 + 펀더멘털 (uncommitted)
 
 `backend_kiwoom` Phase B (종목 마스터 — NXT enable 게이팅의 source) 계획서 3건 완성. 본 세션은 **계획서만 작성** (코드 0줄). Phase A(3건) + Phase B(3건) = 6 endpoint 계획서 누적, 총 ~5,200줄 문서.
