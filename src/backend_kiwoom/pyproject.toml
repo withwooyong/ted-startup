@@ -79,7 +79,10 @@ warn_unused_ignores = true
 warn_no_return = true
 plugins = ["pydantic.mypy"]
 
-# tool.mypy.overrides 는 A2 (apscheduler) / 통합 테스트 (testcontainers stubs 누락) 진입 시 추가
+# tool.mypy.overrides — apscheduler 3.x stubs 미제공
+[[tool.mypy.overrides]]
+module = ["apscheduler.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"

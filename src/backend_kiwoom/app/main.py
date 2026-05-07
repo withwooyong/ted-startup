@@ -46,6 +46,7 @@ from app.application.service.token_service import (
 )
 from app.config.settings import get_settings
 from app.observability.logging import setup_logging
+from app.scheduler import SectorSyncScheduler
 from app.security.kiwoom_credential_cipher import KiwoomCredentialCipher
 
 logger = logging.getLogger(__name__)
@@ -131,9 +132,24 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     set_sync_sector_factory(_sync_sector_factory)
 
+    # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
+    # alias 미설정 + scheduler_enabled=True 면 fail-fast (운영 실수 방어).
+    if settings.scheduler_enabled and not settings.scheduler_sector_sync_alias:
+        raise RuntimeError("scheduler_enabled=True 인데 scheduler_sector_sync_alias 미설정 — 운영 실수 방어 fail-fast")
+    scheduler = SectorSyncScheduler(
+        factory=_sync_sector_factory,
+        alias=settings.scheduler_sector_sync_alias,
+        enabled=settings.scheduler_enabled,
+    )
+    scheduler.start()
+
     try:
         yield
     finally:
+        # A3-γ: scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient 호출이
+        # graceful token revoke 와 충돌하지 않도록 보장
+        scheduler.shutdown(wait=True)
+
         # H-3 적대적 리뷰: revoke 실패/hang/cancel 와 무관하게 engine.dispose() 도달 보장
         try:
             await asyncio.wait_for(

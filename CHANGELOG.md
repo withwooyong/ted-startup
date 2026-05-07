@@ -7,6 +7,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase A3-γ — APScheduler weekly cron + lifespan 통합 (단일 리뷰, 345 tests / 93%)
+
+ka10101 sector sync 의 자동 트리거 — 일요일 KST 03:00 cron 1개 등록. AsyncIOScheduler 를 lifespan 에 통합하되 graceful shutdown 순서를 명확히 정의: scheduler 먼저 정지 → token revoke → engine.dispose. 운영 실수 방어를 위한 fail-fast 가드 (`scheduler_enabled=True + alias=""` → startup RuntimeError).
+
+자동 분류: **일반 기능 (general)** — 보안 표면 변경 없음. 이중 리뷰 2b 자동 생략. 1차 리뷰 PASS.
+
+### Added — Scheduler 모듈
+
+- `app/scheduler.py` — `SectorSyncScheduler` (AsyncIOScheduler + CronTrigger 일 03:00 KST + `max_instances=1` + `coalesce=True` + `replace_existing=True`)
+  - `start()` 멱등성 — `_started` 플래그 가드 + scheduler_enabled=False 시 no-op
+  - `shutdown(wait=True)` — 진행 중 cron 완료 대기, 미기동 상태에서도 안전
+  - `is_running = _started AND scheduler.running` — AsyncIOScheduler.shutdown(wait=False) 의 비동기 cleanup race 회피
+- `app/batch/sector_sync_job.py` — `fire_sector_sync` 콜백
+  - 모든 예외 swallow (logger.exception) — 다음 cron tick 보장
+  - 정상 완료: logger.info / 부분 실패: logger.warning (운영 oncall hint)
+
+### Added — Lifespan 통합
+
+- `app/main.py` — lifespan 확장:
+  - startup: SectorSyncScheduler 생성 + start (settings.scheduler_enabled=True 일 때만 실제 등록)
+  - shutdown 순서: `scheduler.shutdown(wait=True)` → graceful token revoke → `engine.dispose`
+  - **fail-fast 가드**: `scheduler_enabled=True + scheduler_sector_sync_alias=""` → RuntimeError (운영 실수 방어)
+
+### Added — Settings
+
+- `Settings.scheduler_sector_sync_alias: str = ""` — 주간 cron 이 사용할 자격증명 alias
+
+### Added — 의존성 / mypy
+
+- `pyproject.toml` — `[[tool.mypy.overrides]]` 추가: `apscheduler.*` ignore_missing_imports (3.x stubs 미제공)
+
+### Tests +13
+
+- `tests/test_scheduler.py` (신규):
+  - fire_sector_sync 정상 / 예외 swallow / 부분 실패 (3 — monkeypatch 로 logger mock, caplog 회피)
+  - SectorSyncScheduler disabled / enabled+cron 등록 / idempotent / shutdown / 미기동 shutdown / disabled+shutdown (6)
+  - 수동 job 호출 (1)
+  - lifespan fail-fast 가드 + startup·shutdown 사이클 enabled/disabled (3 — 3-5 런타임 smoke)
+
+### 검증
+
+- 345 passed (이전 332, +13) / coverage **93%** (+1%)
+- 핵심 파일: scheduler.py 96% / sector_sync_job.py 100% / main.py 75%
+- ruff check 0 / format 0 / mypy strict 0 (41 source files) / bandit 0
+- 5관문 모두 통과 — 3-5 런타임 smoke (lifespan startup→shutdown 사이클 enabled/disabled 양방향)
+
+### 문서
+
+- ADR-0001 § 11 추가 (12 결정 + 결과 + 운영 dry-run 보류 + 다음 chunk)
+
+### 다음 chunk
+
+운영 dry-run (DoD § 10.3) — α + β + A3-α + F1 + A3-β + A3-γ 통합 검증. 그 다음 Phase B (ka10099/ka10100/ka10001).
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase A3-β — sector 도메인 영속화 + UseCase + 라우터 (이중 리뷰 1R, 332 tests / 91%)
 
 ka10101 의 도메인 풀 체인 단일 PR. `KiwoomStkInfoClient.fetch_sectors` (A3-α 완료) → `SyncSectorMasterUseCase` (시장 단위 격리) → `SectorRepository` (PG ON CONFLICT upsert + 디액티베이션 정책 B) → DB. 라우터 `GET/POST /api/kiwoom/sectors` 까지 포함. APScheduler weekly 는 A3-γ 로 분리.

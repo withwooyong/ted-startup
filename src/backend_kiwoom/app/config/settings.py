@@ -81,6 +81,13 @@ class Settings(BaseSettings):
 
     # ---- Scheduler ----
     scheduler_enabled: bool = Field(default=False, description="APScheduler 자동 기동 (운영만 True)")
+    scheduler_sector_sync_alias: str = Field(
+        default="",
+        description=(
+            "주간 sector sync cron job 이 사용할 키움 자격증명 alias. "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast (운영 실수 방어)."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

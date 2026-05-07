@@ -438,3 +438,59 @@ A3-α + F1 + A3-β 합산 코드 검증만. 운영 자격증명 1쌍 등록 후 
 ### 10.6 다음 chunk
 
 A3-γ — APScheduler weekly + scheduler 모듈 + lifespan 통합. 그 다음 운영 dry-run.
+
+---
+
+## 11. Phase A3-γ — APScheduler weekly cron + lifespan 통합 (2026-05-08)
+
+### 11.1 결정
+
+ka10101 sector sync 의 자동 트리거. 일요일 KST 03:00 cron job 1개 등록 (업종 변경이 잦지 않음 — 주 1회면 충분). AsyncIOScheduler 를 lifespan 에 통합하되 graceful shutdown 순서를 명확히 정의 — scheduler 먼저 정지 → 그 다음 token revoke → engine.dispose.
+
+### 11.2 핵심 설계 결정
+
+| # | 결정 | 근거 |
+|---|------|------|
+| 1 | **AsyncIOScheduler** (BackgroundScheduler 아님) | FastAPI lifespan 의 동일 이벤트 루프에 묶임 — async UseCase 가 직접 호출 가능. BackgroundScheduler 는 별도 스레드 — `_token_provider` 의 asyncio.Lock 충돌 위험 |
+| 2 | **CronTrigger(day_of_week="sun", hour=3, minute=0, timezone=KST)** | 새벽 3시 — DB IO 부담 적은 시간대. 일요일 — KOSPI/KOSDAQ 휴일이라 시장 데이터 안정 |
+| 3 | **`max_instances=1` + `coalesce=True`** | 이전 cron 이 길게 늘어져 다음 트리거와 겹치는 상황 방어. 누락된 트리거는 1번으로 축약 |
+| 4 | **`replace_existing=True`** + start 멱등성 가드 (`self._started` 플래그) | 재 start 호출해도 job 중복 등록 0건. 회귀 테스트 1건 |
+| 5 | **scheduler shutdown → token revoke → engine.dispose 순서** | 진행 중 cron job 의 KiwoomClient 호출이 token revoke 와 충돌하지 않게. `wait=True` 로 진행 중 job 완료 대기 |
+| 6 | **`is_running = _started AND scheduler.running`** | AsyncIOScheduler.shutdown(wait=False) 의 비동기 cleanup race 회피 — 호출자 의도 (start/shutdown) 가 진실의 원천 |
+| 7 | **fail-fast 가드** — `scheduler_enabled=True + scheduler_sector_sync_alias=""` 면 lifespan startup RuntimeError | 운영 실수 방어 — alias 누락 상태로 cron 이 매주 실패 vs startup 즉시 실패. 후자 안전 |
+| 8 | **cron 콜백 (`fire_sector_sync`) 모든 예외 swallow** | APScheduler 가 다음 tick 정상 트리거하도록 보장. logger.exception 만 보고 — 운영 알람 hint |
+| 9 | **부분 실패 시 logger.warning** — `all_succeeded=False` 분기 | 5 시장 중 일부 실패 시 oncall 알람용. 정상 완료는 logger.info |
+| 10 | **`Settings.scheduler_sector_sync_alias`** — alias 명시 필드 | hardcoded alias 회피 — 운영 환경별 자격증명 alias 다를 수 있음 (prod-main / mock-test 등) |
+| 11 | **mypy override `apscheduler.*` ignore_missing_imports** | APScheduler 3.x stubs 미제공. `pyproject.toml` 의 [[tool.mypy.overrides]] 에 추가 |
+| 12 | **`SectorSyncScheduler` 단일 책임** — sector sync cron 1개만 관리 | 다른 cron job 추가 시 별도 클래스 또는 generic 래퍼로 분리 — Phase B/C 진입 시 |
+
+### 11.3 결과
+
+- 신규 파일 3개 + 확장 3개:
+  - `app/scheduler.py` (신규 — SectorSyncScheduler + KST 상수 + SECTOR_SYNC_JOB_ID)
+  - `app/batch/__init__.py` (신규)
+  - `app/batch/sector_sync_job.py` (신규 — fire_sector_sync 콜백)
+  - `app/config/settings.py` (확장 — `scheduler_sector_sync_alias` 필드)
+  - `app/main.py` (확장 — lifespan 통합 + fail-fast 가드)
+  - `pyproject.toml` (확장 — apscheduler mypy override)
+- 테스트 +13 (`tests/test_scheduler.py` — 신규 13 케이스):
+  - fire_sector_sync 정상/예외/부분실패 (3 — monkeypatch 로 logger 직접 mock, caplog 회피)
+  - SectorSyncScheduler enabled/disabled/idempotent/shutdown 5
+  - 수동 job 호출 1
+  - lifespan fail-fast 1 + startup·shutdown 사이클 enabled/disabled 2
+- 누적 **345 passed / coverage 93%** (이전 332 / 91%)
+- 핵심 파일: `scheduler.py` 96% / `sector_sync_job.py` 100% / `main.py` 75% (lifespan 사이클 커버 +)
+- ruff 0 / format 0 / mypy strict 0 (41 source files) / bandit 0
+- 5관문 모두 통과 (3-5 런타임 smoke — lifespan startup→shutdown 사이클 enabled/disabled 양방향 검증)
+
+### 11.4 운영 dry-run 으로 보류
+
+`scheduler_enabled` 는 운영 환경에서만 True. 로컬/CI 는 기본 False. 운영 dry-run 시점에 다음 검증:
+1. `SCHEDULER_ENABLED=true` + 유효 alias 로 컨테이너 기동 시 cron 등록 확인
+2. APScheduler logger 로 다음 트리거 시각 (KST 일 03:00) 확인
+3. 수동 트리거 (POST `/sectors/sync?alias=...`) → cron 콜백 결과와 일치 확인
+4. 컨테이너 재시작 시 lifespan shutdown → scheduler.shutdown(wait=True) → graceful revoke 순서 정상 도달
+
+### 11.5 다음 chunk
+
+운영 dry-run (DoD § 10.3) — α + β + A3-α + F1 + A3-β + A3-γ 통합 검증. 그 다음 Phase B (종목 마스터 ka10099/ka10100/ka10001).
