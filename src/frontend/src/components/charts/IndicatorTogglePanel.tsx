@@ -24,12 +24,13 @@ const ITEMS: ReadonlyArray<ToggleItem> = [
 interface Props {
   toggles: IndicatorToggles;
   onToggle: <K extends keyof IndicatorToggles>(key: K, value: boolean) => void;
+  onOpenSettings?: () => void;
 }
 
-export default function IndicatorTogglePanel({ toggles, onToggle }: Props) {
+export default function IndicatorTogglePanel({ toggles, onToggle, onOpenSettings }: Props) {
   return (
     <div
-      className="flex flex-wrap gap-1.5 mb-3"
+      className="flex flex-wrap items-center gap-1.5 mb-3"
       role="group"
       aria-label="차트 지표 토글"
     >
@@ -56,6 +57,30 @@ export default function IndicatorTogglePanel({ toggles, onToggle }: Props) {
           </button>
         );
       })}
+      {onOpenSettings && (
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="지표 파라미터 설정 열기"
+          className="ml-auto flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-[#7A8699] hover:text-[#E8ECF1] border border-white/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6395FF]/50"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          설정
+        </button>
+      )}
     </div>
   );
 }

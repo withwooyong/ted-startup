@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import { getStockDetail } from '@/lib/api/client';
@@ -20,6 +20,7 @@ import type {
   VolumePoint,
 } from '@/components/charts/PriceAreaChart';
 import IndicatorTogglePanel from '@/components/charts/IndicatorTogglePanel';
+import IndicatorParametersDrawer from '@/components/charts/IndicatorParametersDrawer';
 import StockChartAccessibilityTable from '@/components/charts/StockChartAccessibilityTable';
 import {
   aggregateMonthly,
@@ -70,7 +71,13 @@ export default function StockDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [prevKey, setPrevKey] = useState(`${code}:${period}`);
-  const { prefs, setToggle } = useIndicatorPreferences();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 무한 과거 스크롤 상태:
+  //   loadingMoreRef — fetch in-flight 가드 (state 면 콜백 캡처가 stale)
+  //   historyExhausted — 빈 응답 받으면 true. 좌측 panning lock 으로도 사용.
+  const loadingMoreRef = useRef(false);
+  const [historyExhausted, setHistoryExhausted] = useState(false);
+  const { prefs, setToggle, setParams } = useIndicatorPreferences();
 
   // fetch 파라미터 변경 시 loading 재진입 (render 중 리셋 패턴)
   const currentKey = `${code}:${period}`;
@@ -94,6 +101,9 @@ export default function StockDetailPage() {
       .then((d: StockDetail) => {
         setData(d);
         setLoading(false);
+        // period/code 변경 시 lazy load 상태 리셋
+        loadingMoreRef.current = false;
+        setHistoryExhausted(false);
       })
       .catch((err: unknown) => {
         // abort 된 요청은 정상적인 cleanup — state 를 건드리지 않음.
@@ -104,6 +114,41 @@ export default function StockDetailPage() {
 
     return () => controller.abort();
   }, [code, period]);
+
+  // 좌측 가시영역 진입 → 더 과거 데이터 prepend.
+  //   - in-flight 가드 + historyExhausted 가드.
+  //   - 새 from = (현재 가장 오래된 trading_date - 1day) 기준으로 cfg.monthsFetch 만큼 추가 요청.
+  //   - 빈 응답 → historyExhausted=true 로 lock.
+  //   - 응답 받은 prices 는 기존 prices 앞에 prepend (서버가 오름차순으로 정렬해서 줌).
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingMoreRef.current || historyExhausted) return;
+    if (!data || data.prices.length === 0) return;
+    loadingMoreRef.current = true;
+
+    try {
+      const cfg = PERIODS.find(p => p.key === period) ?? PERIODS[0];
+      const earliest = data.prices[0].trading_date;
+      const newToDate = new Date(`${earliest}T00:00:00`);
+      newToDate.setDate(newToDate.getDate() - 1);
+      const newFromDate = new Date(newToDate);
+      newFromDate.setMonth(newFromDate.getMonth() - cfg.monthsFetch);
+      const newFrom = newFromDate.toISOString().split('T')[0];
+      const newTo = newToDate.toISOString().split('T')[0];
+
+      const more = await getStockDetail(code, newFrom, newTo);
+      if (more.prices.length === 0) {
+        setHistoryExhausted(true);
+      } else {
+        setData(prev =>
+          prev ? { ...prev, prices: [...more.prices, ...prev.prices] } : prev,
+        );
+      }
+    } catch {
+      // 무시 — 다음 가시영역 변경 시 재시도 가능.
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }, [data, period, code, historyExhausted]);
 
   // lightweight-charts 는 'YYYY-MM-DD' 풀 포맷 요구 (slice 금지).
   // Rules-of-Hooks: early return 앞에서 호출되도록 위치 고정.
@@ -378,8 +423,18 @@ export default function StockDetailPage() {
         ))}
       </div>
 
-      {/* Indicator toggles — v1.2 Cp 2α 에서 prefs.toggles 구조로 분리 */}
-      <IndicatorTogglePanel toggles={prefs.toggles} onToggle={setToggle} />
+      {/* Indicator toggles — v1.2 Cp 2α 에서 prefs.toggles 구조로 분리. Cp 2β 에서 설정 버튼 추가. */}
+      <IndicatorTogglePanel
+        toggles={prefs.toggles}
+        onToggle={setToggle}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <IndicatorParametersDrawer
+        open={settingsOpen}
+        prefs={prefs}
+        onClose={() => setSettingsOpen(false)}
+        onSave={setParams}
+      />
 
       {/* Chart */}
       <ErrorBoundary resetKeys={[period, chartData.length]}>
@@ -394,6 +449,9 @@ export default function StockDetailPage() {
               rsi={rsiSeries}
               macd={macdSeries}
               bb={bbSeries}
+              onReachLeftEdge={loadMoreHistory}
+              lockLeftEdge={historyExhausted}
+              lockRightEdge
             />
           </div>
         ) : (

@@ -79,7 +79,15 @@ interface Props {
   rsi?: RSISeriesProp;
   macd?: MACDSeriesProp;
   bb?: BBSeriesProp;
+  /** 가시영역 좌측 끝(< THRESHOLD) 도달 시 호출. 호출자가 debounce/dedupe. */
+  onReachLeftEdge?: () => void;
+  /** true 면 좌측으로 더 이상 panning 불가 — 과거 데이터 소진 후 호출자가 true. */
+  lockLeftEdge?: boolean;
+  /** true 면 우측으로 더 이상 panning 불가 — 미래 데이터 없으므로 보통 true. */
+  lockRightEdge?: boolean;
 }
+
+const LEFT_EDGE_THRESHOLD = 5; // 좌측 logical from < 5 candle 진입 시 prefetch trigger
 
 interface HoverTooltip {
   time: string;
@@ -161,6 +169,9 @@ export default function PriceAreaChart({
   rsi,
   macd,
   bb,
+  onReachLeftEdge,
+  lockLeftEdge,
+  lockRightEdge,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -170,6 +181,13 @@ export default function PriceAreaChart({
   const bbUpperRef = useRef<ISeriesApi<'Line'> | null>(null);
   const bbMiddleRef = useRef<ISeriesApi<'Line'> | null>(null);
   const bbLowerRef = useRef<ISeriesApi<'Line'> | null>(null);
+
+  // 콜백을 ref 로 안정화 — chart init useEffect 의 의존성을 빈 배열로 유지하기 위해.
+  const onReachLeftEdgeRef = useRef(onReachLeftEdge);
+  onReachLeftEdgeRef.current = onReachLeftEdge;
+  // setData 시 prepend 감지용 — 이전 첫 candle 의 date / 길이.
+  const prevFirstDateRef = useRef<string | undefined>(undefined);
+  const prevLenRef = useRef(0);
 
   const volumePaneRef = useRef<IPaneApi<Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
@@ -271,6 +289,16 @@ export default function PriceAreaChart({
     };
     chart.subscribeCrosshairMove(crosshairHandler);
 
+    // 좌측 가시영역 진입 감지 — logical from 이 임계 미만이면 호출.
+    // logical 좌표는 data 인덱스 기준이며 음수도 가능 (왼쪽 빈 영역). from < THRESHOLD 시 prefetch.
+    const visibleRangeHandler = (range: { from: number; to: number } | null) => {
+      if (!range) return;
+      if (range.from < LEFT_EDGE_THRESHOLD) {
+        onReachLeftEdgeRef.current?.();
+      }
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(visibleRangeHandler);
+
     const resizeObserver = new ResizeObserver(() => {
       chart.applyOptions({
         width: container.clientWidth || initialWidth,
@@ -282,6 +310,7 @@ export default function PriceAreaChart({
     return () => {
       resizeObserver.disconnect();
       chart.unsubscribeCrosshairMove(crosshairHandler);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(visibleRangeHandler);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -300,14 +329,55 @@ export default function PriceAreaChart({
       bbUpperRef.current = null;
       bbMiddleRef.current = null;
       bbLowerRef.current = null;
+      prevFirstDateRef.current = undefined;
+      prevLenRef.current = 0;
       setTooltip(null);
     };
   }, []);
 
+  // setData + 가시영역 보존:
+  //   - 첫 렌더 (prevLen=0): fitContent 로 전체 보임
+  //   - prepend (첫 candle date 변경 + 길이 증가): visible logical range 를 added 만큼 시프트해
+  //     사용자가 보던 위치를 유지. 시프트 안 하면 lazy load 후 갑자기 좌측으로 점프하는 UX.
+  //   - 그 외 (지표 등 동일 data 재할당, append, 길이 감소): 시프트 없이 그대로 두면 차트가 자체 보존.
   useEffect(() => {
-    seriesRef.current?.setData(data.map(mapCandle));
-    chartRef.current?.timeScale().fitContent();
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+
+    const newFirst = data[0]?.date;
+    const wasFirst = prevFirstDateRef.current;
+    const wasLen = prevLenRef.current;
+    const isInitial = wasLen === 0;
+    const added = data.length - wasLen;
+    const isPrepend = !isInitial && newFirst !== wasFirst && added > 0;
+
+    series.setData(data.map(mapCandle));
+
+    if (isInitial) {
+      chart.timeScale().fitContent();
+    } else if (isPrepend) {
+      const ts = chart.timeScale();
+      const r = ts.getVisibleLogicalRange();
+      if (r) {
+        ts.setVisibleLogicalRange({ from: r.from + added, to: r.to + added });
+      }
+    }
+
+    prevFirstDateRef.current = newFirst;
+    prevLenRef.current = data.length;
   }, [data]);
+
+  // 좌/우 panning lock — fixLeftEdge/fixRightEdge 는 lightweight-charts v5 의 timeScale 옵션.
+  // true 면 해당 방향으로 데이터 끝을 넘는 panning 을 차단.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.timeScale().applyOptions({
+      fixLeftEdge: !!lockLeftEdge,
+      fixRightEdge: !!lockRightEdge,
+    });
+  }, [lockLeftEdge, lockRightEdge]);
 
   useEffect(() => {
     markersRef.current?.setMarkers(markers.map(mapMarker));
