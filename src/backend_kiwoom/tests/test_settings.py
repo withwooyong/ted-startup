@@ -49,7 +49,7 @@ def test_settings_default_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.kiwoom_request_timeout_seconds == 15.0
     assert s.kiwoom_min_request_interval_seconds == 0.25
     assert s.kiwoom_concurrent_requests == 4
-    assert s.nxt_collection_enabled is True
+    assert s.nxt_collection_enabled is False  # C-1β: 디폴트 OFF (사용자 결정)
     assert s.backfill_max_days == 1095
     assert s.scheduler_enabled is False
     assert s.log_level == "INFO"
@@ -60,13 +60,13 @@ def test_settings_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_kiwoom_env(monkeypatch)
     monkeypatch.setenv("KIWOOM_DEFAULT_ENV", "prod")
     monkeypatch.setenv("KIWOOM_CONCURRENT_REQUESTS", "8")
-    monkeypatch.setenv("NXT_COLLECTION_ENABLED", "false")
+    monkeypatch.setenv("NXT_COLLECTION_ENABLED", "true")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", "x" * 44)  # Fernet 키 길이
 
     s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.kiwoom_default_env == "prod"
     assert s.kiwoom_concurrent_requests == 8
-    assert s.nxt_collection_enabled is False
+    assert s.nxt_collection_enabled is True
     assert s.kiwoom_credential_master_key == "x" * 44
 
 

@@ -29,13 +29,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.kiwoom._client import KiwoomClient
 from app.adapter.out.kiwoom.auth import KiwoomAuthClient
+from app.adapter.out.kiwoom.chart import KiwoomChartClient
 from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
 from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
+    reset_ingest_ohlcv_factory,
     reset_lookup_stock_factory,
     reset_sync_fundamental_factory,
     reset_sync_sector_factory,
     reset_sync_stock_factory,
+    set_ingest_ohlcv_factory,
     set_lookup_stock_factory,
     set_revoke_use_case,
     set_sync_fundamental_factory,
@@ -45,8 +48,10 @@ from app.adapter.web._deps import (
 )
 from app.adapter.web.routers.auth import router as auth_router
 from app.adapter.web.routers.fundamentals import router as fundamentals_router
+from app.adapter.web.routers.ohlcv import router as ohlcv_router
 from app.adapter.web.routers.sectors import router as sectors_router
 from app.adapter.web.routers.stocks import router as stocks_router
+from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
 from app.application.service.sector_service import SyncSectorMasterUseCase
 from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
@@ -61,6 +66,7 @@ from app.application.service.token_service import (
 from app.config.settings import get_settings
 from app.observability.logging import setup_logging
 from app.scheduler import (
+    OhlcvDailyScheduler,
     SectorSyncScheduler,
     StockFundamentalScheduler,
     StockMasterScheduler,
@@ -110,6 +116,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 ("scheduler_sector_sync_alias", settings.scheduler_sector_sync_alias),
                 ("scheduler_stock_sync_alias", settings.scheduler_stock_sync_alias),
                 ("scheduler_fundamental_sync_alias", settings.scheduler_fundamental_sync_alias),
+                ("scheduler_ohlcv_daily_sync_alias", settings.scheduler_ohlcv_daily_sync_alias),
             )
             if not value
         ]
@@ -261,6 +268,37 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     set_sync_fundamental_factory(_sync_fundamental_factory)
 
+    # C-1β: IngestDailyOhlcvUseCaseFactory — sync_stock factory 와 같은 패턴.
+    # nxt_collection_enabled 는 settings 로 lifespan 에서 묶음 (프로세스당 단일 정책, 1R H-1
+    # 패턴 일관 — 멀티 env / 멀티 nxt 정책 동시 운영은 향후 확장).
+    nxt_enabled = settings.nxt_collection_enabled
+
+    @asynccontextmanager
+    async def _ingest_ohlcv_factory(alias: str) -> AsyncIterator[IngestDailyOhlcvUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            chart = KiwoomChartClient(kiwoom_client)
+            yield IngestDailyOhlcvUseCase(
+                session_provider=_session_provider,
+                chart_client=chart,
+                nxt_collection_enabled=nxt_enabled,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    set_ingest_ohlcv_factory(_ingest_ohlcv_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
     # alias fail-fast 검증은 lifespan 진입 직후로 이동 (B-γ-2 2R H-1) — set_*_factory 후
     # raise 시 cleanup 우회 차단.
@@ -285,17 +323,26 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     fundamental_scheduler.start()
 
+    ohlcv_scheduler = OhlcvDailyScheduler(
+        factory=_ingest_ohlcv_factory,
+        alias=settings.scheduler_ohlcv_daily_sync_alias,
+        enabled=settings.scheduler_enabled,
+    )
+    ohlcv_scheduler.start()
+
     try:
         yield
     finally:
-        # A3-γ / B-α / B-γ-2: scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient
+        # A3-γ / B-α / B-γ-2 / C-1β: scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient
         # 호출이 graceful token revoke 와 충돌하지 않도록 보장.
+        ohlcv_scheduler.shutdown(wait=True)
         fundamental_scheduler.shutdown(wait=True)
         stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
 
         # 1R 2b M4: factory 싱글톤 unset — close 후 stale factory 가 라우터에 노출되지
         # 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 (factory 미초기화) 반환.
+        reset_ingest_ohlcv_factory()
         reset_sync_fundamental_factory()
         reset_lookup_stock_factory()
         reset_sync_stock_factory()
@@ -345,6 +392,7 @@ def create_app() -> FastAPI:
     app.include_router(sectors_router)
     app.include_router(stocks_router)
     app.include_router(fundamentals_router)
+    app.include_router(ohlcv_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

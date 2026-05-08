@@ -966,3 +966,116 @@ Phase B 4 chunk 완료 (B-α / B-β / B-γ-1 / B-γ-2):
   - C-1β 도 `--force-2b` 적대적 리뷰 강제
 
 후속 Phase C chunk: C-2 (ka10086 일별 보강 — 투자자별 + 외인 + 신용), C-3 (ka10082/83 주봉/월봉 — P1).
+
+---
+
+## 17. ka10081 일봉 OHLCV 자동화 (Phase C-1β, 2026-05-08)
+
+**Phase C 두 번째 chunk** — ka10081 의 UseCase + Router + Scheduler 자동화. C-1α 인프라 (Migration 005/006 + ORM + Repository + KiwoomChartClient.fetch_daily) 위에 비즈니스 로직을 얹는다.
+
+진입 전 결정 사항 (사용자 승인):
+- **nxt_collection_enabled 디폴트 OFF** — settings flag, 운영 전환 전 안전판. True 로 전환해도 stock.nxt_enable 별도 게이팅 (이중 차단)
+- **target_date_range = today - 365일 ~ today** — admin 호출 시 base_date 검증. 1년 cap (백필 1095일 vs 운영 sync 365일 분리)
+- **Cron = KST mon-fri 18:30** — fundamental cron 18:00 의 30분 후. master(17:30) → fundamental(18:00) → ohlcv(18:30) 직렬화
+- **lazy fetch (c) batch + fail-closed** — active stock 만 대상, ensure_exists 호출 안 함 (RPS 보존)
+
+### 17.1 핵심 설계 결정
+
+#### A. KRX/NXT 분리 ingest + per-(stock,exchange) 격리
+
+- `execute()` 가 종목 순회 + KRX 호출 + (옵션) NXT 호출 — 각각 try/except 로 격리
+- KRX 실패 → NXT 는 시도 (계획서 § 4.2 (a) 독립 호출)
+- 한 종목·한 거래소 KiwoomError → 해당 outcome 만 `errors` list 추가, 다음 종목·거래소 진행
+- `OhlcvSyncResult.errors[*]` 에 클래스명 only — 응답 본문 echo 차단 (B-α/B-β M-2 패턴 일관)
+
+#### B. NXT collection 이중 게이팅
+
+```python
+if not (self._nxt_enabled and stock.nxt_enable):
+    continue  # NXT skip
+```
+
+- `settings.nxt_collection_enabled` (프로세스 마스터 스위치) AND `stock.nxt_enable` (종목별 ka10100 응답 기반) — 둘 다 True 일 때만 NXT 호출.
+- 디폴트 OFF — KRX 만 적재. fail-closed (실수로 NXT 활성화 차단).
+
+#### C. base_date target_date_range 검증
+
+- `_validate_base_date`: `today - 365일 <= base_date <= today` 외 → ValueError
+- 라우터가 400 매핑 (admin 입력 검증)
+- cron 호출은 `base_date=None` → today 자동, 검증 통과
+
+#### D. refresh_one — KRX raise vs NXT 격리 (2a-M1 / 2b-L3 적용)
+
+- KRX 호출 실패 → KiwoomError 그대로 raise (라우터 4xx/5xx 매핑, admin 즉시 인지)
+- NXT 호출 실패 → KRX 가 이미 적재된 상태이므로 try/except 격리 → `OhlcvSyncResult.failed=1 + errors[NXT]` (응답 200, KRX 성공 명시)
+- 응답 사실 일관성: "KRX 성공, NXT 실패" 가 정확히 응답에 반영
+
+#### E. only_market_codes 화이트리스트 (2b-M2 적용)
+
+- `StockListMarketType.value` 화이트리스트 cross-check
+- 미등록 코드 → ValueError → 라우터 400 매핑
+- silent no-op 차단 (운영 진단 가시성)
+
+#### F. GET range cap (2b-M1 적용)
+
+- `GET /stocks/{code}/ohlcv/daily?start=&end=` 의 date range > 400일 → 400
+- 1년 sync 범위 + 안전 마진. backfill 누적 row × 다중 client × 거대 range 조합 DoS 차단
+- 인증 가드 미적용 (DB-only 공개) — Phase D 배포 시점 internet-facing 정책 결정 필요
+
+#### G. fail-fast lifespan 위치 (B-γ-2 2R H-1 패턴 일관)
+
+- `scheduler_ohlcv_daily_sync_alias` 도 `set_*_factory` 호출 **앞**에서 검증
+- raise 시 cleanup (`reset_*_factory`, `revoke_all_aliases`, `engine.dispose`) 우회 차단
+- 운영 실수로 alias 미설정 시에도 process boundary 안전망
+
+#### H. factory + scheduler shutdown 역순
+
+- shutdown 순서: `ohlcv → fundamental → stock → sector` (역순) → factory reset → revoke → engine.dispose
+- 실행 중 cron job 의 KiwoomClient 호출이 graceful token revoke 와 충돌하지 않도록 보장
+
+#### I. 응답 echo 차단 (vendor message 격리)
+
+- `KiwoomBusinessError.message` 는 logger only, 응답 detail 은 `{"return_code", "error": "KiwoomBusinessError"}` 만
+- `OhlcvSyncOutcome.error_class` 는 `type(exc).__name__` 만
+- vendor 응답 string 을 logger 인자에 포함 안 함 → `_safe_for_log` 미적용 (B-γ-2 패턴 차이 명시, 2b-M3)
+
+### 17.2 적대적 이중 리뷰 결과 + Fix 매핑
+
+**1R**: HIGH 0 / MEDIUM 6 (2a 3 + 2b 3) / LOW 6 → 5건 즉시 적용 + 회귀 4 추가 → **2R 진입 없이 PASS**
+
+| ID | 발견 | 적용 |
+|---|------|------|
+| 2a-M1 / 2b-L3 | refresh_one NXT 격리 부재 | KRX raise propagate, NXT try/except → errors 격리 |
+| 2a-M2 | refresh_one KRX KiwoomError propagate 테스트 누락 | `test_refresh_one_propagates_krx_kiwoom_error` 추가 |
+| 2a-M3 | fire_ohlcv_daily_sync 콜백 테스트 누락 | 4 cases 추가 (정상/예외 swallow/실패율 error/부분 실패 warning) |
+| 2b-M1 | GET range 무제한 DoS amplification | `GET_RANGE_MAX_DAYS=400` 가드 + 회귀 테스트 |
+| 2b-M2 | only_market_codes 화이트리스트 부재 | `_validate_market_codes` + `StockListMarketType.value` cross-check |
+| 2b-M3 | docstring vs 코드 불일치 (`_safe_for_log`) | docstring 정정 — 본 chunk 미적용 명시 |
+
+LOW 6건은 후속 chunk / 운영 정책 (date.today() KST 명시 / GET 인증 정책 / 자정 race / list materialization 등).
+
+### 17.3 결과
+
+- **테스트 694 passed / coverage 93.08%** (C-1α 639 + C-1β 55 신규: 46 신규 + 9 회귀)
+- mypy --strict ✅ / ruff ✅
+- 변경 파일: 코드 8 (service 신규 / repository 확장 / _deps 확장 / router 신규 / batch 신규 / scheduler 확장 / settings 수정 / main 통합) + 테스트 5 (3 신규 + 2 보강) + 4 회귀 픽스 (settings/scheduler/stock_master_scheduler 신규 alias env, ohlcv_router engine cache fixture)
+
+### 17.4 Defer (C-2 / 운영 검증 시점)
+
+| 항목 | 1R 리뷰 ID | 결정 시점 | 메모 |
+|------|-----------|----------|------|
+| GET 라우터 admin guard | 2b-M1 LOW 후속 | Phase D internet-facing | 현재 DB-only 공개. 배포 시 internet-facing 이면 admin 가드 추가 |
+| date.today() vs `datetime.now(KST).date()` | 2b-L1 | 후속 chunk | cron 영향 없음 — admin 호출 KST 명시 |
+| _validate_base_date 자정 race | 2b-L2 | 무시 가능 | 수십 마이크로초, 실용 영향 없음 |
+| OhlcvDailyRowOut.updated_at | 2a-L2 | Phase D 캐시 결정 시점 | fundamentals 패턴 일관 |
+| find_range adjusted 필터 | 2a-L3 | Phase D 비교 검증 시점 | 현재 모든 row adjusted=True |
+| C-1α 에서 상속 | NUMERIC magnitude / list cap / MappingProxyType / chart.py private import | 운영 dry-run 후 / 후속 chunk | § 16.5 동일 |
+
+### 17.5 Phase C 진입 후 다음 chunk
+
+| chunk | 내용 | 우선순위 |
+|-------|------|--------|
+| **C-2** | ka10086 일별 보강 (투자자별 + 외인 + 신용) | P0 — 백테스팅 시그널 핵심 |
+| 운영 dry-run | α/β/A3/B-α/β/γ + C-1α/β 통합 검증 | P0 — 키움 자격증명 필요 |
+| C-3 | ka10082/83 주봉/월봉 | P1 — 같은 chart endpoint, KiwoomChartClient 메서드 추가 |
+| Phase D | 시그널 백테스팅 (vectorbt + pandas) | 후속 |

@@ -65,8 +65,11 @@ class Settings(BaseSettings):
 
     # ---- NXT 수집 ----
     nxt_collection_enabled: bool = Field(
-        default=True,
-        description="False 면 KRX 만 수집 — 운영 전환 전 안전판",
+        default=False,
+        description=(
+            "False 디폴트 (사용자 결정, C-1β) — 운영 전환 전 안전판. KRX 만 수집. "
+            "True 로 전환 시에도 stock.nxt_enable 별도 게이팅"
+        ),
     )
 
     # ---- 백필 ----
@@ -99,6 +102,13 @@ class Settings(BaseSettings):
         default="",
         description=(
             "일간 stock fundamental sync cron job 이 사용할 키움 자격증명 alias (B-γ-2 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_ohlcv_daily_sync_alias: str = Field(
+        default="",
+        description=(
+            "일간 OHLCV sync cron job 이 사용할 키움 자격증명 alias (C-1β 추가). "
             "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
         ),
     )

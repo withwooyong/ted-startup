@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,3 +111,31 @@ class StockPriceRepository:
         result = await self._session.execute(upsert_stmt)
         await self._session.flush()
         return rowcount_of(result)
+
+    async def find_range(
+        self,
+        stock_id: int,
+        *,
+        exchange: ExchangeType,
+        start: date,
+        end: date,
+    ) -> Sequence[StockPriceKrx | StockPriceNxt]:
+        """[start, end] 시계열 조회 — KRX/NXT 분기 + trading_date asc.
+
+        Raises:
+            ValueError: start > end 또는 unsupported exchange (SOR).
+        """
+        if start > end:
+            raise ValueError(f"start ({start}) must be <= end ({end})")
+        model = self._model(exchange)
+        stmt = (
+            select(model)
+            .where(
+                model.stock_id == stock_id,
+                model.trading_date >= start,
+                model.trading_date <= end,
+            )
+            .order_by(model.trading_date.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())  # type: ignore[arg-type]

@@ -7,6 +7,81 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase C-1β — ka10081 OHLCV 자동화 (UseCase + Router + Scheduler, 이중 리뷰 1R PASS, 694 tests / 93.08%)
+
+**Phase C 두 번째 chunk** — C-1α 인프라 위에 자동화 (IngestDailyOhlcvUseCase + 라우터 3종 + OhlcvDailyScheduler) 추가. 백테스팅 OHLCV 의 자동 적재 파이프라인 완성.
+
+자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제. 1R HIGH 0 / MEDIUM 6 (2a 3 + 2b 3) / LOW 6 → 5건 즉시 적용 + 회귀 4 추가 → **2R 진입 없이 PASS** (CRITICAL/HIGH 0).
+
+### Decisions (사용자 승인)
+
+- **nxt_collection_enabled 디폴트 OFF** (settings flag) — 운영 전환 전 안전판. 이중 게이팅 (settings AND stock.nxt_enable)
+- **target_date_range = today - 365 ~ today** — admin 호출 base_date 1년 cap, ValueError → 400
+- **Cron = KST mon-fri 18:30** — fundamental 18:00 의 30분 후 (master 17:30 → fundamental 18:00 → ohlcv 18:30 직렬화)
+
+### Added — IngestDailyOhlcvUseCase (KRX/NXT 분리 ingest + per-(stock,exchange) 격리)
+
+- `app/application/service/ohlcv_daily_service.py` (신규) — `IngestDailyOhlcvUseCase.execute / refresh_one`, `OhlcvSyncResult / OhlcvSyncOutcome` (frozen slots, response echo 차단)
+- per-(stock, exchange) try/except — KRX 실패 → NXT 시도 (계획서 § 4.2 (a) 독립 호출)
+- `_validate_base_date` (today ± 365) + `_validate_market_codes` (StockListMarketType 화이트리스트, 2b-M2)
+- `refresh_one` — KRX raise propagate, NXT 실패 시 errors 격리 (KRX 이미 적재됨, 2a-M1 / 2b-L3)
+
+### Added — Router (POST sync + POST refresh + GET range)
+
+- `app/adapter/web/routers/ohlcv.py` (신규):
+  - `POST /api/kiwoom/ohlcv/daily/sync?alias=` (admin) — 전체 active stock 동기화
+  - `POST /api/kiwoom/stocks/{code}/ohlcv/daily/refresh?alias=&base_date=` (admin) — 단건 새로고침
+  - `GET /api/kiwoom/stocks/{code}/ohlcv/daily?start=&end=&exchange=` — DB only 시계열 조회
+- KiwoomError 매핑 (B-γ-2 패턴 일관): business→400 (message echo 차단) / credential→400 / rate→503 / upstream/validation→502
+- ValueError 매핑: "stock master not found" → 404, base_date 범위 → 400
+- **GET range cap = 400일** (2b-M1 DoS amplification 차단)
+
+### Added — Scheduler + Batch Job (KST mon-fri 18:30)
+
+- `app/scheduler.py` (확장) — `OhlcvDailyScheduler` + `OHLCV_DAILY_SYNC_JOB_ID` (StockFundamentalScheduler 패턴 일관)
+- `app/batch/ohlcv_daily_job.py` (신규) — `fire_ohlcv_daily_sync` callback, 실패율 10% 임계 alert (logger.error / warning / info 분기)
+
+### Added — Settings + Lifespan 통합
+
+- `app/config/settings.py` (수정) — `nxt_collection_enabled` 디폴트 **False** 로 변경 + `scheduler_ohlcv_daily_sync_alias` 추가
+- `app/adapter/web/_deps.py` (확장) — `IngestDailyOhlcvUseCaseFactory` + get/set/reset 패턴 (B-γ-2 일관) + `reset_token_manager` 일괄 unset 에 추가
+- `app/main.py` (수정) — `_ingest_ohlcv_factory` 등록 + `OhlcvDailyScheduler` start/shutdown + `ohlcv_router` 포함 + fail-fast alias 검증에 `scheduler_ohlcv_daily_sync_alias` 추가
+
+### Added — Repository 확장
+
+- `app/adapter/out/persistence/repositories/stock_price.py` (수정) — `find_range(stock_id, *, exchange, start, end)` 추가. start <= trading_date <= end, asc 정렬, start>end → ValueError, SOR → ValueError
+
+### Added — 1R 회귀 테스트 (이중 리뷰 발견 사항)
+
+- `test_ingest_daily_ohlcv_service.py` 보강:
+  - `test_refresh_one_propagates_krx_kiwoom_error` (2a-M2)
+  - `test_refresh_one_isolates_nxt_failure_after_krx_success` (2a-M1 / 2b-L3)
+  - `test_execute_rejects_unknown_market_code` + `test_execute_accepts_known_market_codes` (2b-M2)
+- `test_ohlcv_daily_scheduler.py` 보강 — `fire_ohlcv_daily_sync` 4 cases (정상 / 예외 swallow / 실패율 error / 부분 실패 warning, 2a-M3)
+- `test_ohlcv_router.py` 보강 — `test_get_ohlcv_rejects_oversized_range` (2b-M1)
+
+### Added — 신규 테스트 5 파일 / 55 cases
+
+- `tests/test_ingest_daily_ohlcv_service.py` (16 + 5 신규/회귀)
+- `tests/test_stock_price_repository_find_range.py` (6)
+- `tests/test_ohlcv_router.py` (15 + 1 회귀)
+- `tests/test_ohlcv_daily_scheduler.py` (5 + 4 콜백 회귀)
+- `tests/test_ohlcv_daily_deps.py` (4)
+
+### Changed — 기존 테스트 회귀 픽스 (4 cases)
+
+- `tests/test_settings.py` — nxt_collection_enabled 디폴트 False 반영
+- `tests/test_scheduler.py::test_lifespan_startup_and_shutdown_cycle_with_scheduler_enabled` — `SCHEDULER_OHLCV_DAILY_SYNC_ALIAS` env 추가
+- `tests/test_stock_master_scheduler.py::test_lifespan_starts_both_schedulers_with_valid_aliases` — 동일
+
+### Defer (Phase D / 운영 검증)
+
+- GET 라우터 admin guard (현재 DB-only 공개) — internet-facing 배포 시 정책 결정
+- date.today() KST 명시 (`datetime.now(KST).date()`) — cron 영향 없음, admin 호출 안전
+- find_range adjusted 필터 / OhlcvDailyRowOut.updated_at — 비교 검증 / 캐시 결정 시점
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase C-1α — ka10081 일봉 OHLCV 인프라 (Migration 005/006 + ORM + Repository + Adapter + ExchangeType enum, 이중 리뷰 1R + 2R, 639 tests / 93.44%) — Phase C 진입
 
 **Phase C 진입 첫 chunk** — 백테스팅 OHLCV 코어 인프라. ka10081 (주식일봉차트, P0) 의 Migration + ORM + Repository + Adapter + ExchangeType enum 도입. UseCase + Router + Scheduler 는 C-1β 에서.
