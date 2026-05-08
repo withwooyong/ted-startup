@@ -7,6 +7,86 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] feat(kiwoom): Phase C-2β — ka10086 일별 수급 자동화 (UseCase + Router + Scheduler + Lifespan, 이중 리뷰 1R PASS, 812 tests / 93.13%)
+
+**Phase C 네 번째 chunk** — ka10086 자동화 레이어 (UseCase + Router + Scheduler + Lifespan). C-2α 인프라 위에 자동화만 얹는 구조. C-1β (ka10081 자동화) 패턴을 daily_flow 도메인으로 mechanical 차용.
+
+자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제. 1R PASS (2a sonnet + 2b opus 모두 CRITICAL/HIGH 0). MEDIUM 2건은 C-1β 동일 패턴이라 본 chunk 범위 외로 보류.
+
+### Decisions
+
+- **C-1β 패턴 mechanical 차용** — UseCase / Router / Scheduler / Lifespan / Settings 시그니처 그대로 daily_flow 로 치환
+- **indc_mode 프로세스당 단일 정책** — lifespan factory 가 `DailyMarketDisplayMode.QUANTITY` 하드코딩 주입 (백테스팅 시그널 단위 일관성, 계획서 § 2.3 권장)
+- **cron = KST mon-fri 19:00** (ohlcv 18:30 + 30분 후) — ohlcv 적재 완료 후 수급 적재 시점에 stock master / OHLCV 모두 최신화 보장
+- **backfill 스크립트 보류** — C-1β 동일 방식, 별도 chunk (운영 정책 확정 후)
+
+### Added — IngestDailyFlowUseCase + Outcome/Result
+
+- `app/application/service/daily_flow_service.py` (신규) — `IngestDailyFlowUseCase`:
+  - 두 진입점: `execute(*, base_date, only_market_codes)` + `refresh_one(stock_code, *, base_date)`
+  - per-(stock, exchange) try/except — KiwoomError + Exception 안전망 (C-1β 일관)
+  - KRX/NXT 분리 ingest — `nxt_collection_enabled` settings flag + `stock.nxt_enable` 이중 게이팅
+  - `refresh_one` NXT 격리 (KRX 성공 후 NXT 실패 시 errors 격리, 전체 raise 안 함 — C-1β 2a-M1/2b-L3 일관)
+  - `_validate_base_date` (today - 365 ~ today) + `_validate_market_codes` (StockListMarketType 화이트리스트, silent no-op 차단)
+  - `DailyFlowSyncOutcome` / `DailyFlowSyncResult` slots dataclass (error_class 만 echo, vendor 응답 차단)
+
+### Added — POST/GET /api/kiwoom/daily-flow* 라우터
+
+- `app/adapter/web/routers/daily_flow.py` (신규):
+  - POST `/daily-flow/sync` (admin, body: base_date + only_market_codes)
+  - POST `/stocks/{code}/daily-flow/refresh` (admin, query: alias + base_date)
+  - GET `/stocks/{code}/daily-flow?start=&end=&exchange=` (DB only, KRX/NXT pattern, 400일 cap)
+  - KiwoomError 5계층 매핑 — business→400 / credential→400 / rate→503 / upstream/validation→502 / fallback→502
+  - KiwoomBusinessError.message 응답 echo 차단 (logger 만 기록, detail 은 비식별 메타)
+  - `DailyFlowRowOut` Pydantic (13 영속 필드 + indc_mode + 메타)
+
+### Added — fire_daily_flow_sync 콜백 + DailyFlowScheduler
+
+- `app/batch/daily_flow_job.py` (신규) — `fire_daily_flow_sync`:
+  - 모든 예외 swallow (cron 연속성)
+  - 실패율 > 10% → logger.error (oncall 알람) + sample[:10] (vendor string echo 없음)
+  - failed > 0 + ratio ≤ 10% → logger.warning (부분 실패)
+- `app/scheduler.py` (확장) — `DailyFlowScheduler`:
+  - `DAILY_FLOW_SYNC_JOB_ID = "daily_flow_sync_daily"`
+  - cron mon-fri 19:00 KST + max_instances=1 + coalesce=True + replace_existing=True
+  - start 멱등성 + shutdown wait=True 안전 + enabled=False 시 no-op
+
+### Added — IngestDailyFlowUseCaseFactory + lifespan 통합
+
+- `app/adapter/web/_deps.py` (확장) — `IngestDailyFlowUseCaseFactory` 타입 + get/set/reset_ingest_daily_flow_factory + reset_token_manager 일괄 unset
+- `app/config/settings.py` (확장) — `scheduler_daily_flow_sync_alias: str = ""` 필드 + lifespan fail-fast 검증 대상 추가
+- `app/main.py` (확장):
+  - `_ingest_daily_flow_factory` lifespan factory — KiwoomClient + KiwoomMarketCondClient 빌드 + close 보장
+  - `daily_flow_indc_mode = DailyMarketDisplayMode.QUANTITY` 하드코딩 (프로세스당 단일 정책)
+  - `DailyFlowScheduler.start` startup + `shutdown(wait=True)` teardown 역순 (daily_flow → ohlcv → fundamental → stock → sector)
+  - `reset_ingest_daily_flow_factory()` teardown 시 호출 (1R 2b M4 fail-closed)
+  - `daily_flow_router` include
+
+### Added — 52 신규 테스트 (812 / 93.13%)
+
+- `tests/test_ingest_daily_flow_service.py` (20 cases) — KRX-only / KRX+NXT / NXT skip / 부분 실패 / boundary date / refresh_one / inactive skip / indc_mode 전달 + 디폴트 / 빈 응답 / 적재 검증 / 화이트리스트 / cross-stock 회귀
+- `tests/test_daily_flow_router.py` (17 cases) — admin 401 / KiwoomError 5계층 매핑 / message echo 차단 회귀 / GET range cap / SOR 차단 / inverted window / 3 시나리오 단일 lifetime
+- `tests/test_daily_flow_scheduler.py` (9 cases) — 콜백 logger 4종 + scheduler 5종 (멱등성 + cron field 19:00 KST mon-fri)
+- `tests/test_daily_flow_deps.py` (4 cases) — get 503 / set-then-get / reset_token_manager 일괄 / 단독 reset
+- `tests/test_scheduler.py` + `tests/test_stock_master_scheduler.py` (회귀 1줄씩) — `SCHEDULER_DAILY_FLOW_SYNC_ALIAS` 환경변수 추가
+
+### Added — DoD § 10 체크리스트 갱신
+
+- `src/backend_kiwoom/docs/plans/endpoint-10-ka10086.md` § 10.1 / 10.2 — C-2β 코드 7개 / 테스트 5 카테고리 모두 [x] 마킹
+
+### Verified — 이중 리뷰 1R PASS (CRITICAL/HIGH 0)
+
+- **2a 일반 품질 (Sonnet)**: PASS, MEDIUM 2건 (errors mutable list / ValueError 메시지 검색 — 둘 다 C-1β 동일 패턴, 본 chunk 범위 외)
+- **2b 적대적 보안 (Opus)**: PASS, C-1β 9개 핵심 보안 패턴 일관 검증 (vendor echo 차단 / admin guard / KiwoomError 매핑 / per-(stock,exchange) outcome / only_market_codes 화이트리스트 / GET range cap / cross-stock pollution / factory unset / fail-fast 순서)
+
+### Known Issues (이번 세션 한정)
+
+- **MEDIUM 2 (C-1β 상속)**: `errors: list` mutable + `"stock master not found" in msg` 문자열 검색 — 다음 chunk 에서 일관 개선 권고 (errors → tuple / StockMasterNotFoundError 전용 예외)
+- **LOW 5 (C-1β 상속)**: only_market_codes max_length=4 vs pattern={1,2} dead constraint / DailyFlowRowOut.fetched_at None 타입 / CredentialNotFoundError·Inactive·CapacityExceeded 라우터 테스트 미커버 / GET exchange=NXT DB 분기 테스트 미커버 / refresh_one NXT 비-Kiwoom Exception 전파
+- **운영 검증 대기**: 가설 B (`--714`→-714) 정확성 / R15 단위 (외인 순매수 indc_tp 무시 항상 수량 가정) / NXT 가 KRX mirror 인지 cross-check / 페이지네이션 빈도 / active 3000 + NXT 1500 sync 실측 시간
+
+---
+
 ## [2026-05-09] feat(kiwoom): Phase C-2α — ka10086 일별 수급 인프라 (Migration 007 + ORM + Repository + Adapter + helpers, 이중 리뷰 1R PASS, 760 tests / 93.43%)
 
 **Phase C 세 번째 chunk** — ka10086 (일별주가요청) 의 인프라 (Migration + ORM + Repository + Adapter + helpers). ka10081 의 짝꿍 — 백테스팅 시그널 보강 (투자자별/외인/신용). UseCase + Router + Scheduler 는 C-2β 에서.
