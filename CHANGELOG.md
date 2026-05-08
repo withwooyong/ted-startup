@@ -7,6 +7,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase C-1α — ka10081 일봉 OHLCV 인프라 (Migration 005/006 + ORM + Repository + Adapter + ExchangeType enum, 이중 리뷰 1R + 2R, 639 tests / 93.44%) — Phase C 진입
+
+**Phase C 진입 첫 chunk** — 백테스팅 OHLCV 코어 인프라. ka10081 (주식일봉차트, P0) 의 Migration + ORM + Repository + Adapter + ExchangeType enum 도입. UseCase + Router + Scheduler 는 C-1β 에서.
+
+자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제. 1R HIGH 1 + MEDIUM 3 + LOW 2 → 2R 1 + sonnet M-1/M-2 적용 + 회귀 4 → 2R PASS (CRITICAL/HIGH 0).
+
+### Decisions (사용자 승인)
+
+- **lazy fetch RPS 보호 = (c) batch + fail-closed** (ADR § 13.4.1 deferred 해소) — Phase C 적재 시 미지 종목 logger.warning + skip. C-1β UseCase 에서 적용
+- **chunk 분할 — C-1α (인프라) + C-1β (자동화)** (B-γ-1/B-γ-2 패턴 일관)
+
+### Added — ExchangeType enum + build_stk_cd 헬퍼 (Phase C 첫 도입)
+
+- `app/application/constants.py` (확장) — `ExchangeType` StrEnum (KRX/NXT/SOR). B-γ-1 ADR § 14.5 deferred 결정 해소
+- `app/adapter/out/kiwoom/stkinfo.py` (확장) — `build_stk_cd(stock_code, exchange)` 헬퍼. `_validate_stk_cd_for_lookup` (B-β 6자리 ASCII) 재사용 + suffix 합성 (KRX → 005930 / NXT → 005930_NX / SOR → 005930_AL)
+
+### Added — Migration 005 + 006 (KRX/NXT 물리 분리)
+
+- `migrations/versions/005_kiwoom_stock_price_krx.py` (신규) — `stock_price_krx` 테이블 + UNIQUE(stock_id, trading_date, adjusted) + FK CASCADE + 2 인덱스
+- `migrations/versions/006_kiwoom_stock_price_nxt.py` (신규) — `stock_price_nxt` 테이블 (같은 컬럼 구조, 분리 마이그레이션 — 운영 중 NXT 토글 가능)
+- KRX/NXT 가격이 같은 종목·같은 날도 다를 수 있음 (master.md § 3.1 / 계획서 § 4.2)
+- `adjusted` boolean PK 일부 — upd_stkpc_tp=1 (수정주가, 백테스팅 디폴트) + =0 (raw 비교 검증) 두 row 동시 보유 가능
+
+### Added — ORM + Repository
+
+- `app/adapter/out/persistence/models/stock_price.py` (신규) — `_DailyOhlcvMixin` (KRX/NXT 공통 컬럼) + `StockPriceKrx` + `StockPriceNxt`
+- `app/adapter/out/persistence/models/__init__.py` (수정) — export 추가
+- `app/adapter/out/persistence/repositories/stock_price.py` (신규) — `StockPriceRepository`:
+  - `_MODEL_BY_EXCHANGE` 분기 (KRX/NXT — SOR 은 ValueError, Phase D 결정)
+  - `upsert_many` ON CONFLICT (stock_id, trading_date, adjusted) DO UPDATE
+  - `trading_date == date.min` 빈 응답 row 자동 skip
+  - 명시 update_set 11 항목 (B-γ-1 2R B-H3 패턴 일관, schema-drift 차단)
+
+### Added — KiwoomChartClient (chart.py)
+
+- `app/adapter/out/kiwoom/chart.py` (신규):
+  - `KiwoomChartClient.fetch_daily(stock_code, *, base_date, exchange=KRX, adjusted=True, max_pages=10)` — cont-yn 자동 페이지네이션, build_stk_cd 사전 검증, return_code != 0 → KiwoomBusinessError, flag-then-raise-outside-except (`__context__` 차단)
+  - `DailyChartRow` Pydantic — 모든 string 필드 max_length 강제 (B-γ-1 2R A-H1 패턴 / `dt:8`, `pred_pre_sig:1`, 숫자 `:32`, `stk_cd:20`, `return_msg:200`)
+  - `DailyChartResponse` (stk_cd 메아리 + stk_dt_pole_chart_qry list)
+  - `NormalizedDailyOhlcv` slots dataclass (stock_id + trading_date + exchange + adjusted + 9 OHLCV 필드)
+  - `to_normalized` — `_to_int`/`_to_decimal`/`_parse_yyyymmdd` 재사용 (B-γ-1 BIGINT/NaN/Infinity 가드 자동 적용)
+- **2R H-1 — 페이지네이션 cross-stock pollution 차단**: `strip_kiwoom_suffix` 기반 base code 비교. page N 응답 stk_cd base ≠ 요청 base → KiwoomResponseValidationError. base 비교 정책 — suffix stripped/동봉 양쪽 수용 (계획서 § 4.3 운영 미검증)
+
+### Added — 신규 테스트 4 파일 / 50 cases
+
+- `tests/test_exchange_type.py` (7) — ExchangeType StrEnum + build_stk_cd 합성/거부
+- `tests/test_kiwoom_chart_client.py` (20) — fetch_daily + KRX/NXT/SOR + 페이지네이션 + 정규화 + 2R 회귀 4 (cross-stock pollution / 빈 stk_cd / NXT base 매칭 stripped/full suffix)
+- `tests/test_stock_price_repository.py` (8) — KRX/NXT 분기 + upsert_many + 멱등 + raw vs adjusted + date.min skip + 다중 stock
+- `tests/test_migration_005_006.py` (15 — parametrize) — 두 마이그레이션 통합 검증
+
+### Documentation
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 16 신규 — C-1α 결정 + 1R/2R 매핑 + Defer 6 + C-1β 진입 결정 사항
+- 학습 패턴: H-1 페이지네이션 cross-stock pollution (base code 비교 정책)
+
+### Quality Gates
+
+- 테스트 **639 passed / coverage 93.44%** (이전 589 + 신규 50 / 회귀 0)
+- mypy --strict ✅ / ruff ✅ / FastAPI app create + ExchangeType + build_stk_cd 검증
+- 2R PASS — 1R HIGH 1 + sonnet MEDIUM 2 모두 적용, 신규 회귀 0, 학습 위협 회귀 0
+
+### 다음
+
+**Phase C-1β** — IngestDailyOhlcvUseCase + 라우터 (sync/refresh/조회) + OhlcvDailyScheduler (KST mon-fri 18:30) + lazy fetch (c) batch fail-closed 적용. 후속: C-2 (ka10086 일별 보강), C-3 (ka10082/83 주봉/월봉).
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase B-γ-2 — ka10001 펀더멘털 자동화 (UseCase + Router + Scheduler + Lifespan, 이중 리뷰 1R + 2R, 589 tests / 93.24%) — Phase B 마무리
 
 Phase B-γ-1 인프라 위에 비즈니스 로직 + 운영 자동화 layer 추가. **Phase B 마무리** — 이후 Phase C (OHLCV 백테스팅) 진입 가능.

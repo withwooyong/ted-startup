@@ -860,3 +860,109 @@ Phase B 4 chunk 완료 (B-α / B-β / B-γ-1 / B-γ-2):
    - (b) `ensure_exists` 에 stock_code 단위 in-flight cache (asyncio.Lock)
    - (c) batch 처리 + lazy fetch fail-closed
 2. **운영 dry-run 통합** (DoD § 10.3) — α/β/A3/B-α/B-β/B-γ-1/B-γ-2 합산 검증. ka10001 응답 45 필드 단위 검증 + 외부 벤더 PER/EPS/ROE 빈값 종목 패턴 + 부분 실패 임계 운영 테스트.
+
+---
+
+## 16. Phase C-1α — ka10081 일봉 OHLCV 인프라 (백테스팅 코어 진입) (2026-05-08)
+
+### 16.1 결정
+
+**Phase C 진입 첫 chunk** — 백테스팅 OHLCV 코어 인프라. ka10081 (주식일봉차트) 의 Migration + ORM + Repository + Adapter + ExchangeType enum 도입. UseCase + Router + Scheduler 는 C-1β 에서.
+
+진입 전 결정 사항 (사용자 승인):
+- **lazy fetch RPS 보호 = (c) batch + fail-closed** (ADR § 13.4.1 deferred 해소) — Phase C 적재 시 미지 종목은 logger.warning + skip. ensure_exists 호출 자체 안 함. 코드 단순 + RPS 완전 제어. C-1β UseCase 에서 적용
+- **chunk 분할 — C-1α (인프라) + C-1β (자동화)** — 1,172줄 작업계획서를 인프라/자동화로 분할 (B-γ-1/B-γ-2 패턴 일관)
+
+### 16.2 핵심 설계 결정
+
+#### A. ExchangeType StrEnum 신규 도입 (Phase C 첫)
+
+- `app/application/constants.py` 에 `ExchangeType` (KRX/NXT/SOR) 추가. B-γ-1 ADR § 14.5 deferred 결정 해소.
+- 본 chunk 는 KRX/NXT 만 영속화 (stock_price_krx/nxt). SOR 은 호출 가능하지만 영속화 미지원 — Phase D 결정.
+
+#### B. build_stk_cd 헬퍼 (시계열 endpoint 공통)
+
+- `(stock_code, exchange) → stk_cd suffix 합성`. KRX → `005930`, NXT → `005930_NX`, SOR → `005930_AL`.
+- `_validate_stk_cd_for_lookup` 재사용 (B-β 6자리 ASCII) — `_NX`/`_AL` 박힌 입력 거부.
+- `stkinfo.py` 에 추가 — ka10082/83/94/86 등 후속 시계열 endpoint 공통 사용.
+
+#### C. KRX/NXT 물리 분리 영속화
+
+- Migration 005 (`stock_price_krx`) + Migration 006 (`stock_price_nxt`) 두 테이블. master.md § 3.1 결정.
+- 같은 종목·같은 날의 KRX/NXT 가격이 다를 수 있음 (계획서 § 4.2). 수집 실패 격리·재현성 추적·백테스팅 시나리오 분기.
+- 운영 중 NXT 활성화/비활성화 토글 가능 (Migration 분리).
+
+#### D. UNIQUE(stock_id, trading_date, adjusted)
+
+- `adjusted` boolean 이 PK 일부 — `upd_stkpc_tp=1` (수정주가, 백테스팅 디폴트) 와 `=0` (raw) 두 row 동시 보유 가능. 비교 검증용.
+- ON CONFLICT DO UPDATE — 멱등성 + 부분 갱신.
+
+#### E. _DailyOhlcvMixin (DRY)
+
+- KRX/NXT 두 ORM 같은 컬럼 구조 공유. ka10082/83/94 도 본 mixin 차용 예정.
+- `updated_at` 의 `onupdate=func.now()` 는 raw INSERT/UPDATE 시 ORM-level 안 발동 — Repository.upsert_many 가 명시 update_set 으로 보완.
+
+#### F. StockPriceRepository._MODEL_BY_EXCHANGE (분기)
+
+- exchange 인자로 KRX/NXT 모델 분기. caller 는 어느 테이블인지 신경 안 씀.
+- SOR 은 `_MODEL_BY_EXCHANGE` 에서 빠짐 → `ValueError("unsupported exchange")`. Phase D 결정 시 추가.
+
+#### G. trading_date == date.min 빈 응답 표식
+
+- chart.py `to_normalized` 가 빈 dt 응답에 date.min 박음.
+- Repository.upsert_many 가 caller 안전망으로 skip — ka10081 응답이 잘못된 row 보내도 영속화 0.
+
+#### H. **2R H-1 적용 — 페이지네이션 cross-stock pollution 차단**
+
+- chart.py `fetch_daily` 의 페이지 루프에 `strip_kiwoom_suffix` 기반 base code 비교. 응답 stk_cd base ≠ 요청 base → `KiwoomResponseValidationError`.
+- 빈 string 응답은 통과 (계획서 § 4.3 — 키움이 root 에 stk_cd 항상 동봉하지는 않을 가능성. 운영 검증 후 strict 전환 검토).
+- base code 비교 — suffix stripped/동봉 양쪽 수용 (계획서 § 4.3 운영 미검증 동작 양쪽 안전).
+- 메시지에 attacker-influenced 응답값 echo 0.
+
+#### I. B-γ-1 가드 자동 적용
+
+- `_to_int` BIGINT / `_to_decimal` is_finite / Pydantic max_length 모두 stkinfo.py 헬퍼 재사용.
+- 명시 update_set (B-γ-1 2R B-H3 패턴) — schema-drift 차단.
+- flag-then-raise-outside-except (B-β 1R 2b-H2) — `__context__` 박힘 차단.
+
+### 16.3 1R 적대적 이중 리뷰 결과 + 2R 적용 매핑
+
+1R: HIGH 1 + MEDIUM 3 + LOW 2 → 2R 1 적용 + sonnet M-1/M-2 정정 + 회귀 4 추가 → 2R PASS.
+
+| 1R ID | 카테고리 | 적용 위치 |
+|-------|---------|----------|
+| **H-1** | 페이지네이션 cross-stock pollution | `chart.py:fetch_daily` base code 비교 + KiwoomResponseValidationError + 메시지 echo 0 |
+| sonnet M-1 | docstring SOR | `chart.py` Raises 절 정정 |
+| sonnet M-2 | local datetime import | `repositories/stock_price.py` top-level 이동 |
+
+2R 결과: **PASS** — 1R H-1 + sonnet M-1/M-2 모두 적용 검증, 신규 회귀 위협 0, 학습 위협 회귀 0.
+
+### 16.4 결과
+
+- **테스트 639 passed / coverage 93.44%** (이전 589 + B-γ-2 0회귀 + C-1α 50 신규)
+- mypy --strict ✅ / ruff ✅ / FastAPI app create + ExchangeType enum + build_stk_cd 검증
+- 변경 파일: 코드 8 (constants 확장 / stkinfo 확장 / chart 신규 / Migration 005·006 / models stock_price 신규 / models __init__ / repositories stock_price 신규) + 테스트 4 신규
+
+### 16.5 Defer (C-1β / C-2 / 운영 검증 시점)
+
+| 항목 | 1R/2R ID | 결정 시점 | 메모 |
+|------|---------|----------|------|
+| NUMERIC(8,4) magnitude 가드 (turnover_rate) | 1R 2b M-1 | 운영 dry-run | 키움 응답 magnitude 분포 검증 후 결정 (회귀 위협, 본 chunk 새 도입 X) |
+| stk_dt_pole_chart_qry list 길이 cap | 1R 2b M-2 | 운영 검증 후 | 페이지 당 row 수 cap (~600 가정 안전, 운영 후 cap 적용 검토) |
+| `_MODEL_BY_EXCHANGE` MappingProxyType | 1R 2b M-3 | 후속 chunk | mutable class attr — frozen 으로 immutable 화 |
+| chart.py 가 stkinfo private helper import | 1R 2b L-1 | 후속 chunk | `_normalize.py` 별도 모듈 추출 (ka10082/83/94 도 공유 시점) |
+| build_stk_cd 타입 가드 | 1R 2b L-2 | mypy strict 정책 유지 | 정적 차단 |
+| 응답 stk_cd 빈 string strict 전환 | 본 chunk H-1 | 운영 dry-run 후 | 키움이 항상 동봉하는지 검증 |
+
+### 16.6 다음 chunk
+
+**Phase C-1β** — ka10081 자동화:
+- `IngestDailyOhlcvUseCase` (active stock + KRX/NXT 동시 ingest, per-stock skip + counter, lazy fetch (c) batch fail-closed)
+- 라우터: `POST /api/kiwoom/ohlcv/daily/sync` (admin) + `POST /api/kiwoom/stocks/{code}/ohlcv/daily/refresh` (admin) + `GET /api/kiwoom/stocks/{code}/ohlcv/daily?exchange=KRX&start=&end=`
+- Scheduler: `OhlcvDailyScheduler` (KST mon-fri 18:30 — fundamental 18:00 의 30분 후, 시계열 적재 가장 마지막 단계)
+- C-1β 진입 전 결정 사항:
+  - `nxt_collection_enabled` settings flag (NXT 운영 토글)
+  - 백필 정책 (target_date_range, 최대 일자 cap)
+  - C-1β 도 `--force-2b` 적대적 리뷰 강제
+
+후속 Phase C chunk: C-2 (ka10086 일별 보강 — 투자자별 + 외인 + 신용), C-3 (ka10082/83 주봉/월봉 — P1).

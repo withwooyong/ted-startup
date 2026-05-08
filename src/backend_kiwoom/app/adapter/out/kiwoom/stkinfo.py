@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.adapter.out.kiwoom._client import KiwoomClient
 from app.adapter.out.kiwoom._exceptions import KiwoomResponseValidationError
-from app.application.constants import StockListMarketType
+from app.application.constants import ExchangeType, StockListMarketType
 
 VALID_MRKT_TP: Final[tuple[str, ...]] = ("0", "1", "2", "4", "7")
 """ka10101 mrkt_tp 유효값 (master.md § 11.3 - 다른 endpoint 와 의미 다름).
@@ -434,6 +434,32 @@ def strip_kiwoom_suffix(stk_cd: str) -> str:
     if not stk_cd:
         return stk_cd
     return stk_cd.split("_", maxsplit=1)[0]
+
+
+def build_stk_cd(stock_code: str, exchange: ExchangeType) -> str:
+    """`(stock_code, exchange) → 키움 호출용 stk_cd` (Phase C 첫 도입).
+
+    설계: endpoint-06-ka10081.md § 2.4. ka10081 / ka10082 / ka10083 / ka10094 등
+    시계열 endpoint 가 본 헬퍼로 stk_cd suffix 합성.
+
+    KRX:  '005930' → '005930'
+    NXT:  '005930' → '005930_NX'
+    SOR:  '005930' → '005930_AL'
+
+    pre-validation: stock_code 6자리 ASCII 숫자 (`STK_CD_LOOKUP_PATTERN` 재사용).
+    `_NX`/`_AL` suffix 가 박힌 입력은 거부 — caller 가 이미 base code 로 strip 후 호출.
+
+    Raises:
+        ValueError: stock_code 가 6자리 숫자 외 또는 미지원 ExchangeType.
+    """
+    _validate_stk_cd_for_lookup(stock_code)
+    if exchange is ExchangeType.KRX:
+        return stock_code
+    if exchange is ExchangeType.NXT:
+        return f"{stock_code}_NX"
+    if exchange is ExchangeType.SOR:
+        return f"{stock_code}_AL"
+    raise ValueError(f"unknown exchange: {exchange!r}")
 
 
 class StockBasicInfoRequest(BaseModel):

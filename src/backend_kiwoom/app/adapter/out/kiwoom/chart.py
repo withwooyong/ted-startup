@@ -1,0 +1,233 @@
+"""KiwoomChartClient — `/api/dostk/chart` 계열 어댑터 (Phase C-1α).
+
+설계: endpoint-06-ka10081.md § 6.1.
+
+범위 (C-1α): ka10081 (주식일봉차트) — 백테스팅 코어. 후속 ka10082/83/94 (주봉/월봉/년봉)
+는 같은 endpoint path 공유, 본 클래스에 메서드 추가 예정 (Phase C-1β/γ).
+
+책임:
+- KiwoomClient 위임 — 토큰 / 재시도 / rate-limit / cont-yn 페이지네이션
+- stock_code 6자리 ASCII 사전 검증 (build_stk_cd) — `_NX`/`_AL` suffix 입력 거부
+- exchange 별 stk_cd suffix 합성 (KRX/NXT/SOR)
+- 응답 row 파싱 (Pydantic) — KiwoomBusinessError / KiwoomResponseValidationError 매핑
+- 페이지네이션 결과 합치기
+
+`_to_int` / `_to_decimal` / `_parse_yyyymmdd` 는 `stkinfo.py` 의 helper 재사용 — B-γ-1
+2R A-C1/A-C2/A-H4 가드 (BIGINT/NaN/Infinity) 자동 적용.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from app.adapter.out.kiwoom._client import KiwoomClient
+from app.adapter.out.kiwoom._exceptions import (
+    KiwoomBusinessError,
+    KiwoomResponseValidationError,
+)
+from app.adapter.out.kiwoom.stkinfo import (
+    _parse_yyyymmdd,
+    _to_decimal,
+    _to_int,
+    build_stk_cd,
+    strip_kiwoom_suffix,
+)
+from app.application.constants import ExchangeType
+
+
+class DailyChartRow(BaseModel):
+    """ka10081 응답 row — 키움 응답 그대로 (string + 부호 포함).
+
+    B-γ-1 2R A-H1 패턴 — 모든 string 필드 max_length 강제 (DB 컬럼 sync, vendor 거대
+    string DataError 차단).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    cur_prc: Annotated[str, Field(max_length=32)] = ""
+    trde_qty: Annotated[str, Field(max_length=32)] = ""
+    trde_prica: Annotated[str, Field(max_length=32)] = ""
+    dt: Annotated[str, Field(max_length=8)] = ""
+    open_pric: Annotated[str, Field(max_length=32)] = ""
+    high_pric: Annotated[str, Field(max_length=32)] = ""
+    low_pric: Annotated[str, Field(max_length=32)] = ""
+    pred_pre: Annotated[str, Field(max_length=32)] = ""
+    pred_pre_sig: Annotated[str, Field(max_length=1)] = ""
+    trde_tern_rt: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        stock_id: int,
+        exchange: ExchangeType,
+        adjusted: bool,
+    ) -> NormalizedDailyOhlcv:
+        """ka10081 row → NormalizedDailyOhlcv.
+
+        빈 dt → trading_date=date.min. caller (Repository.upsert_many) 가 skip.
+        `_to_int` BIGINT 가드 / `_to_decimal` is_finite 가드 자동 적용 (B-γ-1).
+        """
+        return NormalizedDailyOhlcv(
+            stock_id=stock_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            exchange=exchange,
+            adjusted=adjusted,
+            open_price=_to_int(self.open_pric),
+            high_price=_to_int(self.high_pric),
+            low_price=_to_int(self.low_pric),
+            close_price=_to_int(self.cur_prc),
+            trade_volume=_to_int(self.trde_qty),
+            trade_amount=_to_int(self.trde_prica),
+            prev_compare_amount=_to_int(self.pred_pre),
+            prev_compare_sign=self.pred_pre_sig or None,
+            turnover_rate=_to_decimal(self.trde_tern_rt),
+        )
+
+
+class DailyChartResponse(BaseModel):
+    """ka10081 응답 — `stk_cd` 메아리 + `stk_dt_pole_chart_qry` list."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    stk_cd: Annotated[str, Field(max_length=20)] = ""
+    stk_dt_pole_chart_qry: list[DailyChartRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedDailyOhlcv:
+    """ka10081 정규화 도메인 — Repository 가 보는 형태.
+
+    `trading_date == date.min` 은 빈 응답 row 표식 — caller (Repository.upsert_many) 가
+    영속화 직전 skip.
+    """
+
+    stock_id: int
+    trading_date: date
+    exchange: ExchangeType
+    adjusted: bool
+    open_price: int | None
+    high_price: int | None
+    low_price: int | None
+    close_price: int | None
+    trade_volume: int | None
+    trade_amount: int | None
+    prev_compare_amount: int | None
+    prev_compare_sign: str | None
+    turnover_rate: Decimal | None
+
+
+class KiwoomChartClient:
+    """`/api/dostk/chart` 어댑터 (C-1α — ka10081 주식 일봉)."""
+
+    PATH = "/api/dostk/chart"
+    DAILY_API_ID = "ka10081"
+    DAILY_MAX_PAGES = 10  # 키움 일봉 1 페이지 ~600 거래일 추정. 3년 백필 = 2 페이지 + 여유
+
+    def __init__(self, kiwoom_client: KiwoomClient) -> None:
+        self._client = kiwoom_client
+
+    async def fetch_daily(
+        self,
+        stock_code: str,
+        *,
+        base_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        adjusted: bool = True,
+        max_pages: int | None = None,
+    ) -> list[DailyChartRow]:
+        """단일 종목·단일 거래소의 일봉 시계열. cont-yn 자동 페이지네이션.
+
+        Parameters:
+            stock_code: 6자리 ASCII 숫자 base code (`_NX`/`_AL` suffix 거부).
+            base_date: 기준일자 (이 날짜를 포함한 과거 시계열 응답).
+            exchange: KRX (디폴트) / NXT / SOR. build_stk_cd 가 suffix 합성.
+            adjusted: True 면 수정주가 (백테스팅 디폴트). False 는 raw 비교 검증용.
+            max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 DAILY_MAX_PAGES.
+
+        Raises:
+            ValueError: stock_code 가 6자리 ASCII 숫자 외 (build_stk_cd 사전 검증).
+                SOR 은 호출 가능 — 영속화는 Phase D 결정 (Repository 단계 거부).
+            KiwoomCredentialRejectedError: 401/403.
+            KiwoomBusinessError: 응답 return_code != 0.
+            KiwoomRateLimitedError: 429 재시도 후 최종 실패.
+            KiwoomUpstreamError: 5xx · 네트워크 · 파싱 실패.
+            KiwoomResponseValidationError: Pydantic 검증 실패 또는 stk_cd 메아리 mismatch
+                (C-1α 2R H-1 cross-stock pollution 차단).
+            KiwoomMaxPagesExceededError: max_pages 도달.
+        """
+        # build_stk_cd 가 stock_code 사전 검증 + suffix 합성 (raise 시 호출 차단)
+        expected_stk_cd = build_stk_cd(stock_code, exchange)
+
+        body: dict[str, Any] = {
+            "stk_cd": expected_stk_cd,
+            "base_dt": base_date.strftime("%Y%m%d"),
+            "upd_stkpc_tp": "1" if adjusted else "0",
+        }
+
+        cap = max_pages if max_pages is not None else self.DAILY_MAX_PAGES
+        all_rows: list[DailyChartRow] = []
+
+        async for page in self._client.call_paginated(
+            api_id=self.DAILY_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=cap,
+        ):
+            # B-β 1R 2b-H2 패턴 — flag-then-raise-outside-except (__context__ 박힘 차단)
+            validation_failed = False
+            parsed: DailyChartResponse | None = None
+            try:
+                parsed = DailyChartResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(f"{self.DAILY_API_ID} 응답 검증 실패")
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+
+            # C-1α 2R H-1 — 페이지 응답의 root.stk_cd 메아리 검증 (base code 비교).
+            # 키움 백엔드 버그 / proxy 캐시 / MITM 으로 page N 의 stk_cd 가 다른 종목으로 박혀
+            # 오면 silent merge → cross-stock pollution.
+            #
+            # base code 비교 정책 (계획서 § 4.3 — 운영 미검증):
+            # - 응답 stk_cd 가 `005930_NX` (suffix 동봉) → base `005930`
+            # - 응답 stk_cd 가 `005930` (suffix stripped) → base `005930`
+            # - 둘 다 expected base 와 일치하면 통과. base 가 다르면 cross-stock 으로 raise.
+            # 빈 string 은 응답 미동봉 (운영 검증 후 strict 전환 검토).
+            # 메시지에 attacker-influenced 응답값 echo 금지 — 비식별 메타만.
+            if parsed.stk_cd:
+                response_base = strip_kiwoom_suffix(parsed.stk_cd)
+                expected_base = strip_kiwoom_suffix(expected_stk_cd)
+                if response_base != expected_base:
+                    raise KiwoomResponseValidationError(
+                        f"{self.DAILY_API_ID} 응답 stk_cd 메아리 mismatch (요청 vs 응답)"
+                    )
+
+            if parsed.return_code != 0:
+                # KiwoomClient.call_paginated 가 보통 return_code 검증을 처리하지만 page 단위
+                # 검증 안전망. message 는 attacker-influenced 라 비식별 메타만 (B-α/B-β M-2).
+                raise KiwoomBusinessError(
+                    api_id=self.DAILY_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+
+            all_rows.extend(parsed.stk_dt_pole_chart_qry)
+
+        return all_rows
+
+
+__all__ = [
+    "DailyChartResponse",
+    "DailyChartRow",
+    "KiwoomChartClient",
+    "NormalizedDailyOhlcv",
+]

@@ -7,6 +7,7 @@ from app.adapter.out.persistence.models.raw_response import RawResponse
 from app.adapter.out.persistence.models.sector import Sector
 from app.adapter.out.persistence.models.stock import Stock
 from app.adapter.out.persistence.models.stock_fundamental import StockFundamental
+from app.adapter.out.persistence.models.stock_price import StockPriceKrx, StockPriceNxt
 
 __all__ = [
     "KiwoomCredential",
@@ -15,4 +16,6 @@ __all__ = [
     "Sector",
     "Stock",
     "StockFundamental",
+    "StockPriceKrx",
+    "StockPriceNxt",
 ]
