@@ -7,6 +7,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase B-γ-1 — ka10001 펀더멘털 인프라 (Migration 004 + ORM + Repository + Adapter, 이중 리뷰 1R + 2R, 550 tests / 94.28%)
+
+Phase B-γ 1,164줄 작업계획서를 **B-γ-1 (인프라) + B-γ-2 (UseCase/Router/Scheduler)** 두 chunk 로 분할 (사용자 승인). 본 chunk 는 인프라만 — 백테스팅 진입점에 펀더멘털 (PER/EPS/ROE/PBR/EV/BPS + 시총/외인/250일통계/일중시세 45 필드) 일별 스냅샷 적재 인프라.
+
+자동 분류: **계약 변경 (contract)** — Migration 신규 + Pydantic Response 45 필드. `--force-2b` 적대적 리뷰 강제 실행. 1R CRITICAL 2 + HIGH 4 + MEDIUM 5 + LOW 5 → 2R 12개 적용 + 회귀 테스트 16 → 2R PASS (CRITICAL/HIGH 0).
+
+거래소 정책: **(a) KRX only** (계획서 § 4.3 권장) — NXT/SOR 추가는 Phase C 후. 일 1회 cron 시간: **18:00 KST** (ka10099 stock master 직후, B-γ-2 에서 코드화).
+
+### Added — Migration 004 + ORM
+
+- `migrations/versions/004_kiwoom_stock_fundamental.py` (신규) — `kiwoom.stock_fundamental` 테이블 + UNIQUE(stock_id, asof_date, exchange) + FK ON DELETE CASCADE + 2 인덱스 (`asof_date`, `stock_id`). 5 카테고리 컬럼 (A 기본 / B 자본·시총·외인 / C 재무비율 / D 250일통계 / E 일중시세) + `fundamental_hash` CHAR(32) + 타임스탬프
+- `app/adapter/out/persistence/models/stock_fundamental.py` (신규) — `StockFundamental` ORM (45 매핑 + CHAR(2)/CHAR(1)/CHAR(32) 타입 sync, 2R L-2)
+
+### Added — Repository
+
+- `app/adapter/out/persistence/repositories/stock_fundamental.py` (신규) — `StockFundamentalRepository`:
+  - `upsert_one(row, *, stock_id, expected_stock_code=None)` — ON CONFLICT (stock_id, asof_date, exchange) DO UPDATE RETURNING + populate_existing. **2R B-H2** caller 가 `expected_stock_code` 명시 시 row 와 cross-check (orphaned/cross-link row 차단). **2R B-H3** 명시 update_set 46 항목 (Stock repository 패턴 일관, schema-drift 차단)
+  - `find_latest(stock_id, *, exchange="KRX")` — 가장 최근 asof_date row
+  - `find_by_stock_and_date(...)` — backfill 멱등성 검증용
+  - `compute_fundamental_hash(row)` — PER/EPS/ROE/PBR/EV/BPS 6 필드 MD5. `Decimal.normalize() + format("f")` (지수 표기 위험 방지, 2R M-1)
+
+### Added — Adapter (KiwoomStkInfoClient.fetch_basic_info)
+
+- `app/adapter/out/kiwoom/stkinfo.py` (확장) — ka10001 섹션 신규:
+  - `_to_int(value)` — zero-padded · 부호 · 콤마 → int | None. **2R A-C1** BIGINT 경계 가드 (`_BIGINT_MIN`/`_BIGINT_MAX`) — DataError 트랜잭션 abort 차단
+  - `_to_decimal(value)` — string → Decimal | None. **2R A-C2/A-H4** `is_finite()` 가드 (NaN/Infinity/sNaN 거부). **2R M-2** `replace(",", "")` 추가 (`_to_int` 비대칭 해소)
+  - `strip_kiwoom_suffix(stk_cd)` — `"005930_NX" → "005930"` (응답 메아리 방어)
+  - `StockBasicInfoRequest` — Pydantic Request (`STK_CD_LOOKUP_PATTERN` 재사용, ka10100 패턴 일관)
+  - `StockBasicInfoResponse` — 45 필드 + `250hgst` alias + `extra="ignore"`. **2R A-H1** 모든 string 필드 `Field(max_length=N)` 강제 (DB CHAR/VARCHAR sync, vendor 거대 string DataError 차단)
+  - `NormalizedFundamental` (slots dataclass) — 45 필드 + `exchange="KRX"` 고정
+  - `normalize_basic_info(response, *, asof_date, exchange="KRX")` — **2R C-M4** kwarg BC 보존 (Phase C NXT 진입 시 시그니처 변경 0)
+  - `KiwoomStkInfoClient.fetch_basic_info(stock_code)` — `_validate_stk_cd_for_lookup` 재사용 (ka10100 패턴) + flag-then-raise-outside-except (B-β 1R 2b-H2 회귀 방어). **2R A-L1** `stk_cd[:50]!r` 메시지 cap
+
+### Added — 신규 테스트 3 파일 / 52 cases
+
+- `tests/test_migration_004.py` (8 cases) — 스키마 / UNIQUE 복합키 / FK CASCADE / 5 카테고리 컬럼 타입 / server_default / downgrade 멱등성
+- `tests/test_kiwoom_stkinfo_basic_info.py` (33 cases) — 어댑터 + Pydantic + 정규화 + 2R 회귀 14 (BIGINT overflow / NaN / Infinity / sNaN / 쉼표 / Pydantic max_length 4 / repr cap / exchange kwarg)
+- `tests/test_stock_fundamental_repository.py` (14 cases) — upsert_one + find_latest + fundamental_hash + 2R 회귀 3 (B-H2 mismatch / matching / legacy)
+
+### Changed — 기존 파일 갱신
+
+- `app/adapter/out/persistence/models/__init__.py` — StockFundamental export 추가
+- `app/adapter/out/kiwoom/stkinfo.py` — 모듈 docstring 갱신 (ka10001 (B-γ-1 KRX-only) 추가, 2R L-1)
+
+### Documentation
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 14 신규 — B-γ-1 결정 + 2R 이슈 매핑 12 + Defer 5 (B-M1 vendor metric / C-M3 partial-failure / 단위 검증 / `_parse_yyyymmdd` 알림 / `replace(",")` 의도)
+- B-γ-2 진입 전 결정 사항 명시 (partial-failure / stock_id resolution invariant / mismatch alert / lookup 의존)
+
+### Quality Gates
+
+- 테스트 **550 passed / coverage 94.28%** (이전 498 + 36 Step 1 + 16 2R 회귀 / 회귀 0)
+- mypy --strict ✅ / ruff ✅ / Alembic upgrade head testcontainers ✅ / FastAPI app create ✅
+- 2R PASS — 1R CRITICAL/HIGH 12개 모두 적용 검증 + 신규 회귀 위협 0건
+
+### 다음 chunk
+
+**Phase B-γ-2** — `SyncStockFundamentalUseCase` + 라우터 (sync 전체 / refresh 단건) + `StockFundamentalScheduler` (KST 18:00 평일).
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase B-β — ka10100 단건 종목 조회 (gap-filler / lazy fetch, 이중 리뷰 1R, 498 tests / 93.73%) — `abce7e0`
 
 Phase B 의 두 번째 chunk — ka10099 (bulk sync) 의 gap-filler. ka10100 (단건 종목 조회) endpoint 의 어댑터·Repository.upsert_one·LookupStockUseCase·라우터·lifespan 통합. Phase C OHLCV 적재가 stock 마스터 미스 시 호출할 lazy fetch 진입점 (`ensure_exists`) 마련.

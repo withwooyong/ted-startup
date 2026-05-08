@@ -1,9 +1,10 @@
 """KiwoomStkInfoClient — `/api/dostk/stkinfo` 계열 어댑터.
 
-설계: endpoint-14-ka10101.md § 6.1 + endpoint-03-ka10099.md § 6.1 + endpoint-04-ka10100.md § 6.1.
+설계: endpoint-14-ka10101.md § 6.1 + endpoint-03-ka10099.md § 6.1 + endpoint-04-ka10100.md § 6.1
++ endpoint-05-ka10001.md § 6.1.
 
-범위: ka10101 (sector 마스터, A3-α) + ka10099 (stock 마스터, B-α) + ka10100 (stock gap-filler, B-β).
-ka10001 등은 Phase B 후속.
+범위: ka10101 (sector 마스터, A3-α) + ka10099 (stock 마스터, B-α) + ka10100 (stock gap-filler, B-β)
++ ka10001 (종목 기본 정보 / 펀더멘털, B-γ-1 KRX-only).
 
 책임:
 - KiwoomClient(공통 트랜스포트) 위임 — 토큰 / 재시도 / rate-limit / 페이지네이션
@@ -20,6 +21,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -219,13 +221,16 @@ _STK_CD_LOOKUP_RE = re.compile(STK_CD_LOOKUP_PATTERN)
 
 
 def _validate_stk_cd_for_lookup(stk_cd: str) -> None:
-    """ka10100 stk_cd 사전 검증 — 6자리 ASCII 숫자만. 호출 자체 차단.
+    """ka10100/ka10001 stk_cd 사전 검증 — 6자리 ASCII 숫자만. 호출 자체 차단.
 
     Excel R22 Length=6 — 다른 차트 endpoint 의 `_NX`/`_AL` suffix(Length=20) 와 다름.
     빈 문자열·공백·영문·unicode digit 모두 거부.
+
+    예외 메시지의 입력값은 50자 cap (B-γ-1 2R A-L1) — 거대 입력 / 제어문자 박힌 입력이
+    log line 폭주 / RTL override 등 공격 시 message 자체를 dos 수단으로 쓰는 것 차단.
     """
     if not _STK_CD_LOOKUP_RE.fullmatch(stk_cd):
-        raise ValueError(f"ka10100 stk_cd 는 6자리 ASCII 숫자만 허용: {stk_cd!r}")
+        raise ValueError(f"stk_cd 는 6자리 ASCII 숫자만 허용: {stk_cd[:50]!r}")
 
 
 class StockLookupResponse(BaseModel):
@@ -330,6 +335,341 @@ class NormalizedStock:
     requested_market_type: str
 
 
+# =============================================================================
+# ka10001 — 주식 기본 정보 (펀더멘털 + 일중 시세 + 250일 통계, Phase B-γ-1)
+# =============================================================================
+#
+# KRX-only 결정 (계획서 § 4.3 권장 (a)) — `_NX`/`_AL` suffix 미지원. NXT/SOR 추가는
+# Phase C 후 결정. stk_cd 6자리 ASCII 검증은 ka10100 의 `_validate_stk_cd_for_lookup`
+# 재사용.
+#
+# 응답 45 필드 → 5 카테고리:
+# - A. 기본 (3): stk_cd, stk_nm, setl_mm
+# - B. 자본/시총/외인 (11): fav, cap, flo_stk, mac, mac_wght, for_exh_rt, repl_pric,
+#                            crd_rt, dstr_stk, dstr_rt, fav_unit
+# - C. 재무 비율 (9): per, eps, roe, pbr, ev, bps, sale_amt, bus_pro, cup_nga
+# - D. 250일/연중 통계 (8): 250hgst/lwst (alias), oyr_hgst/lwst
+# - E. 일중 시세 (14): cur_prc, pre_sig, pred_pre, flu_rt, trde_qty, trde_pre,
+#                      open/high/low/upl/lst/base_pric, exp_cntr_pric/qty
+
+
+_BIGINT_MIN: Final[int] = -(2**63)
+_BIGINT_MAX: Final[int] = 2**63 - 1
+
+
+def _to_int(value: str) -> int | None:
+    """zero-padded · 부호 포함 string → int | None.
+
+    BIGINT 경계 가드 (B-γ-1 2R A-C1) — Python int 임의정밀 → PG BIGINT 한계
+    `[-2^63, 2^63-1]` 초과 시 None 반환. 키움 응답이 단위 변경 / 외부 벤더 오염으로
+    거대 숫자 보내도 트랜잭션 abort 차단.
+
+    예:
+        "+181400" → 181400 (양수 부호 흡수)
+        "-91200"  → -91200 (음수 부호 보존)
+        "00136000" → 136000 (zero-padded 흡수)
+        ""        → None
+        "-"       → None
+        "+"       → None
+        "abc"     → None (raise 안 함 — caller 가 검증 별도)
+        "9" * 30  → None (BIGINT overflow)
+
+    raise 안 함 — 외부 벤더 빈/잘못 응답은 NULL 영속화 정책 (§ 11.2).
+    """
+    if not value:
+        return None
+    stripped = value.strip().replace(",", "")
+    if stripped in ("-", "+"):
+        return None
+    try:
+        n = int(stripped)
+    except ValueError:
+        return None
+    if not (_BIGINT_MIN <= n <= _BIGINT_MAX):
+        return None
+    return n
+
+
+def _to_decimal(value: str) -> Decimal | None:
+    """zero-padded · 부호 포함 string → Decimal | None.
+
+    is_finite 가드 (B-γ-1 2R A-C2 / A-H4) — `Decimal("NaN")`/`Decimal("Infinity")`/
+    `Decimal("sNaN")` 은 InvalidOperation 발생 안 함 (정상 생성). 그러나 PG NUMERIC
+    에 NaN 박히면 다운스트림 백테스팅 산술 폭발 + signaling NaN 은 hash 산출 시
+    raise. `is_finite()` 로 finite 값만 통과시킴.
+
+    `_to_int` 와의 비대칭 해소 (M-2): 천단위 콤마 처리도 동일하게 적용.
+
+    예:
+        "+0.0800"   → Decimal("+0.0800")
+        "-25.5000"  → Decimal("-25.5000")
+        "1,234.56"  → Decimal("1234.56")
+        ""          → None
+        "-"         → None
+        "abc"       → None
+        "NaN"       → None (vendor 오염 차단)
+        "Infinity"  → None
+        "sNaN"      → None
+    """
+    if not value:
+        return None
+    stripped = value.strip().replace(",", "")
+    if stripped in ("-", "+"):
+        return None
+    try:
+        d = Decimal(stripped)
+    except (InvalidOperation, ValueError):
+        return None
+    if not d.is_finite():
+        return None
+    return d
+
+
+def strip_kiwoom_suffix(stk_cd: str) -> str:
+    """`'005930_NX' → '005930'`, `'005930_AL' → '005930'`, `'005930' → '005930'`.
+
+    응답 `stk_cd` 가 요청 그대로 메아리쳐서 suffix 가 박혀 올 수 있음 (§ 11.2).
+    영속화 시 base code (6자리) 로 정규화 — Stock 마스터 FK lookup 일관.
+    """
+    if not stk_cd:
+        return stk_cd
+    return stk_cd.split("_", maxsplit=1)[0]
+
+
+class StockBasicInfoRequest(BaseModel):
+    """ka10001 요청 본문 — sector/ka10099/ka10100 패턴 일관 (wire 직전 Pydantic 검증).
+
+    KRX-only — `_NX`/`_AL` suffix 미지원. `STK_CD_LOOKUP_PATTERN` (`^[0-9]{6}$`)
+    재사용 — ka10100 과 같은 6자리 ASCII 단일 source.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stk_cd: Annotated[
+        str,
+        Field(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+    ]
+
+
+class StockBasicInfoResponse(BaseModel):
+    """ka10001 응답 — flat object (45 필드 + return_code/msg).
+
+    `populate_by_name=True` 로 비-식별자 키 (`250hgst` 등) 를 alias 로 매핑.
+    `extra="ignore"` — 키움이 신규 필드 추가해도 어댑터 안 깨짐.
+
+    필드 빈값 정책: 모든 string 필드 디폴트 "" — 외부 벤더 미공급 (PER/EPS/ROE 등)
+    종목도 응답 파싱 가능. 정규화 시 None 으로 변환.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore", populate_by_name=True)
+
+    # B-γ-1 2R A-H1 — 모든 string 필드에 max_length 강제 (Pydantic → DB CHAR/VARCHAR sync).
+    # vendor 가 거대 string 보내도 DataError 트랜잭션 abort + 메모리 RSS 폭증 차단.
+    # 길이 위반 → ValidationError → flag-then-raise-outside-except 가
+    # KiwoomResponseValidationError 로 매핑.
+
+    # A. 기본
+    stk_cd: Annotated[str, Field(min_length=1, max_length=20)]
+    stk_nm: Annotated[str, Field(max_length=40)] = ""
+    setl_mm: Annotated[str, Field(max_length=2)] = ""
+
+    # B. 자본 / 시총 / 외인 — 모두 정규화 거치므로 32자 cap (BIGINT 19자 + 부호/콤마 여유)
+    fav: Annotated[str, Field(max_length=32)] = ""
+    fav_unit: Annotated[str, Field(max_length=10)] = ""
+    cap: Annotated[str, Field(max_length=32)] = ""
+    flo_stk: Annotated[str, Field(max_length=32)] = ""
+    mac: Annotated[str, Field(max_length=32)] = ""
+    mac_wght: Annotated[str, Field(max_length=32)] = ""
+    for_exh_rt: Annotated[str, Field(max_length=32)] = ""
+    repl_pric: Annotated[str, Field(max_length=32)] = ""
+    crd_rt: Annotated[str, Field(max_length=32)] = ""
+    dstr_stk: Annotated[str, Field(max_length=32)] = ""
+    dstr_rt: Annotated[str, Field(max_length=32)] = ""
+
+    # C. 재무 비율 (외부 벤더 — 빈값 가능)
+    per: Annotated[str, Field(max_length=32)] = ""
+    eps: Annotated[str, Field(max_length=32)] = ""
+    roe: Annotated[str, Field(max_length=32)] = ""
+    pbr: Annotated[str, Field(max_length=32)] = ""
+    ev: Annotated[str, Field(max_length=32)] = ""
+    bps: Annotated[str, Field(max_length=32)] = ""
+    sale_amt: Annotated[str, Field(max_length=32)] = ""
+    bus_pro: Annotated[str, Field(max_length=32)] = ""
+    cup_nga: Annotated[str, Field(max_length=32)] = ""
+
+    # D. 250일 / 연중 통계 — Pydantic 식별자 첫 글자 숫자 불가 → alias
+    high_250d: Annotated[str, Field(default="", alias="250hgst", max_length=32)]
+    high_250d_date: Annotated[str, Field(default="", alias="250hgst_pric_dt", max_length=8)]
+    high_250d_pre_rate: Annotated[str, Field(default="", alias="250hgst_pric_pre_rt", max_length=32)]
+    low_250d: Annotated[str, Field(default="", alias="250lwst", max_length=32)]
+    low_250d_date: Annotated[str, Field(default="", alias="250lwst_pric_dt", max_length=8)]
+    low_250d_pre_rate: Annotated[str, Field(default="", alias="250lwst_pric_pre_rt", max_length=32)]
+    oyr_hgst: Annotated[str, Field(max_length=32)] = ""
+    oyr_lwst: Annotated[str, Field(max_length=32)] = ""
+
+    # E. 일중 시세
+    cur_prc: Annotated[str, Field(max_length=32)] = ""
+    pre_sig: Annotated[str, Field(max_length=1)] = ""
+    pred_pre: Annotated[str, Field(max_length=32)] = ""
+    flu_rt: Annotated[str, Field(max_length=32)] = ""
+    trde_qty: Annotated[str, Field(max_length=32)] = ""
+    trde_pre: Annotated[str, Field(max_length=32)] = ""
+    open_pric: Annotated[str, Field(max_length=32)] = ""
+    high_pric: Annotated[str, Field(max_length=32)] = ""
+    low_pric: Annotated[str, Field(max_length=32)] = ""
+    upl_pric: Annotated[str, Field(max_length=32)] = ""
+    lst_pric: Annotated[str, Field(max_length=32)] = ""
+    base_pric: Annotated[str, Field(max_length=32)] = ""
+    exp_cntr_pric: Annotated[str, Field(max_length=32)] = ""
+    exp_cntr_qty: Annotated[str, Field(max_length=32)] = ""
+
+    # 처리 결과
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedFundamental:
+    """ka10001 정규화 도메인 — Repository 가 보는 형태.
+
+    KRX-only (§ 4.3) — `exchange="KRX"` 고정. NXT/SOR 추가 시 enum 도입 (Phase C 후).
+    `asof_date` 는 응답 시점 KST 오늘 — 응답 본문에 timestamp 부재 (§ 11.2).
+    PER/EPS/ROE/PBR/EV/BPS 는 외부 벤더 미공급 종목에서 None 가능.
+    """
+
+    stock_code: str            # base code (suffix 제거)
+    exchange: str              # 'KRX' 고정 (B-γ-1 KRX-only)
+    asof_date: date            # 응답 시점 KST 오늘
+    stock_name: str
+    settlement_month: str | None
+
+    # B. 자본 / 시총 / 외인
+    face_value: int | None
+    face_value_unit: str | None
+    capital_won: int | None
+    listed_shares: int | None
+    market_cap: int | None
+    market_cap_weight: Decimal | None
+    foreign_holding_rate: Decimal | None
+    replacement_price: int | None
+    credit_rate: Decimal | None
+    circulating_shares: int | None
+    circulating_rate: Decimal | None
+
+    # C. 재무 비율
+    per_ratio: Decimal | None
+    eps_won: int | None
+    roe_pct: Decimal | None
+    pbr_ratio: Decimal | None
+    ev_ratio: Decimal | None
+    bps_won: int | None
+    revenue_amount: int | None
+    operating_profit: int | None
+    net_profit: int | None
+
+    # D. 250일 / 연중 통계
+    high_250d: int | None
+    high_250d_date: date | None
+    high_250d_pre_rate: Decimal | None
+    low_250d: int | None
+    low_250d_date: date | None
+    low_250d_pre_rate: Decimal | None
+    year_high: int | None
+    year_low: int | None
+
+    # E. 일중 시세
+    current_price: int | None
+    prev_compare_sign: str | None
+    prev_compare_amount: int | None
+    change_rate: Decimal | None
+    trade_volume: int | None
+    trade_compare_rate: Decimal | None
+    open_price: int | None
+    high_price: int | None
+    low_price: int | None
+    upper_limit_price: int | None
+    lower_limit_price: int | None
+    base_price: int | None
+    expected_match_price: int | None
+    expected_match_volume: int | None
+
+
+def normalize_basic_info(
+    response: StockBasicInfoResponse,
+    *,
+    asof_date: date,
+    exchange: str = "KRX",
+) -> NormalizedFundamental:
+    """ka10001 응답 → NormalizedFundamental.
+
+    KRX-only (§ 4.3) — `exchange="KRX"` 디폴트. Phase C 에서 NXT/SOR 추가 시 caller
+    에 명시 (BC 보존, B-γ-1 2R C-M4). NormalizedFundamental.exchange 는 caller 가 명시한
+    값 그대로 영속화 (Repository upsert_one 의 ON CONFLICT 키 일치).
+
+    응답 stk_cd 의 suffix 는 strip — 응답이 `005930_NX` 로 메아리치는 경우 방어
+    (§ 11.2). caller 의 stock_id resolution 은 base code 로 한다 (ADR § 14 invariant).
+    """
+    base_code = strip_kiwoom_suffix(response.stk_cd)
+
+    return NormalizedFundamental(
+        stock_code=base_code,
+        exchange=exchange,
+        asof_date=asof_date,
+        stock_name=response.stk_nm,
+        settlement_month=response.setl_mm or None,
+
+        # B
+        face_value=_to_int(response.fav),
+        face_value_unit=response.fav_unit or None,
+        capital_won=_to_int(response.cap),
+        listed_shares=_to_int(response.flo_stk),
+        market_cap=_to_int(response.mac),
+        market_cap_weight=_to_decimal(response.mac_wght),
+        foreign_holding_rate=_to_decimal(response.for_exh_rt),
+        replacement_price=_to_int(response.repl_pric),
+        credit_rate=_to_decimal(response.crd_rt),
+        circulating_shares=_to_int(response.dstr_stk),
+        circulating_rate=_to_decimal(response.dstr_rt),
+
+        # C
+        per_ratio=_to_decimal(response.per),
+        eps_won=_to_int(response.eps),
+        roe_pct=_to_decimal(response.roe),
+        pbr_ratio=_to_decimal(response.pbr),
+        ev_ratio=_to_decimal(response.ev),
+        bps_won=_to_int(response.bps),
+        revenue_amount=_to_int(response.sale_amt),
+        operating_profit=_to_int(response.bus_pro),
+        net_profit=_to_int(response.cup_nga),
+
+        # D
+        high_250d=_to_int(response.high_250d),
+        high_250d_date=_parse_yyyymmdd(response.high_250d_date),
+        high_250d_pre_rate=_to_decimal(response.high_250d_pre_rate),
+        low_250d=_to_int(response.low_250d),
+        low_250d_date=_parse_yyyymmdd(response.low_250d_date),
+        low_250d_pre_rate=_to_decimal(response.low_250d_pre_rate),
+        year_high=_to_int(response.oyr_hgst),
+        year_low=_to_int(response.oyr_lwst),
+
+        # E
+        current_price=_to_int(response.cur_prc),
+        prev_compare_sign=response.pre_sig or None,
+        prev_compare_amount=_to_int(response.pred_pre),
+        change_rate=_to_decimal(response.flu_rt),
+        trade_volume=_to_int(response.trde_qty),
+        trade_compare_rate=_to_decimal(response.trde_pre),
+        open_price=_to_int(response.open_pric),
+        high_price=_to_int(response.high_pric),
+        low_price=_to_int(response.low_pric),
+        upper_limit_price=_to_int(response.upl_pric),
+        lower_limit_price=_to_int(response.lst_pric),
+        base_price=_to_int(response.base_pric),
+        expected_match_price=_to_int(response.exp_cntr_pric),
+        expected_match_volume=_to_int(response.exp_cntr_qty),
+    )
+
+
 class KiwoomStkInfoClient:
     """`/api/dostk/stkinfo` 어댑터. KiwoomClient 위임."""
 
@@ -342,6 +682,9 @@ class KiwoomStkInfoClient:
 
     # ka10100 전용 메타 (B-β)
     STOCK_LOOKUP_API_ID = "ka10100"
+
+    # ka10001 전용 메타 (B-γ-1)
+    STOCK_BASIC_INFO_API_ID = "ka10001"
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
@@ -500,6 +843,58 @@ class KiwoomStkInfoClient:
 
         if validation_failed:
             raise KiwoomResponseValidationError(f"{self.STOCK_LOOKUP_API_ID} 응답 검증 실패")
+        if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+            raise RuntimeError("unreachable: parsed None without validation_failed")
+        return parsed
+
+    async def fetch_basic_info(self, stock_code: str) -> StockBasicInfoResponse:
+        """ka10001 — 단건 종목 기본 정보 (펀더멘털 + 일중 시세 + 250일 통계).
+
+        Phase B-γ-1 KRX-only 결정 (계획서 § 4.3 권장 (a)):
+        - `_NX`/`_AL` suffix 미지원 — 6자리 ASCII 숫자만 (`STK_CD_LOOKUP_PATTERN`).
+        - NXT 시세 분리 호출은 Phase C 의 ka10086 에 위임.
+        - NXT/SOR 추가는 Phase C 후 결정 — 그때 시그니처에 `exchange` 인자 추가.
+
+        Pre-validation:
+        - stk_cd 6자리 숫자 강제 — ka10100 의 `_validate_stk_cd_for_lookup` 재사용.
+          호출 자체 차단 (키움 응답 받기 전 ValueError).
+
+        트랜스포트 정책 (ka10100 패턴 일관):
+        - `KiwoomClient.call` 이 return_code != 0 → KiwoomBusinessError 자동 raise.
+        - 401/403/429/5xx/네트워크 도메인 매핑도 트랜스포트 책임.
+        - 본 메서드는 stk_cd 검증 + Pydantic 응답 파싱만 책임.
+
+        Raises:
+            ValueError: stk_cd 가 6자리 숫자 외.
+            KiwoomCredentialRejectedError: 401/403.
+            KiwoomBusinessError: 응답 return_code != 0 (존재하지 않는 종목 등).
+            KiwoomRateLimitedError: 429 (재시도 후 최종 실패).
+            KiwoomUpstreamError: 5xx · 네트워크 · 파싱 실패.
+            KiwoomResponseValidationError: 응답 Pydantic 검증 실패.
+        """
+        _validate_stk_cd_for_lookup(stock_code)
+
+        # 1R L1 sector/ka10099/ka10100 패턴 일관 — wire 직전 Pydantic 검증
+        request_body: dict[str, Any] = StockBasicInfoRequest(stk_cd=stock_code).model_dump()
+
+        result = await self._client.call(
+            api_id=self.STOCK_BASIC_INFO_API_ID,
+            endpoint=self.PATH,
+            body=request_body,
+        )
+
+        # flag-then-raise-outside-except (B-β 1R 2b-H2 패턴 일관) — Pydantic
+        # ValidationError 가 KiwoomResponseValidationError 의 __context__/__cause__
+        # 에 박히지 않도록 except 밖에서 raise.
+        validation_failed = False
+        parsed: StockBasicInfoResponse | None = None
+        try:
+            parsed = StockBasicInfoResponse.model_validate(result.body)
+        except ValidationError:
+            validation_failed = True
+
+        if validation_failed:
+            raise KiwoomResponseValidationError(f"{self.STOCK_BASIC_INFO_API_ID} 응답 검증 실패")
         if parsed is None:  # pragma: no cover — validation_failed 와 mutex
             raise RuntimeError("unreachable: parsed None without validation_failed")
         return parsed

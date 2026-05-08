@@ -633,3 +633,105 @@ Phase B-β (ka10100 종목 정보 리스트) — gap-filler 단건 보강. Norma
 ### 13.5 다음 chunk
 
 Phase B-γ (ka10001 주식 기본 정보) — 펀더멘털 보강. Phase B 마무리. 작업계획서 1,164줄 → chunk 분할 검토 필요.
+
+---
+
+## 14. Phase B-γ-1 — ka10001 펀더멘털 인프라 chunk (Migration + ORM + Repository + Adapter) (2026-05-08)
+
+### 14.1 결정
+
+- 1,164줄 작업계획서를 **B-γ-1 (인프라) + B-γ-2 (UseCase/Router/Scheduler)** 두 chunk 로 분할 (사용자 승인). 본 chunk 는 인프라만.
+- **거래소 호출 정책 = (a) KRX only** — NXT/SOR 추가는 Phase C 후 결정 (계획서 § 4.3 권장 (a) 채택, § 11.1 #1).
+- **일 1회 cron 시간 = 18:00 KST** — ka10099 stock master cron 18:00 직후. is_active stock 조회 시점에 마스터 최신화 보장 (§ 11.1 #5). 본 chunk 는 cron 미배포, B-γ-2 에서 코드화.
+- **2R 적대적 이중 리뷰 (--force-2b)** 강제 적용 — 계약 변경 분류로 자동 게이트는 2b 생략이지만 사용자 명시 요청.
+
+### 14.2 핵심 설계 결정 (2R 적용 후)
+
+#### A. 어댑터 — `KiwoomStkInfoClient.fetch_basic_info` (B-α/B-β 패턴 차용)
+
+- **stk_cd 6자리 ASCII 강제** — ka10100 의 `_validate_stk_cd_for_lookup` 재사용 (`STK_CD_LOOKUP_PATTERN = r"^[0-9]{6}$"`). KRX-only 결정과 일관 — `_NX`/`_AL` suffix 거부.
+- **Pydantic Request wire 직전 검증** — `StockBasicInfoRequest(stk_cd=...).model_dump()` 패턴 일관 (sector / ka10099 / ka10100).
+- **flag-then-raise-outside-except** — `validation_failed` flag 캡처 후 except 밖에서 raise. Pydantic ValidationError 가 `KiwoomResponseValidationError.__context__/__cause__` 에 박히지 않음 (B-β 1R 2b-H2 회귀 방어).
+
+#### B. 응답 모델 — `StockBasicInfoResponse` (45 필드 + 250hgst alias)
+
+- `populate_by_name=True` + `Field(alias="250hgst")` — Pydantic 식별자 첫 글자 숫자 불가 회피.
+- `extra="ignore"` — 키움이 신규 필드 추가해도 어댑터 안 깨짐.
+- **2R A-H1 적용 — 모든 string 필드 `Field(max_length=N)` 강제**: vendor 거대 string 응답 시 Pydantic 단계 차단 → `KiwoomResponseValidationError` 자동 매핑. CHAR/VARCHAR DB 컬럼과 sync (`setl_mm:2`, `pre_sig:1`, `fav_unit:10`, 숫자 string 32자, `return_msg:200`).
+
+#### C. 정규화 — `_to_int` / `_to_decimal` (vendor 입력 보호)
+
+- **2R A-C1 적용 — `_to_int` BIGINT 경계 가드** (`_BIGINT_MIN = -(2**63)`, `_BIGINT_MAX = 2**63 - 1`): 거대 정수 응답 시 None 반환 → 트랜잭션 abort 차단. Python int 임의정밀 + PG BIGINT 한계 mismatch 방어.
+- **2R A-C2/A-H4 적용 — `_to_decimal` `is_finite()` 가드**: `Decimal("NaN")`/`Decimal("Infinity")`/`Decimal("sNaN")` 모두 None. PG NUMERIC 이 NaN 받지만 다운스트림 백테스팅 산술 폭발 + signaling NaN 의 hash 산출 시 InvalidOperation raise 차단.
+- **2R M-2 — `_to_decimal` 도 `replace(",", "")`** — `_to_int` 와 비대칭 해소.
+- **2R A-L1 — `_validate_stk_cd_for_lookup` 메시지 `stk_cd[:50]!r` cap**: log line 폭주 / RTL override 공격 차단.
+
+#### D. 도메인 — `NormalizedFundamental` (slots dataclass) + `normalize_basic_info`
+
+- `exchange="KRX"` 디폴트 (B-γ-1 KRX-only). **2R C-M4 — kwarg 인자화** (`exchange: str = "KRX"`) 로 BC 보존 — Phase C NXT/SOR 추가 시 시그니처 변경 0.
+- `stock_code` / `stock_name` 은 dataclass 에는 있고 영속화 안 함 — FK 는 stock_id, stock_name 은 Stock 마스터 권위 (mismatch alert 는 B-γ-2 UseCase 책임).
+- `strip_kiwoom_suffix` — 응답 stk_cd 가 `_NX`/`_AL` 메아리쳐도 base 6자리로 정규화.
+
+#### E. Repository — `StockFundamentalRepository`
+
+- **2R B-H2 적용 — `upsert_one(row, *, stock_id, expected_stock_code=None)`**: caller 가 `expected_stock_code` 명시 시 `row.stock_code` 와 일치 검증, mismatch 시 ValueError. Phase C 의 OHLCV ingest 가 stock_id resolution 실수로 cross-link row 만드는 사고 차단.
+- **2R B-H3 적용 — 명시 update_set 46 항목**: `for col in values if col not in (...)` 자동 생성 패턴 폐기. NormalizedFundamental 의 미래 필드 추가 시 silent contract change 방지 (Stock repository 패턴 일관). UNIQUE 키 (stock_id/asof_date/exchange) 정확히 제외.
+- `populate_existing` — UPDATE 시 session identity map stale 방어 (B-α/B-β 패턴 일관).
+
+#### F. fundamental_hash 산출
+
+- **PER/EPS/ROE/PBR/EV/BPS 6 필드 MD5** — 일중 시세 변경은 hash 영향 없음 (외부 벤더 갱신만 검출). MD5 는 변경 감지 fingerprint 용도, 보안 무결성 목적 아님 (1R C-L3 명시).
+- `Decimal.normalize() + format("f")` — `"15.20"` ↔ `"15.2"` 정규화 일관 (§ 11.2 알려진 위험). `format("g")` 절대 금지 (지수 표기 위험).
+
+#### G. ORM / Migration
+
+- Migration 004 — `kiwoom.stock_fundamental` 테이블 + UNIQUE(stock_id, asof_date, exchange) + FK CASCADE + 2 인덱스 (`asof_date`, `stock_id`).
+- **2R L-2 — ORM CHAR 타입 sync**: `settlement_month` / `prev_compare_sign` / `fundamental_hash` 모두 `CHAR(N)` (Migration SQL `CHAR(N)` 와 일치).
+
+### 14.3 1R 적대적 이중 리뷰 결과 + 2R 적용 매핑
+
+1R: CRITICAL 2 + HIGH 4 + MEDIUM 5 + LOW 5 → 2R 에서 12개 적용 + 회귀 테스트 16 추가.
+
+| 1R ID | 카테고리 | 적용 위치 |
+|-------|---------|----------|
+| A-C1 | BIGINT overflow | `_to_int` `_BIGINT_MIN`/`_BIGINT_MAX` 가드 |
+| A-C2 | NaN/Infinity/sNaN | `_to_decimal` `is_finite()` 가드 |
+| A-H1 | Pydantic max_length | `StockBasicInfoResponse` 45 필드 + `return_msg` |
+| A-H4 | sNaN → hash raise | A-C2 가드로 자동 차단 |
+| B-H2 | stock_id ↔ stock_code | `upsert_one(expected_stock_code=...)` cross-check |
+| B-H3 | update_set schema-drift | 명시 update_set 46 항목 |
+| M-1 | _hash_part 주석 오기 | 주석 정정 (`format("f")` 명시) |
+| M-2 | _to_decimal 쉼표 비대칭 | `replace(",", "")` 추가 |
+| C-M4 | exchange 하드코딩 | `normalize_basic_info` 에 kwarg |
+| L-1 | 모듈 docstring | ka10001 (B-γ-1) 추가 |
+| L-2 | ORM CHAR 타입 | `settlement_month`/`prev_compare_sign`/`fundamental_hash` |
+| A-L1 | repr cap | `stk_cd[:50]!r` |
+
+2R 결과: **PASS** — 1R 12개 모두 PASS 검증, 신규 회귀 위협 0건 (B-M2 CPU 폭주 → Python 3.12 PEP 686 보호 / timing-side / Decimal context override / UTF-8 multi-byte / update_set exchange 잘못 갱신 모두 NOT EXPLOITABLE).
+
+### 14.4 결과
+
+- **테스트 550 passed / coverage 94.28%** (이전 498 + 36 Step 1 + 16 2R 회귀)
+- mypy --strict ✅ / ruff ✅ / Alembic upgrade head testcontainers ✅ / FastAPI app create ✅
+- 변경 파일: 코드 5 (Migration 004 신규, StockFundamental ORM 신규, models __init__ 갱신, StockFundamentalRepository 신규, stkinfo.py 확장) + 테스트 3 신규
+- 회귀 0건 — A1/A2/A3-α/A3-β/A3-γ/F1/B-α/B-β 모두 영향 없음
+
+### 14.5 Defer (B-γ-2 또는 운영 검증 시점)
+
+| 항목 | 1R ID | 결정 시점 | 메모 |
+|------|-------|-----------|------|
+| vendor non-numeric metric (logger.warning + 히스토그램) | B-M1 | Phase F monitoring | `_to_int`/`_to_decimal` 의 None path 진입 시 logger metric. 현재는 silent NULL — 운영팀이 vendor 이상 무알림 |
+| `KiwoomBusinessError` partial-failure 정책 | C-M3 | B-γ-2 작업계획서 | 단건 endpoint 라 본 chunk 무관, 다음 chunk SyncStockFundamentalUseCase 가 multi-stock loop 에서 한 종목 KiwoomBusinessError → 전체 abort 차단 책임 |
+| `replace(",", "")` 의도 명확화 | B-M5 | docstring 보강 시점 | 키움 명세에 콤마 부재 — 안전망 처리. 미사용 변환은 미래 표면 |
+| `_parse_yyyymmdd` silently None 알림 | B-L2 | 운영 1주 모니터 | 잘못된 응답 무알림 — B-α 시점 결정 |
+| 단위 (mac/cap/listed_shares) 운영 검증 후 컬럼 주석 | § 11.1 #2 | DoD § 10.3 운영 dry-run 후 | 영업일 1회 ka10001 호출 후 cur_prc × listed_shares 와 비교 |
+
+### 14.6 다음 chunk
+
+**Phase B-γ-2** — `SyncStockFundamentalUseCase` + `POST /api/kiwoom/fundamentals/sync` 라우터 + `POST /api/kiwoom/stocks/{stock_code}/fundamental/refresh` 단건 라우터 + `StockFundamentalScheduler` (KST 18:00 평일).
+
+진입 전 결정 사항 (B-γ-2 작업계획서):
+- **partial-failure 정책** (C-M3) — multi-stock loop 에서 한 종목 KiwoomBusinessError 발생 시 (a) per-stock try/except 후 success/failed counter 누적 (B-α 패턴 일관) / (b) 일정 비율 (10%, § 11.1 #7) 초과 시 전체 fail. (a) 권장.
+- **stock_id resolution 책임** — 반드시 `Stock.find_by_code(strip_kiwoom_suffix(response.stk_cd))` → stock_id → `upsert_one(row, stock_id=, expected_stock_code=stock.stock_code)` 패턴 강제. 통합 테스트로 invariant 검증.
+- **mismatch alert** (계획서 § 6.3) — 응답 stk_nm ≠ Stock.stock_name 시 `logger.warning` + Sentry alert. 적재는 진행.
+- **lookup 의존** — Phase B-β 의 `LookupStockUseCase.ensure_exists` 가 미지 종목 보강. ka10001 호출 시 active stock 만 대상이라 ensure_exists 호출 불필요할 가능성 — 작업계획서에서 결정.
