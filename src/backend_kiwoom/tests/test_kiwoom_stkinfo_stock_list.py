@@ -385,9 +385,7 @@ def test_stock_list_response_default_empty_list() -> None:
 
 def test_stock_list_response_alias_list_supported() -> None:
     """JSON 키는 'list' (키움 응답 그대로) — alias 동작 검증."""
-    resp = StockListResponse.model_validate(
-        {"list": [{"code": "005930", "name": "삼성전자"}], "return_code": 0}
-    )
+    resp = StockListResponse.model_validate({"list": [{"code": "005930", "name": "삼성전자"}], "return_code": 0})
     assert len(resp.items) == 1
     assert resp.items[0].code == "005930"
 
@@ -490,8 +488,7 @@ def test_to_normalized_mock_env_forces_nxt_enable_false() -> None:
     assert n.nxt_enable is False, "mock 환경은 응답 nxtEnable 무시"
 
 
-def test_to_normalized_market_code_always_uses_requested(
-) -> None:
+def test_to_normalized_market_code_always_uses_requested() -> None:
     """1R H1 — 응답 marketCode 와 무관하게 요청 mrkt_tp 가 권위 있는 source.
 
     Cross-market zombie row 방지 — deactivate_missing 격리 보장 위해 요청값 우선.

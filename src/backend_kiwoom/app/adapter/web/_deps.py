@@ -23,7 +23,10 @@ from contextlib import AbstractAsyncContextManager
 from fastapi import Depends, Header, HTTPException, status
 
 from app.application.service.sector_service import SyncSectorMasterUseCase
-from app.application.service.stock_master_service import SyncStockMasterUseCase
+from app.application.service.stock_master_service import (
+    LookupStockUseCase,
+    SyncStockMasterUseCase,
+)
 from app.application.service.token_service import RevokeKiwoomTokenUseCase, TokenManager
 from app.config.settings import Settings, get_settings
 
@@ -33,13 +36,18 @@ SyncSectorUseCaseFactory = Callable[[str], AbstractAsyncContextManager[SyncSecto
 `async with factory(alias) as use_case:` 패턴 — exit 시 KiwoomClient.close 보장.
 """
 
-SyncStockMasterUseCaseFactory = Callable[
-    [str], AbstractAsyncContextManager[SyncStockMasterUseCase]
-]
+SyncStockMasterUseCaseFactory = Callable[[str], AbstractAsyncContextManager[SyncStockMasterUseCase]]
 """alias → AsyncContextManager[SyncStockMasterUseCase] factory (B-α 추가).
 
 sector factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌드 + close 보장.
 mock_env 는 lifespan 에서 settings.kiwoom_default_env 기반으로 결정 후 묶음.
+"""
+
+LookupStockUseCaseFactory = Callable[[str], AbstractAsyncContextManager[LookupStockUseCase]]
+"""alias → AsyncContextManager[LookupStockUseCase] factory (B-β 추가).
+
+sync_stock factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌드 + close 보장.
+mock_env 는 lifespan 에서 settings.kiwoom_default_env 기반으로 결정.
 """
 
 
@@ -76,6 +84,7 @@ _token_manager_singleton: TokenManager | None = None
 _revoke_use_case_singleton: RevokeKiwoomTokenUseCase | None = None
 _sync_sector_factory: SyncSectorUseCaseFactory | None = None
 _sync_stock_factory: SyncStockMasterUseCaseFactory | None = None
+_lookup_stock_factory: LookupStockUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -142,13 +151,35 @@ def set_sync_stock_factory(factory: SyncStockMasterUseCaseFactory) -> None:
     _sync_stock_factory = factory
 
 
+def get_lookup_stock_factory() -> LookupStockUseCaseFactory:
+    """alias → AsyncContextManager[LookupStockUseCase] factory. lifespan 에서 set."""
+    if _lookup_stock_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="lookup stock UseCase factory 미초기화",
+        )
+    return _lookup_stock_factory
+
+
+def set_lookup_stock_factory(factory: LookupStockUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — KiwoomClient 빌드 + UseCase 결합 factory."""
+    global _lookup_stock_factory
+    _lookup_stock_factory = factory
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋."""
-    global _token_manager_singleton, _revoke_use_case_singleton, _sync_sector_factory, _sync_stock_factory
+    global \
+        _token_manager_singleton, \
+        _revoke_use_case_singleton, \
+        _sync_sector_factory, \
+        _sync_stock_factory, \
+        _lookup_stock_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
     _sync_stock_factory = None
+    _lookup_stock_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -163,18 +194,28 @@ def reset_sync_stock_factory() -> None:
     _sync_stock_factory = None
 
 
+def reset_lookup_stock_factory() -> None:
+    """테스트 전용 — lookup factory 만 리셋."""
+    global _lookup_stock_factory
+    _lookup_stock_factory = None
+
+
 __all__ = [
+    "LookupStockUseCaseFactory",
     "SyncSectorUseCaseFactory",
     "SyncStockMasterUseCaseFactory",
+    "get_lookup_stock_factory",
     "get_revoke_use_case",
     "get_settings_dep",
     "get_sync_sector_factory",
     "get_sync_stock_factory",
     "get_token_manager",
     "require_admin_key",
+    "reset_lookup_stock_factory",
     "reset_sync_sector_factory",
     "reset_sync_stock_factory",
     "reset_token_manager",
+    "set_lookup_stock_factory",
     "set_revoke_use_case",
     "set_sync_sector_factory",
     "set_sync_stock_factory",

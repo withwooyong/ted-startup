@@ -145,9 +145,7 @@ async def test_upsert_many_overwrites_market_code_on_cross_market_conflict(
 @pytest.mark.asyncio
 async def test_upsert_many_persists_listed_date(session: AsyncSession) -> None:
     repo = StockRepository(session)
-    await repo.upsert_many(
-        [_row("005930", "삼성전자", "0", listed_date=date(1975, 6, 11))]
-    )
+    await repo.upsert_many([_row("005930", "삼성전자", "0", listed_date=date(1975, 6, 11))])
     rows = await repo.list_by_filters(market_code="0")
     assert rows[0].listed_date == date(1975, 6, 11)
 

@@ -33,7 +33,13 @@ from app.adapter.out.kiwoom._exceptions import (
     KiwoomError,
     KiwoomResponseValidationError,
 )
-from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient, NormalizedStock, StockListRow
+from app.adapter.out.kiwoom.stkinfo import (
+    KiwoomStkInfoClient,
+    NormalizedStock,
+    StockListRow,
+    _validate_stk_cd_for_lookup,
+)
+from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock import StockRepository
 from app.application.constants import (
     STOCK_SYNC_DEFAULT_MARKETS,
@@ -210,7 +216,120 @@ def _to_row_dict(n: NormalizedStock) -> dict[str, Any]:
     return full
 
 
+# =============================================================================
+# Phase B-β — ka10100 단건 보강 (gap-filler / lazy fetch)
+# =============================================================================
+
+
+class LookupStockUseCase:
+    """ka10100 단건 보강 — ka10099 의 gap-filler.
+
+    설계: endpoint-04-ka10100.md § 6.3.
+
+    두 진입점:
+    1. `execute(stock_code)` — 명시 호출 (admin POST /stocks/{code}/refresh, CLI 등).
+       항상 키움 호출 + DB upsert. 운영 디버깅 / 단건 정확도 검증.
+    2. `ensure_exists(stock_code)` — lazy 보강 (다른 service 의 미스 안전망).
+       DB hit → 그대로 반환 (키움 호출 안 함, RPS 보존)
+       DB miss → 키움 호출 + INSERT
+
+    트랜잭션 격리:
+    - 매 호출 새 AsyncSession (session_provider) — `async with session.begin()` 으로
+      atomicity 확보. 키움 실패 시 DB 변경 없음 (예외가 commit 전에 raise).
+    - upsert_one 의 ON CONFLICT (stock_code) DO UPDATE 가 동시 호출 race 흡수.
+
+    mock 환경 안전판 (§4.2):
+    - `mock_env=True` 면 응답 `nxtEnable` 무시 + 일률 False (mock 도메인 NXT 미지원).
+    """
+
+    def __init__(
+        self,
+        *,
+        session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+        stkinfo_client: KiwoomStkInfoClient,
+        mock_env: bool = False,
+    ) -> None:
+        self._session_provider = session_provider
+        self._client = stkinfo_client
+        self._mock_env = mock_env
+
+    async def execute(self, stock_code: str) -> Stock:
+        """ka10100 호출 → upsert → 갱신된 Stock row 반환.
+
+        Raises:
+            ValueError: stock_code 가 6자리 ASCII 숫자 외 (어댑터 사전 검증).
+            KiwoomBusinessError: 응답 return_code != 0 (존재하지 않는 종목 등).
+            KiwoomCredentialRejectedError / KiwoomRateLimitedError / KiwoomUpstreamError:
+                트랜스포트 매핑.
+            KiwoomResponseValidationError: 응답 Pydantic 검증 실패 + listCount/lastPrice
+                비숫자 정규화 실패 (1R 2b H2 — 본 메서드가 매핑 책임. 라우터 except
+                망에 raw ValueError 누설 차단).
+        """
+        # 1. 키움 API 호출 — 트랜잭션 밖 (DB 락 점유 시간 최소화, sector/B-α 일관)
+        response = await self._client.lookup_stock(stock_code)
+
+        # 2. 정규화 — listCount/lastPrice 비숫자 ValueError 매핑 (1R 2b H2).
+        # 패턴: 변수 캡처 후 except 밖 raise — Pydantic/ValueError 가 cause/context 에
+        # 박히지 않음 (B-α `fetch_stock_list` 의 validation_failed 플래그 패턴 일관).
+        # `raise X from None` 만으로는 __context__ 가 except 안에서 자동 설정되어 차단
+        # 안 됨. except 밖 raise 가 필수.
+        normalize_failed = False
+        normalized: NormalizedStock | None = None
+        try:
+            normalized = response.to_normalized(mock_env=self._mock_env)
+        except ValueError:
+            normalize_failed = True
+
+        if normalize_failed:
+            raise KiwoomResponseValidationError(
+                f"ka10100 응답 row 정규화 실패 stock_code={stock_code} — 비숫자 listCount/lastPrice"
+            )
+        if normalized is None:  # pragma: no cover — normalize_failed 와 mutex
+            raise RuntimeError("unreachable: normalized None without normalize_failed")
+
+        # 3. DB upsert — 단건 트랜잭션
+        async with self._session_provider() as session, session.begin():
+            repo = StockRepository(session)
+            return await repo.upsert_one(normalized)
+
+    async def ensure_exists(self, stock_code: str) -> Stock:
+        """lazy 보강 진입점 — DB hit (active) → 그대로, DB miss/inactive → 키움 호출 + upsert.
+
+        Phase C 의 OHLCV ingest 등 다른 service 가 stock 마스터 누락 시 호출.
+        호출 자체가 멱등 — 같은 stock_code 두 번 호출해도 row 1개 (ON CONFLICT 흡수).
+
+        검증:
+        - 1R 2b M2 — DB lookup 전 stk_cd 사전 검증 (hit/miss 양쪽 균일).
+
+        활성 여부 (1R 2a M2):
+        - DB hit + is_active=True → 캐시 hit (키움 호출 안 함)
+        - DB hit + is_active=False (폐지된 종목) → 키움 재조회로 복원 시도
+        - DB miss → 키움 호출 + INSERT
+
+        TOCTOU 안내 (1R 2a H1):
+        - find_by_code 와 execute 가 별도 세션 — 같은 stock_code 동시 호출 시 두
+          코루틴 모두 execute 진입 가능. ON CONFLICT (stock_code) DO UPDATE 가 row 를
+          1개로 수렴시키나 키움 호출은 중복 발생. RPS 보호는 트랜스포트 책임.
+          Phase C 진입 빈도가 높아지면 stock_code 단위 in-flight 캐시 또는 분산 락
+          도입 고려 (ADR-0001 § 13.2 deferred).
+        """
+        # 1R 2b M2 — DB hit/miss 진입 전 검증 (raw 검증 우회 차단)
+        _validate_stk_cd_for_lookup(stock_code)
+
+        # DB hit 우선 — 활성 row 만 캐시 hit 으로 인정 (1R 2a M2)
+        async with self._session_provider() as session:
+            repo = StockRepository(session)
+            existing = await repo.find_by_code(stock_code)
+            if existing is not None and existing.is_active:
+                return existing
+
+        # DB miss 또는 비활성 → execute 위임 (자체 트랜잭션 + 활성 복원)
+        logger.info("stock_code=%s lazy fetch via ka10100", stock_code)
+        return await self.execute(stock_code)
+
+
 __all__ = [
+    "LookupStockUseCase",
     "MarketStockOutcome",
     "SUPPORTED_STOCK_MARKETS",
     "StockMasterSyncResult",

@@ -32,6 +32,10 @@ from app.adapter.out.kiwoom.auth import KiwoomAuthClient
 from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
 from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
+    reset_lookup_stock_factory,
+    reset_sync_sector_factory,
+    reset_sync_stock_factory,
+    set_lookup_stock_factory,
     set_revoke_use_case,
     set_sync_sector_factory,
     set_sync_stock_factory,
@@ -41,7 +45,10 @@ from app.adapter.web.routers.auth import router as auth_router
 from app.adapter.web.routers.sectors import router as sectors_router
 from app.adapter.web.routers.stocks import router as stocks_router
 from app.application.service.sector_service import SyncSectorMasterUseCase
-from app.application.service.stock_master_service import SyncStockMasterUseCase
+from app.application.service.stock_master_service import (
+    LookupStockUseCase,
+    SyncStockMasterUseCase,
+)
 from app.application.service.token_service import (
     RevokeKiwoomTokenUseCase,
     TokenManager,
@@ -171,6 +178,34 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     set_sync_stock_factory(_sync_stock_factory)
 
+    # B-β: LookupStockUseCaseFactory — sync_stock factory 와 같은 패턴, 같은 mock_env 정책.
+    # 단건 보강이므로 RPS 가 낮음 (admin 명시 호출 + Phase C 의 ensure_exists lazy fetch).
+    @asynccontextmanager
+    async def _lookup_stock_factory(alias: str) -> AsyncIterator[LookupStockUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            yield LookupStockUseCase(
+                session_provider=_session_provider,
+                stkinfo_client=stkinfo,
+                mock_env=stock_mock_env,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    set_lookup_stock_factory(_lookup_stock_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
     # alias 미설정 + scheduler_enabled=True 면 fail-fast (운영 실수 방어).
     if settings.scheduler_enabled and not settings.scheduler_sector_sync_alias:
@@ -199,6 +234,12 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # B-α: stock scheduler 도 같은 시점에 정지.
         stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
+
+        # 1R 2b M4: factory 싱글톤 unset — close 후 stale factory 가 라우터에 노출되지
+        # 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 (factory 미초기화) 반환.
+        reset_lookup_stock_factory()
+        reset_sync_stock_factory()
+        reset_sync_sector_factory()
 
         # H-3 적대적 리뷰: revoke 실패/hang/cancel 와 무관하게 engine.dispose() 도달 보장
         try:

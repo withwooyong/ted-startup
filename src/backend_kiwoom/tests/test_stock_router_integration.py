@@ -212,9 +212,7 @@ async def test_router_post_sync_full_chain_writes_to_db(
     app.dependency_overrides[get_sync_stock_factory] = lambda: _sync_factory
 
     # 6. 호출
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
         resp = await client.post(
             "/api/kiwoom/stocks/sync",
             params={"alias": "test-stock-integration"},

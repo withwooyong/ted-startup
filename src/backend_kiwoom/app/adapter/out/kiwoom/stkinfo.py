@@ -1,9 +1,9 @@
 """KiwoomStkInfoClient — `/api/dostk/stkinfo` 계열 어댑터.
 
-설계: endpoint-14-ka10101.md § 6.1 + endpoint-03-ka10099.md § 6.1.
+설계: endpoint-14-ka10101.md § 6.1 + endpoint-03-ka10099.md § 6.1 + endpoint-04-ka10100.md § 6.1.
 
-범위: ka10101 (sector 마스터, A3-α) + ka10099 (stock 마스터, B-α).
-ka10100 / ka10001 등은 Phase B 후속.
+범위: ka10101 (sector 마스터, A3-α) + ka10099 (stock 마스터, B-α) + ka10100 (stock gap-filler, B-β).
+ka10001 등은 Phase B 후속.
 
 책임:
 - KiwoomClient(공통 트랜스포트) 위임 — 토큰 / 재시도 / rate-limit / 페이지네이션
@@ -17,6 +17,7 @@ camelCase 키 유지 (키움 응답 그대로) — 영속화 단계에서 snake_
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Final, Literal
@@ -201,6 +202,108 @@ class StockListResponse(BaseModel):
     return_msg: str = ""
 
 
+# =============================================================================
+# ka10100 — 종목정보 조회 (단건, Phase B-β)
+# =============================================================================
+
+
+STK_CD_LOOKUP_PATTERN: Final[str] = r"^[0-9]{6}$"
+"""ka10100 stk_cd 정규식 — Excel R22 Length=6, ASCII 0-9 only.
+
+`_NX`/`_AL` suffix 거부 + unicode digit 거부 (`\\d` 가 unicode digit 매칭하는 점
+방어, 1R 2b L2). 어댑터 검증 / Pydantic Request / 라우터 Path pattern 세 곳이
+모두 본 상수 참조 — 단일 source of truth.
+"""
+
+_STK_CD_LOOKUP_RE = re.compile(STK_CD_LOOKUP_PATTERN)
+
+
+def _validate_stk_cd_for_lookup(stk_cd: str) -> None:
+    """ka10100 stk_cd 사전 검증 — 6자리 ASCII 숫자만. 호출 자체 차단.
+
+    Excel R22 Length=6 — 다른 차트 endpoint 의 `_NX`/`_AL` suffix(Length=20) 와 다름.
+    빈 문자열·공백·영문·unicode digit 모두 거부.
+    """
+    if not _STK_CD_LOOKUP_RE.fullmatch(stk_cd):
+        raise ValueError(f"ka10100 stk_cd 는 6자리 ASCII 숫자만 허용: {stk_cd!r}")
+
+
+class StockLookupResponse(BaseModel):
+    """ka10100 응답 — flat object (ka10099 row + return_code/msg).
+
+    ka10099 의 `StockListRow` 와 14 필드 동일하나 본 모델은 단건 응답을 root 에서
+    파싱해야 하므로 별도 정의 (`return_code`/`return_msg` 동행, alias 없음).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    code: Annotated[str, Field(min_length=1, max_length=20)]
+    name: Annotated[str, Field(min_length=1, max_length=40)]
+    listCount: str = ""  # noqa: N815 — 키움 응답 키 그대로
+    auditInfo: str = ""  # noqa: N815
+    regDay: str = ""  # noqa: N815
+    lastPrice: str = ""  # noqa: N815
+    state: str = ""
+    marketCode: str = ""  # noqa: N815
+    marketName: str = ""  # noqa: N815
+    upName: str = ""  # noqa: N815
+    upSizeName: str = ""  # noqa: N815
+    companyClassName: str = ""  # noqa: N815
+    orderWarning: Annotated[str, Field(max_length=1)] = "0"  # noqa: N815
+    nxtEnable: Annotated[str, Field(max_length=2)] = ""  # noqa: N815
+    return_code: int = 0
+    return_msg: str = ""
+
+    def to_normalized(self, *, mock_env: bool = False) -> NormalizedStock:
+        """단건 응답 → NormalizedStock.
+
+        ka10099 의 `to_normalized` 와 차이:
+        - `requested_market_code` 인자 없음 — ka10100 은 stk_cd 만으로 호출하므로 응답
+          marketCode 가 권위 있는 source. `requested_market_type` 도 응답값으로 채움.
+        - 그 외 zero-padded · regDay · nxt_enable 변환은 동일 로직 (`_parse_zero_padded_int`,
+          `_parse_yyyymmdd` 공유).
+
+        Parameters:
+            mock_env: True 면 응답 `nxtEnable` 무시 + 강제 False (mock 도메인 NXT 미지원).
+
+        Raises:
+            ValueError: listCount/lastPrice 가 비숫자 (caller 가 검증 예외로 매핑).
+        """
+        nxt_enable = False if mock_env else (self.nxtEnable.upper() == "Y")
+        return NormalizedStock(
+            stock_code=self.code,
+            stock_name=self.name,
+            list_count=_parse_zero_padded_int(self.listCount),
+            audit_info=self.auditInfo or None,
+            listed_date=_parse_yyyymmdd(self.regDay),
+            last_price=_parse_zero_padded_int(self.lastPrice),
+            state=self.state or None,
+            market_code=self.marketCode,
+            market_name=self.marketName or None,
+            up_name=self.upName or None,
+            up_size_name=self.upSizeName or None,
+            company_class_name=self.companyClassName or None,
+            order_warning=self.orderWarning or "0",
+            nxt_enable=nxt_enable,
+            requested_market_type=self.marketCode,
+        )
+
+
+class StockLookupRequest(BaseModel):
+    """ka10100 요청 본문 — sector/ka10099 패턴 일관 (wire 직전 Pydantic 검증).
+
+    pattern 은 `STK_CD_LOOKUP_PATTERN` 단일 source 참조 — 어댑터 validator / 라우터 Path
+    pattern 과 sync (1R 2a H2 — 정규식 중복 단일화).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stk_cd: Annotated[
+        str,
+        Field(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+    ]
+
+
 @dataclass(frozen=True, slots=True)
 class NormalizedStock:
     """정규화된 stock 도메인 — Repository 가 보는 형태.
@@ -236,6 +339,9 @@ class KiwoomStkInfoClient:
     # ka10099 전용 메타
     STOCK_LIST_API_ID = "ka10099"
     STOCK_LIST_MAX_PAGES = 100  # KOSPI ~900~1000 / KOSDAQ ~1500~1700 추정 — 페이지네이션 빈도 높음
+
+    # ka10100 전용 메타 (B-β)
+    STOCK_LOOKUP_API_ID = "ka10100"
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
@@ -347,3 +453,53 @@ class KiwoomStkInfoClient:
             return_code=return_code,
             return_msg=return_msg,
         )
+
+    async def lookup_stock(self, stk_cd: str) -> StockLookupResponse:
+        """ka10100 — 단건 종목 조회. ka10099 의 gap-filler.
+
+        스코프:
+        - 신규 상장 즉시 보강 (ka10099 일 1회 cron 사이의 gap)
+        - 다른 endpoint 응답에 등장한 미지 종목 lazy fetch (ensure_exists 진입점)
+        - 운영 디버깅 / 단건 정확도 검증
+
+        Pre-validation:
+        - stk_cd 6자리 숫자 강제 — `_NX`/`_AL` suffix 거부 (Excel R22 Length=6).
+          호출 자체 차단 — 키움 응답을 받기 전에 ValueError.
+
+        트랜스포트 정책:
+        - `KiwoomClient.call` 이 return_code != 0 → KiwoomBusinessError 자동 raise
+        - 401/403/429/5xx/네트워크 도메인 매핑도 트랜스포트 책임
+        - 본 메서드는 stk_cd 검증 + Pydantic 응답 파싱만 책임
+
+        Raises:
+            ValueError: stk_cd 가 6자리 숫자 외.
+            KiwoomCredentialRejectedError: 401/403.
+            KiwoomBusinessError: 응답 return_code != 0 (존재하지 않는 종목 등).
+            KiwoomRateLimitedError: 429 (재시도 후 최종 실패).
+            KiwoomUpstreamError: 5xx · 네트워크 · 파싱 실패.
+            KiwoomResponseValidationError: 응답 Pydantic 검증 실패.
+        """
+        _validate_stk_cd_for_lookup(stk_cd)
+
+        # 1R L1 sector/ka10099 패턴 일관 — wire 직전 Pydantic 검증
+        request_body: dict[str, Any] = StockLookupRequest(stk_cd=stk_cd).model_dump()
+
+        result = await self._client.call(
+            api_id=self.STOCK_LOOKUP_API_ID,
+            endpoint=self.PATH,
+            body=request_body,
+        )
+
+        # sector/ka10099 패턴 일관 — 변수 캡처 후 except 밖 raise (`__context__` 차단)
+        validation_failed = False
+        parsed: StockLookupResponse | None = None
+        try:
+            parsed = StockLookupResponse.model_validate(result.body)
+        except ValidationError:
+            validation_failed = True
+
+        if validation_failed:
+            raise KiwoomResponseValidationError(f"{self.STOCK_LOOKUP_API_ID} 응답 검증 실패")
+        if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+            raise RuntimeError("unreachable: parsed None without validation_failed")
+        return parsed

@@ -20,13 +20,24 @@ import logging
 from datetime import date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.adapter.out.kiwoom._exceptions import (
+    KiwoomBusinessError,
+    KiwoomCredentialRejectedError,
+    KiwoomError,
+    KiwoomRateLimitedError,
+    KiwoomResponseValidationError,
+    KiwoomUpstreamError,
+)
+from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
 from app.adapter.out.persistence.repositories.stock import StockRepository
 from app.adapter.out.persistence.session import get_sessionmaker
 from app.adapter.web._deps import (
+    LookupStockUseCaseFactory,
     SyncStockMasterUseCaseFactory,
+    get_lookup_stock_factory,
     get_sync_stock_factory,
     require_admin_key,
 )
@@ -115,8 +126,7 @@ async def list_stocks(
             max_length=4,
             pattern=r"^[0-9]{1,2}$",
             description=(
-                "시장 코드 — ka10099 mrkt_tp 16종 중 하나 (`0`/`10`/`50`/`60`/`6` 외 등). "
-                "미지정 시 16 시장 통합 조회."
+                "시장 코드 — ka10099 mrkt_tp 16종 중 하나 (`0`/`10`/`50`/`60`/`6` 외 등). 미지정 시 16 시장 통합 조회."
             ),
         ),
     ] = None,
@@ -234,6 +244,147 @@ async def sync_stocks(
         total_nxt_enabled=result.total_nxt_enabled,
         all_succeeded=result.all_succeeded,
     )
+
+
+# =============================================================================
+# GET /stocks/{stock_code} — 단건 조회 (B-β, DB only)
+# =============================================================================
+
+
+@router.get(
+    "/stocks/{stock_code}",
+    response_model=StockOut,
+    summary="저장된 종목 단건 조회 (DB only)",
+)
+async def get_stock_by_code(
+    stock_code: Annotated[
+        str,
+        Path(
+            min_length=6,
+            max_length=6,
+            pattern=STK_CD_LOOKUP_PATTERN,
+            description="6자리 숫자 종목코드 (`_NX`/`_AL` suffix 미허용)",
+        ),
+    ],
+) -> StockOut:
+    """DB read only — 키움 호출 없음.
+
+    미존재 → 404. lazy fetch 가 필요한 경우 admin 의 POST /refresh 사용.
+    """
+    sessionmaker = get_sessionmaker()
+    async with sessionmaker() as session:
+        repo = StockRepository(session)
+        stock = await repo.find_by_code(stock_code)
+
+    if stock is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"stock not found: {stock_code}",
+        )
+    return StockOut.model_validate(stock)
+
+
+# =============================================================================
+# POST /stocks/{stock_code}/refresh — 단건 강제 재조회 (B-β, admin)
+# =============================================================================
+
+
+@router.post(
+    "/stocks/{stock_code}/refresh",
+    response_model=StockOut,
+    summary="단건 종목 마스터 강제 재조회 + DB upsert (admin)",
+    dependencies=[Depends(require_admin_key)],
+)
+async def refresh_stock(
+    stock_code: Annotated[
+        str,
+        Path(
+            min_length=6,
+            max_length=6,
+            pattern=STK_CD_LOOKUP_PATTERN,
+            description="6자리 숫자 종목코드 (`_NX`/`_AL` suffix 미허용)",
+        ),
+    ],
+    alias: Annotated[
+        str,
+        Query(
+            min_length=1,
+            max_length=50,
+            description="사용할 키움 자격증명 alias (kiwoom_credential.alias)",
+        ),
+    ],
+    factory: LookupStockUseCaseFactory = Depends(get_lookup_stock_factory),
+) -> StockOut:
+    """ka10100 호출 → DB upsert → 갱신된 row 반환.
+
+    예외 매핑 (sector/B-α 패턴 일관):
+    - alias 미등록 → 404
+    - alias 비활성 → 400
+    - alias 한도 초과 → 503
+    - KiwoomBusinessError (존재하지 않는 종목 등) → 400 + detail{return_code, return_msg}
+    - KiwoomCredentialRejectedError → 400
+    - KiwoomRateLimitedError → 503
+    - KiwoomUpstreamError / 기타 KiwoomError → 502
+    - KiwoomResponseValidationError → 502
+    - ValueError (어댑터 stk_cd 사전 검증) → 400 (라우터 patten 으로 사전 차단되지만 안전망)
+    """
+    try:
+        async with factory(alias) as use_case:
+            stock = await use_case.execute(stock_code)
+    except CredentialNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="등록되지 않은 alias",
+        ) from None
+    except CredentialInactiveError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="비활성 자격증명",
+        ) from None
+    except AliasCapacityExceededError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="alias 한도 초과 — 운영 문의",
+        ) from None
+    except KiwoomBusinessError as exc:
+        # 1R 2b H1 / B-α M-2 정책 — return_msg 는 attacker-influenced (키움 에코) 라
+        # 응답 본문 echo 금지. detail 에는 비식별 메타 (return_code + 클래스명) 만 노출.
+        # 키움 본문은 logger 경로로만 노출 (서버 사이드 운영 디버깅).
+        logger.warning(
+            "ka10100 business error api_id=%s return_code=%d msg=%s",
+            exc.api_id,
+            exc.return_code,
+            exc.message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"return_code": exc.return_code, "error": "KiwoomBusinessError"},
+        ) from None
+    except KiwoomCredentialRejectedError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="키움 자격증명 거부",
+        ) from None
+    except KiwoomRateLimitedError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="키움 RPS 초과 — 잠시 후 재시도",
+        ) from None
+    except (KiwoomUpstreamError, KiwoomResponseValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="키움 응답 오류",
+        ) from None
+    except KiwoomError as exc:
+        # 1R 2b M5 — 향후 신규 KiwoomError 서브클래스 안전망 + 운영 가시성.
+        # detail 에 클래스명 / 메시지 echo 안 함. logger 로만 노출 (B-α M-2 패턴 일관).
+        logger.warning("ka10100 fallback %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="키움 호출 실패",
+        ) from None
+
+    return StockOut.model_validate(stock)
 
 
 __all__ = [

@@ -44,8 +44,7 @@ async def test_stock_unique_constraint_stock_code(engine: AsyncEngine) -> None:
             unique_idx = insp.get_indexes("stock", schema="kiwoom")
             has_uq = any(set(u["column_names"]) == {"stock_code"} for u in uniques)
             has_idx = any(
-                idx.get("unique") and set(idx.get("column_names", [])) == {"stock_code"}
-                for idx in unique_idx
+                idx.get("unique") and set(idx.get("column_names", [])) == {"stock_code"} for idx in unique_idx
             )
             return has_uq or has_idx
 
@@ -134,16 +133,10 @@ async def test_stock_default_values(engine: AsyncEngine) -> None:
     async with engine.connect() as conn, conn.begin():
         # 최소 컬럼만 INSERT — server_default 가 적용되는지
         await conn.execute(
-            text(
-                "INSERT INTO kiwoom.stock (stock_code, stock_name, market_code) "
-                "VALUES ('TST001', 'test', '0')"
-            )
+            text("INSERT INTO kiwoom.stock (stock_code, stock_name, market_code) VALUES ('TST001', 'test', '0')")
         )
         result = await conn.execute(
-            text(
-                "SELECT order_warning, nxt_enable, is_active "
-                "FROM kiwoom.stock WHERE stock_code = 'TST001'"
-            )
+            text("SELECT order_warning, nxt_enable, is_active FROM kiwoom.stock WHERE stock_code = 'TST001'")
         )
         row = result.fetchone()
         assert row is not None

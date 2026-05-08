@@ -396,13 +396,9 @@ async def test_deprecated_stock_marked_inactive(
         "6": httpx.Response(200, json=_ka10099_body([])),
     }
 
-    await _build_use_case(
-        session_provider=session_provider, handler=_make_handler(first_responses)
-    ).execute()
+    await _build_use_case(session_provider=session_provider, handler=_make_handler(first_responses)).execute()
 
-    use_case_second = _build_use_case(
-        session_provider=session_provider, handler=_make_handler(second_responses)
-    )
+    use_case_second = _build_use_case(session_provider=session_provider, handler=_make_handler(second_responses))
     result = await use_case_second.execute()
 
     by_market = {m.market_code: m for m in result.markets}
@@ -477,9 +473,7 @@ async def test_mock_env_forces_nxt_enable_false(
     responses = {
         mrkt.value: httpx.Response(
             200,
-            json=_ka10099_body(
-                [_row(f"{mrkt.value}M01", f"M-{mrkt.value}", mrkt.value, nxt_enable="Y")]
-            ),
+            json=_ka10099_body([_row(f"{mrkt.value}M01", f"M-{mrkt.value}", mrkt.value, nxt_enable="Y")]),
         )
         for mrkt in STOCK_SYNC_DEFAULT_MARKETS
     }
@@ -588,9 +582,7 @@ def test_dto_outcome_succeeded_property() -> None:
     from app.application.service.stock_master_service import MarketStockOutcome
 
     ok = MarketStockOutcome(market_code="0", fetched=1, upserted=1, deactivated=0, nxt_enabled_count=0)
-    fail = MarketStockOutcome(
-        market_code="0", fetched=0, upserted=0, deactivated=0, nxt_enabled_count=0, error="X"
-    )
+    fail = MarketStockOutcome(market_code="0", fetched=0, upserted=0, deactivated=0, nxt_enabled_count=0, error="X")
     assert ok.succeeded is True
     assert fail.succeeded is False
 

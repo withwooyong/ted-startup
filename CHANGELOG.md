@@ -7,6 +7,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase B-β — ka10100 단건 종목 조회 (gap-filler / lazy fetch, 이중 리뷰 1R, 498 tests / 93.73%)
+
+Phase B 의 두 번째 chunk — ka10099 (bulk sync) 의 gap-filler. ka10100 (단건 종목 조회) endpoint 의 어댑터·Repository.upsert_one·LookupStockUseCase·라우터·lifespan 통합. Phase C OHLCV 적재가 stock 마스터 미스 시 호출할 lazy fetch 진입점 (`ensure_exists`) 마련.
+
+자동 분류: **계약 변경 (contract)** — admin endpoint 신설로 `--force-2b` 적대적 리뷰 강제 실행. 1R HIGH 4 + MEDIUM 9 + LOW 6 → HIGH 4 + MEDIUM 4 적용 후 2R PASS (CRITICAL/HIGH 0).
+
+### Added — ka10100 어댑터 (단건 조회)
+
+- `app/adapter/out/kiwoom/stkinfo.py` (확장) — `STK_CD_LOOKUP_PATTERN` 정규식 단일 source (`r"^[0-9]{6}$"`, ASCII only) + `_validate_stk_cd_for_lookup` + `StockLookupResponse` (14 필드 + return_code/msg + `to_normalized()`) + `StockLookupRequest` (Pydantic 검증) + `KiwoomStkInfoClient.lookup_stock` (단건 호출, ValidationError flag-then-raise-outside-except 패턴)
+
+### Added — Repository / UseCase
+
+- `app/adapter/out/persistence/repositories/stock.py` (확장) — `upsert_one(row: NormalizedStock) -> Stock` (RETURNING + populate_existing 으로 session identity map stale 방어)
+- `app/application/service/stock_master_service.py` (확장) — `LookupStockUseCase`:
+  - `execute(stock_code)` — 키움 호출 + DB upsert + 갱신된 Stock 반환. 정규화 실패 ValueError → KiwoomResponseValidationError 매핑 (1R 2b-H2)
+  - `ensure_exists(stock_code)` — DB hit (active) 캐시 / DB miss/inactive 키움 재호출 (Phase C lazy fetch 진입점)
+
+### Added — 라우터 + DI
+
+- `app/adapter/web/routers/stocks.py` (확장) — `GET /api/kiwoom/stocks/{stock_code}` (DB only, 404 if missing) + `POST /api/kiwoom/stocks/{stock_code}/refresh?alias=` (admin, ka10100 호출 + upsert) + KiwoomError 6 종 매핑
+- `app/adapter/web/_deps.py` (확장) — `LookupStockUseCaseFactory` 싱글톤 + `get_/set_/reset_lookup_stock_factory` + `reset_token_manager` 확장
+
+### Added — Lifespan 통합
+
+- `app/main.py` (확장) — lifespan 에 `_lookup_stock_factory` (sync_stock factory 와 동일 패턴, mock_env 일관) + teardown finally 에 `reset_*_factory` 3개 호출 (1R 2b-M4: close 후 stale factory 노출 차단)
+
+### Changed — 1R 적대적 이중 리뷰 적용
+
+- **2a-H1**: `_STK_CD_PATTERN = (6, 6)` 미사용 상수 → 정규식 단일 source `STK_CD_LOOKUP_PATTERN` (어댑터 validator + Pydantic Request + 라우터 Path 세 곳 모두 참조)
+- **2a-H2**: `ensure_exists` TOCTOU docstring 명시 (race 시 두 코루틴 모두 execute 진입, ON CONFLICT 흡수, 키움 호출 중복 가능, Phase C 결정)
+- **2b-H1**: `KiwoomBusinessError.message` (= 키움 `return_msg`) admin 응답 echo 차단 — B-α M-2 정책 백포트. detail 에 `return_code` + `error="KiwoomBusinessError"` 만, 본문은 logger 경로로만
+- **2b-H2**: raw `ValueError` (정규화 실패) → `KiwoomResponseValidationError` 매핑 (flag-then-raise-outside-except 패턴, B-α `fetch_stock_list` 일관, `__cause__/__context__` None)
+- **2a-M2**: `ensure_exists` 의 `is_active=False` row 자동 재조회 + 활성 복원
+- **2b-M2**: `ensure_exists` 진입 시 `_validate_stk_cd_for_lookup` 호출 (DB hit 분기 stk_cd 검증 우회 차단)
+- **2b-M5**: `KiwoomError` fallback 에 `logger.warning("ka10100 fallback %s", type(exc).__name__)` (운영 가시성, 메시지 echo 안 함)
+
+### Tests +55 (443 → 498)
+
+- `test_kiwoom_stkinfo_lookup.py` (17) — 어댑터 단건 + nxtEnable Y/N/빈값 정규화 + ValueError 우회 차단 + Pydantic 응답 검증 + zero-padded 정규화 + extra 필드 무시 + mock_env
+- `test_lookup_stock_service.py` (14) — UseCase 통합 (testcontainers) — INSERT/UPDATE/재활성화 + ensure_exists hit/miss + race + business error + 1R 회귀 가드 (정규화 매핑 / 비활성 재조회 / stk_cd 사전 검증)
+- `test_stock_lookup_router.py` (18) — 라우터 단건 + admin guard + KiwoomError 6 매핑 + alias 분기 + Path validation + 1R 회귀 가드 (return_msg echo 차단 / 502 매핑)
+- `test_stock_repository_upsert_one.py` (5) — INSERT id 채움 / UPDATE 같은 id / 활성 복원 / idempotent / 14 필드 영속화
+- `test_lookup_stock_deps.py` (5) — DI factory get/set/reset/independence
+
+### Documentation
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` — § 13 추가 (7 결정, 1R 4HIGH 적용 매핑, Phase C deferred 항목)
+
+### 누적
+
+- **498 tests passed / coverage 93.73%** (B-β 신규 모듈 86-100%)
+- 적대적 이중 리뷰 누적 발견: CRITICAL 4 + HIGH 20 — 전부 적용 → PASS
+- ADR-0001 § 3·6·7·8·9·10·11·12·13 결정 기록 완료
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase B-α — ka10099 종목 마스터 + StockMasterScheduler (이중 리뷰 1R, 443 tests / 93.38%) — `bf9956a`
 
 Phase B 의 첫 chunk — 백테스팅 진입점인 종목 마스터 적재 인프라 완성. ka10099 (종목정보 리스트) endpoint 의 어댑터·도메인·라우터·일간 cron 통합. sector 도메인 (ka10101) 패턴을 차용하면서 stock 특이사항 (zero-padded 정규화, nxt_enable, 14필드 응답, mock 환경 안전판, UNIQUE(stock_code) 단일키) 반영.
