@@ -1,268 +1,138 @@
 # Session Handoff
 
-> Last updated: 2026-05-08 (KST) — **backend_kiwoom A2 (α + β) + A3-α + F1 + A3-β + A3-γ 완료 — 누적 6 PR**
-> Branch: `master` (working tree clean — 6 PR 모두 커밋 완료)
-> Latest commit: A3-γ — feat(kiwoom) APScheduler weekly cron + lifespan 통합
-> 이전 마일스톤: `6cd4371` — feat(kiwoom) Phase A3-β sector 도메인 영속화
-> 세션 시작점: `265b720` — security(kiwoom): Phase A2 사전 보안 PR (이전 세션 마지막)
+> Last updated: 2026-05-08 (KST) — **backend_kiwoom A1 ~ A3-γ + F1 + B-α 완료 — 누적 9 PR**
+> Branch: `master` (working tree clean — 모든 커밋 + 푸시 완료)
+> Latest commit: `bf9956a` — feat(kiwoom): Phase B-α — ka10099 종목 마스터 + StockMasterScheduler (이중 리뷰 1R, 443 tests / 93.38%)
+> 이전 마일스톤: `52c807b` — feat(kiwoom) Phase A3-γ APScheduler weekly cron + lifespan 통합
+> 세션 시작점: `52c807b` — A3-γ 직후 (이전 세션 마지막)
 
 ## Current Status
 
-backend_kiwoom **Phase A 의 인증·트랜스포트 계층 100% 완료**.
+backend_kiwoom **Phase A 인증·트랜스포트·sector 100% + Phase B-α (ka10099 종목 마스터) 완료**. 백테스팅 진입점 인프라가 갖춰졌으며, 다음은 **운영 dry-run** (DoD §10.3) 또는 **Phase B-β (ka10100)**.
 
 | 단계 | 커밋 | 범위 |
 |------|------|------|
-| A1 기반 인프라 | `12f46aa` (이전 세션) | Settings + Fernet Cipher + structlog 마스킹 + Migration 001 + KiwoomCredentialRepository |
-| 보안 사전 PR | `265b720` (이전 세션) | ADR-0001 § 3 #1·#2·#3 적용 (정규식 보강 + 직렬화 차단 + scrub helper) |
-| **A2-α 토큰 발급** | **`115fcce`** | KiwoomAuthClient.issue_token + IssueUseCase + TokenManager (alias 별 Lock + max_aliases 캡) + POST /tokens (admin) + FastAPI 진입점 |
-| **A2-β 토큰 폐기 + lifespan** | **`0ea955c`** | KiwoomAuthClient.revoke_token + RevokeUseCase + TokenManager 확장 + DELETE/revoke-raw + lifespan graceful shutdown + RequestValidationError 핸들러 |
-| **A3-α 공통 트랜스포트 + ka10101** | **`cce855c`** | KiwoomClient (모든 후속 endpoint 의 기반) + KiwoomStkInfoClient.fetch_sectors |
-| **F1 auth.py `__context__` 백포트** | **`035a68e`** | `_do_issue_token` 4 + `expires_at_kst` 1 + `revoke_token` 4 = 9개 raise site 변수 캡처 패턴 + 회귀 테스트 8 |
-| **A3-β sector 도메인 영속화** | **`6cd4371`** | Migration 002 + Sector ORM/Repository + SyncSectorMasterUseCase (시장 단위 격리) + GET/POST 라우터 + F3 통합 + 통합 테스트 |
-| **A3-γ APScheduler weekly + lifespan 통합** | **다음 커밋** | SectorSyncScheduler (일 03:00 KST cron) + fire_sector_sync 콜백 + lifespan 통합 (fail-fast + shutdown 순서) |
+| A1 기반 인프라 | `12f46aa` | Settings + Fernet Cipher + structlog 마스킹 + Migration 001 + KiwoomCredentialRepository |
+| 보안 사전 PR | `265b720` | ADR-0001 § 3 #1·#2·#3 적용 (정규식 보강 + 직렬화 차단 + scrub helper) |
+| A2-α 토큰 발급 | `115fcce` | KiwoomAuthClient.issue_token + IssueUseCase + TokenManager + POST /tokens (admin) + FastAPI 진입점 |
+| A2-β 토큰 폐기 + lifespan | `0ea955c` | KiwoomAuthClient.revoke_token + RevokeUseCase + TokenManager 확장 + DELETE/revoke-raw + lifespan graceful shutdown + RequestValidationError 핸들러 |
+| A3-α 공통 트랜스포트 + ka10101 | `cce855c` | KiwoomClient (모든 후속 endpoint 의 기반) + KiwoomStkInfoClient.fetch_sectors |
+| F1 auth `__context__` 백포트 | `035a68e` | 9개 raise site 변수 캡처 + 회귀 테스트 8 |
+| A3-β sector 도메인 영속화 | `6cd4371` | Migration 002 + Sector ORM/Repository + SyncSectorMasterUseCase + GET/POST 라우터 + F3 통합 |
+| A3-γ APScheduler weekly cron | `52c807b` | SectorSyncScheduler (일 03:00 KST) + lifespan 통합 (fail-fast + shutdown 순서) |
+| **B-α ka10099 종목 마스터** | **`bf9956a`** (이번 세션) | StockListMarketType StrEnum 16종 + KiwoomStkInfoClient.fetch_stock_list + Stock ORM/Repository + SyncStockMasterUseCase + GET/POST `/api/kiwoom/stocks` + StockMasterScheduler (KST mon-fri 17:30) + Migration 003 + sector M-2 백포트 |
 
-**누적 결과**: **345 tests passed / coverage 93%** / 적대적 이중 리뷰 누적 CRITICAL 4 + HIGH 14+ 발견 → 전부 적용 → 0건 PASS.
+**누적 결과**: **443 tests passed / coverage 93.38%** / 적대적 이중 리뷰 누적 CRITICAL 4 + HIGH 16 발견 → 전부 적용 → 0건 PASS.
 
 ## Completed This Session
 
-### Phase A2-α (커밋 `115fcce`)
+### Phase B-α — ka10099 종목 마스터 + StockMasterScheduler (`bf9956a`)
 
-- KiwoomAuthClient.issue_token (httpx + tenacity, 401/403/429 재시도 금지)
-- IssueKiwoomTokenUseCase + TokenManager (asyncio.Lock per alias, max_aliases=1024 cap, session_provider 패턴)
-- POST /api/kiwoom/auth/tokens (admin only, hmac.compare_digest fail-closed)
-- FastAPI 진입점 + lifespan
-- ADR-0001 § 6 추가 (16 결정)
-- **적대적 1R**: HIGH 5 (lock proliferation / `__context__` leak / 429 timing oracle / 세션 누수 / 이중 SELECT) → 전부 적용
+- 자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제
+- 1R: HIGH 2 + MEDIUM 5 + LOW 5 → 전부 적용 후 2R PASS
 
-### Phase A2-β (커밋 `0ea955c`)
+**신규 파일 (7 코드 + 7 테스트 + 1 마이그레이션)**
+- `app/application/constants.py` — `StockListMarketType` StrEnum 16종 + `STOCK_SYNC_DEFAULT_MARKETS` (5종)
+- `app/adapter/out/persistence/models/stock.py` — Stock ORM (UNIQUE stock_code 단일키)
+- `app/adapter/out/persistence/repositories/stock.py` — list_by_filters / list_nxt_enabled / find_by_code / upsert_many / deactivate_missing
+- `app/application/service/stock_master_service.py` — SyncStockMasterUseCase (5 시장 격리 + 빈 응답 보호 + mock_env 안전판)
+- `app/adapter/web/routers/stocks.py` — GET `/stocks` + GET `/stocks/nxt-eligible` + POST `/stocks/sync?alias=` (admin)
+- `app/batch/stock_master_job.py` — fire_stock_master_sync 콜백
+- `migrations/versions/003_kiwoom_stock.py` — kiwoom.stock 테이블 + 4 인덱스
+- `tests/test_kiwoom_stkinfo_stock_list.py` (36), `test_stock_repository.py` (17), `test_stock_master_service.py` (14), `test_stock_router.py` (12), `test_stock_router_integration.py` (1), `test_migration_003.py` (7), `test_stock_master_scheduler.py` (11)
 
-- KiwoomAuthClient.revoke_token (재시도 0회, best-effort)
-- RevokeKiwoomTokenUseCase (revoke_by_alias / revoke_by_raw_token, 401/403 idempotent 변환)
-- TokenManager 확장 (peek/invalidate_all/alias_keys)
-- DELETE /tokens/{alias} + POST /tokens/revoke-raw (admin only)
-- lifespan graceful shutdown (`asyncio.wait_for(20s)` + finally 분리)
-- RequestValidationError 핸들러 + sensitive paths (`/revoke-raw`)
-- ADR-0001 § 7 추가 (16 결정)
-- **적대적 1R**: **CRITICAL 1 (revoke-raw 422 token echo)** + HIGH 4 → 전부 적용
+**확장 파일**
+- `app/adapter/out/kiwoom/stkinfo.py` — fetch_stock_list + StockListRow + NormalizedStock + StockListResponse + StockListRequest + _parse_yyyymmdd + _parse_zero_padded_int
+- `app/adapter/web/_deps.py` — SyncStockMasterUseCaseFactory 싱글톤
+- `app/config/settings.py` — scheduler_stock_sync_alias (fail-fast 가드 추가)
+- `app/main.py` — lifespan stock factory + StockMasterScheduler 통합 (graceful shutdown: stock → sector → revoke → dispose)
+- `app/scheduler.py` — StockMasterScheduler (KST mon-fri 17:30, sector scheduler 와 lifecycle 분리)
+- `app/application/service/sector_service.py` — outcome.error 클래스명 only 백포트 (1R M-2)
+- `tests/test_scheduler.py` — stock alias env 추가 (회귀 fix)
 
-### Phase A3-α (커밋 `cce855c`)
+**문서**
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 12 (10 결정 + dry-run 항목)
+- `docs/research/kiwoom-rest-feasibility.md` § 10.5 진행 상태 표 + § 10.6 다음 작업 갱신
+- `CHANGELOG.md` prepend (이번 세션 항목)
 
-- KiwoomClient 공통 트랜스포트 (httpx + tenacity + Semaphore + paginated + token_provider)
-- KiwoomStkInfoClient.fetch_sectors (ka10101) + Pydantic 3개
-- ADR-0001 § 8 추가 (16 결정)
-- **적대적 1R**: **CRITICAL 1 (`__context__` 토큰 leak)** + HIGH 4 → 전부 적용
+## In Progress / Pending
 
-### F1 — auth.py `__context__` leak 백포트 (`035a68e`)
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| 1 | 운영 dry-run (DoD §10.3) | pending | 키움 자격증명 1쌍으로 α/β/A3/B-α 전체 검증 — 응답 marketCode 분포·NXT 비율·페이지네이션 마진 |
+| 2 | Phase B-β (ka10100 종목 정보 리스트) | pending | gap-filler 단건 보강 — NormalizedStock 변환 로직 공유 (917 → 673 줄 계획서) |
+| 3 | Phase B-γ (ka10001 주식 기본 정보) | pending | 펀더멘털 보강 (1,164 줄 계획서) — Phase B 마무리 |
+| 4 | Phase C~G | pending | OHLCV 백테스팅 본체 + 시그널 보강 + 순위 + 투자자별 (Phase B 완료 후) |
 
-- A3-α C-1 패턴을 KiwoomAuthClient (au10001 / au10002) 에 백포트 — **9개 raise site**
-- 변수 캡처 + except 밖 raise — `from None` 코드에서 0건 (docstring만 잔존)
-- JSON dict guard 보너스 — `try-except-else: if not isinstance(parsed, dict): raise` 추가
-- 회귀 테스트 +8 — `__cause__ is None` + `__context__ is None` 검증
-- ADR-0001 § 9 추가 (5 결정 + 보안 일관성 종결 섹션)
-- **적대적 1R**: CRITICAL 0 / HIGH 0 PASS
+## Key Decisions Made (이번 세션)
 
-### A3-β — sector 도메인 영속화 + UseCase + 라우터 (`6cd4371`)
+- **StockListMarketType StrEnum 16종**: ka10101 의 `0/1/2/4/7` 와 mrkt_tp 의미 완전히 다름 (master.md § 12). Literal 16 case 길어서 StrEnum 채택. 디폴트 sync 5종 (KOSPI 0 / KOSDAQ 10 / KONEX 50 / ETN 60 / REIT 6).
+- **`UNIQUE(stock_code)` 단일키** (sector 의 복합키와 차이): 한 종목이 여러 시장에 등장하면 ON CONFLICT UPDATE — 운영 dry-run 후 정책 재검토 (§11.1 #2).
+- **`to_normalized.market_code = requested_market_code`** (1R H1): 응답 marketCode 영속화 안 함 → cross-market zombie row 방지 + sector 패턴 일관 + deactivate_missing 격리 보장. 응답 marketCode 분포는 운영 dry-run 시 별도 logger 로 추적.
+- **mock_env 가 lifespan 1회 결정** (1R H-1): 프로세스당 단일 env 운영 가정. 향후 멀티 env 동시 운영 시 alias 단위 결정으로 변경 필요. ADR 주석 명시.
+- **state VARCHAR(255)** (sector 의 100보다 길게, 1R M-1): 키움 다중값 (`"증거금20%|담보대출|..."`) 안전 마진. 길이 초과로 인한 시장 전체 적재 실패 방지.
+- **outcome.error 클래스명 only** (1R M-2, sector + stock 둘 다): 응답 본문 echo 차단 (admin 노출 시 키움 본문 누설 방어). 메시지는 logger 경로로만.
+- **빈 응답 deactivate skip** (§5.3): KOSPI 빈 응답으로 모든 KOSPI 종목 비활성화 사고 방지.
+- **StockMasterScheduler 별도 클래스** (sector scheduler 와 lifecycle 분리): KST mon-fri 17:30 (장 마감 후) — sector 의 일 03:00 와 다른 cron. 같은 패턴, 별도 AsyncIOScheduler.
 
-- Migration 002 — `kiwoom.sector` 테이블 (BIGSERIAL + UNIQUE(market_code, sector_code) + CHECK + 2 인덱스)
-- Sector ORM + SectorRepository (list_by_market / list_all / upsert_many / deactivate_missing)
-- SyncSectorMasterUseCase — 5 시장 순회 + 시장 단위 트랜잭션
-- 라우터: GET `/api/kiwoom/sectors` + POST `/api/kiwoom/sectors/sync?alias=` (admin) + F3 통합
-- 테스트 +47 — Migration 6 / Models +5 / Repository 13 / UseCase 11 / Router 11 / Integration 1
-- ADR-0001 § 10 추가 (16 결정)
-- **이중 리뷰 1R**: CRITICAL 0 / HIGH 0 / MEDIUM 3 PASS
+## Known Issues
 
-### A3-γ — APScheduler weekly cron + lifespan 통합 (다음 커밋)
-
-- 자동 분류: **일반 기능 (general)** — 보안 표면 변경 X, 이중 리뷰 2b 자동 생략
-- `app/scheduler.py` — SectorSyncScheduler (AsyncIOScheduler + CronTrigger 일 03:00 KST + max_instances=1 + coalesce=True + replace_existing=True)
-  - `is_running = _started AND scheduler.running` — AsyncIOScheduler.shutdown 비동기 race 회피
-- `app/batch/sector_sync_job.py` — fire_sector_sync 콜백 (모든 예외 swallow + 부분 실패 warning)
-- `app/main.py` lifespan 확장:
-  - **fail-fast 가드**: scheduler_enabled=True + alias="" → RuntimeError
-  - shutdown 순서: scheduler.shutdown(wait=True) → graceful revoke → engine.dispose
-- `Settings.scheduler_sector_sync_alias` 신규
-- `pyproject.toml` — apscheduler mypy override (3.x stubs 미제공)
-- 테스트 +13 — fire_sector_sync 3 / Scheduler 6 / 수동 호출 1 / lifespan 사이클 3 (fail-fast + enabled/disabled 양방향)
-- ADR-0001 § 11 추가 (12 결정)
-- **단일 리뷰 (1차) PASS**: CRITICAL 0 / HIGH 0 / MEDIUM 0
-- **5관문 통과** (3-5 런타임 smoke 강제) — lifespan startup→shutdown 사이클 enabled/disabled 양방향 검증
-
-### 본 세션 핵심 발견 (보안 일관성 차원)
-
-- **`from None` 의 `__context__` leak**: `from None` 은 `__suppress_context__=True` 만 set, `__context__` 는 살아있어 Sentry/structlog `walk_tb` 가 leak 가능. 해결 패턴: `raise` 를 `except` 블록 밖에서 변수 캡처 패턴으로 실행 (PEP 3134 자동 chaining 차단). A3-α 에서 적용 → **F1 에서 auth.py 백포트 완료** (보안 일관성 종결).
-- **CRITICAL C-1 (β)**: `/revoke-raw` 422 응답이 raw_token 평문을 `errors[].input` 으로 echo. body plaintext 비누설 위협 모델 핵심 깨짐. RequestValidationError 핸들러 + sensitive paths 화이트리스트로 차단.
-- **헤더 인젝션 차단** (A3-α): 토큰 / cont-yn / next-key 모두 wire 전 정규식 화이트리스트 검증 (request + response 양쪽).
-- **보안 일관성 종결 (F1)**: backend_kiwoom 의 모든 외부 호출 어댑터 (`auth.py`, `_client.py`, `stkinfo.py`) 가 단일 예외 chain 정책으로 수렴. `from None` 코드에서 0건. 회귀 테스트 누적 12건 (A3-α 4 + F1 8).
-
-## Files Modified (본 세션, 누적 3 PR)
-
-```
-A2-α (115fcce):
-  app/adapter/out/kiwoom/_exceptions.py         (신규)
-  app/adapter/out/kiwoom/auth.py                (신규 — issue_token)
-  app/application/service/token_service.py     (신규 — IssueUseCase + TokenManager)
-  app/adapter/web/_deps.py                      (신규 — admin guard)
-  app/adapter/web/routers/auth.py               (신규 — POST /tokens)
-  app/main.py                                   (신규)
-  app/application/dto/kiwoom_auth.py            (확장 — mask_token)
-  app/adapter/out/persistence/.../kiwoom_credential.py  (확장 — decrypt_row)
-  tests/test_kiwoom_auth_client.py              (신규)
-  tests/test_token_service.py                   (신규)
-  tests/test_kiwoom_auth_router.py              (신규)
-  tests/test_logging_masking.py                 (확장 +3)
-
-A2-β (0ea955c):
-  app/adapter/out/kiwoom/auth.py                (확장 — revoke_token)
-  app/application/service/token_service.py     (확장 — RevokeUseCase + 함수형 helper)
-  app/adapter/web/_deps.py                      (확장 — get_revoke_use_case)
-  app/adapter/web/routers/auth.py               (확장 — DELETE/revoke-raw)
-  app/main.py                                   (확장 — graceful shutdown + ValidationError 핸들러)
-  tests/test_kiwoom_auth_client.py              (확장 +8)
-  tests/test_token_service.py                   (확장 +12)
-  tests/test_kiwoom_auth_router.py              (확장 +12)
-  tests/test_lifespan.py                        (신규 — 3 케이스)
-
-A3-α (cce855c):
-  app/adapter/out/kiwoom/_client.py             (신규 — KiwoomClient)
-  app/adapter/out/kiwoom/stkinfo.py             (신규 — KiwoomStkInfoClient)
-  tests/test_kiwoom_client.py                   (신규 — 24 케이스)
-  tests/test_kiwoom_stkinfo_client.py           (신규 — 14 케이스)
-
-F1 (035a68e):
-  app/adapter/out/kiwoom/auth.py                (수정 — 9개 raise site 변수 캡처 패턴 + JSON dict guard)
-  tests/test_kiwoom_auth_client.py              (확장 +8 — __context__ 회귀)
-
-A3-β (6cd4371):
-  migrations/versions/002_kiwoom_sector.py      (신규)
-  app/adapter/out/persistence/models/sector.py  (신규) + models/__init__.py 등록
-  app/adapter/out/persistence/repositories/sector.py (신규)
-  app/application/service/sector_service.py     (신규 — UseCase + 2 dataclass)
-  app/adapter/web/routers/sectors.py            (신규 — 2 라우터 + 3 Pydantic DTO)
-  app/adapter/web/_deps.py                      (확장 — SyncSectorUseCaseFactory)
-  app/main.py                                   (확장 — sector router include + lifespan factory)
-  tests/test_migration_002.py                   (신규 — 6 케이스)
-  tests/test_models.py                          (확장 +5 — Sector ORM)
-  tests/test_sector_repository.py               (신규 — 13 케이스)
-  tests/test_sector_service.py                  (신규 — 11 케이스)
-  tests/test_sector_router.py                   (신규 — 11 케이스)
-  tests/test_sector_router_integration.py       (신규 — 1 풀 체인 케이스)
-
-A3-γ (다음 커밋):
-  app/scheduler.py                              (신규 — SectorSyncScheduler)
-  app/batch/__init__.py                         (신규)
-  app/batch/sector_sync_job.py                  (신규 — fire_sector_sync 콜백)
-  app/config/settings.py                        (확장 — scheduler_sector_sync_alias)
-  app/main.py                                   (확장 — lifespan 통합 + fail-fast)
-  pyproject.toml                                (확장 — apscheduler mypy override)
-  tests/test_scheduler.py                       (신규 — 13 케이스)
-
-문서:
-  docs/ADR/ADR-0001-backend-kiwoom-foundation.md (§6, §7, §8, §9, §10, §11 추가)
-  docs/research/kiwoom-rest-feasibility.md       (§10.5 / §10.6 현행화)
-  CHANGELOG.md                                   (6 항목 prepend)
-  HANDOFF.md                                     (본 문서, overwrite)
-```
+- **응답 `marketCode` ↔ 요청 `mrkt_tp` 불일치 가능성** (§11.2): Excel 샘플에서 mrkt_tp="0" 요청에 marketCode="10" 응답 — 현재 H1 fix 로 응답 marketCode 영속화 안 하므로 운영 영향 없음. 단 운영 dry-run 시 분포 확인 필요 (logger 추가 검토).
+- **UNIQUE(stock_code) cross-market overwrite** (§11.1 #2): 한 종목이 여러 시장에 등장하면 두 번째 sync 가 market_code 덮어씀. 운영 dry-run 후 별도 row 분리 정책 재검토.
+- **max_pages=100 cap의 페이지 사이즈 의존**: KOSPI ~900~1000 / KOSDAQ ~1500~1700 추정. 키움이 페이지 사이즈 축소하면 cap 부족 가능. F3 hint Retry-After 헤더로 모니터링.
+- **mock_env 멀티 env 시나리오**: 한 프로세스가 mock + prod alias 혼용 시 mock_env 가 lifespan 1회 결정으로 부정확. 현재는 운영 가정으로 차단, 향후 alias 단위 env 결정 필요.
 
 ## Context for Next Session
 
-### 다음 작업 우선순위
+### 사용자의 원래 의도 / 목표
+backend_kiwoom Phase A 의 인증·트랜스포트 인프라를 검증한 뒤, 백테스팅 본체 진입점인 종목 마스터(Phase B)를 단계별로 chunk 분할하여 진행. 이번 세션에서 B-α (ka10099 종목 마스터) 완료. 다음은 운영 dry-run 또는 B-β/γ 진입.
 
-#### 운영 dry-run (다음 작업 — A3 전체 완료)
+### 선택된 접근 + 이유
+- **chunk 분할**: 작업계획서 1,500줄 초과 시 chunk 분할 합의 (메모리 `feedback_chunk_split_for_pipelines.md`). Phase B 2,754줄을 endpoint 별 3-chunk (B-α/β/γ) 로 분할.
+- **sector 패턴 mechanical 차용**: ka10101 (sector) 와 ka10099 (stock) 이 같은 KiwoomStkInfoClient 어댑터를 공유, sector 의 Repository/UseCase/Factory/Scheduler/main lifespan 패턴을 그대로 복제하면서 stock 특이사항 (zero-padded 정규화, nxt_enable, 14필드 응답, mock 안전판) 만 반영.
+- **/ted-run Quality-First 풀 파이프라인**: 비용 무관, 정확성 우선. Step 0 TDD → Step 1 구현 → Step 2 이중 리뷰 (계약 변경 분류이지만 admin/cron 영향으로 `--force-2b` 강제) → Step 3 Verification (lint/type/test/coverage) → Step 5 ADR + 커밋.
+- **TDD red 단계 단축**: sector 패턴 mechanical 복제이므로 stub 단계와 implementation 단계 합침. 테스트 작성 후 green 확인으로 의도 명시화 + 회귀 방어.
 
-DoD § 10.3 — α + β + A3-α + F1 + A3-β + A3-γ 통합 검증. 키움 자격증명 1쌍 등록 후:
-1. `expires_dt` timezone (KST/UTC) 확정
-2. 401/403 동작 차이
-3. ka10101 5 시장 호출 + 페이지네이션 발생 여부
-4. JWT/hex/Kiwoom 평문 토큰 마스킹 회귀
-5. APScheduler 컨테이너 기동 시 cron 등록 확인 + 다음 트리거 시각 (KST 일 03:00) 확인
-6. 수동 트리거 (POST `/sectors/sync?alias=...`) → cron 결과와 일치
-7. 컨테이너 재시작 시 lifespan shutdown 순서 정상 도달
+### 사용자 제약 / 선호
+- 한글 커밋 메시지 (~/.claude/CLAUDE.md 글로벌 규칙)
+- 푸시는 명시적 요청 시만 (커밋과 분리, 글로벌 CLAUDE.md 규칙)
+- 큰 Phase 는 chunk 분할 후 ted-run 풀 파이프라인 (메모리 `feedback_chunk_split_for_pipelines.md`)
+- 진행 상황 가시화 — 체크리스트 + 한 줄 현황 (메모리 `feedback_progress_visibility.md`)
 
-#### Phase B (운영 dry-run 후)
+### 다음 세션 진입 시 결정 필요
+사용자에게 옵션 확인 권장:
+1. **운영 dry-run 먼저** — 키움 자격증명 1쌍으로 α/β/A3/B-α 통합 검증. 응답 marketCode 분포·NXT 비율·페이지네이션 마진 확인. 사용자가 KIWOOM_PROD_APPKEY/SECRETKEY 보유 여부 + 운영 환경 가용성 확인 필요.
+2. **Phase B-β (ka10100) 직진** — gap-filler 단건 보강 어댑터. 계획서 673줄 (B-α 의 917줄보다 작음). NormalizedStock 변환 로직 재사용. /ted-run 풀 파이프라인.
+3. **Phase B-α 후속 follow-up** (선택사항) — 응답 marketCode 분포 logger 추가, alias 별 mock_env 결정 (TokenManager 자격증명 row env 노출 패턴 검토).
 
-APScheduler weekly cron (KST 일 03:00) + scheduler 모듈 + lifespan 통합.
+## Files Modified This Session
 
-#### 운영 dry-run (DoD §10.3 일괄)
-
-α + β + A3-α 합쳐 키움 운영 자격증명 1쌍으로 검증 (사용자 등록 후 별도 작업):
-1. expires_dt timezone (KST/UTC) 확정
-2. authorization 헤더 빈/생략 (au10001)
-3. 401/403 동작 차이
-4. 같은 토큰 2회 폐기 응답 패턴 (200/401/return_code)
-5. ka10101 5 시장 호출 + 페이지네이션 발생 여부
-6. JWT/hex/Kiwoom 평문 토큰 마스킹 회귀
-
-### 사용자 선호·제약 (이번 세션 학습)
-
-- **chunk 분할 권장**: 1,500줄 미만이라도 KiwoomClient 같이 후속 의존성 큰 작업은 단독 PR (사용자 합의 후 진행)
-- **이중 리뷰 1R 충분**: A2 사전 보안 PR 은 3R 까지 갔으나 이후 PR 들은 1R 적용 후 PASS
-- **푸시 분리**: 글로벌 CLAUDE.md 규칙대로 커밋과 푸시는 항상 별도 확인. 본 세션 모든 PR 미푸시 상태
-- **운영 dry-run 보류 OK**: 코드 + 테스트 + 이중 리뷰까지 완료한 상태로 진행. 운영 자격증명 등록은 사용자가 별도 시점에
-
-### 누적 follow-up (defer 가능, 별도 PR)
-
-**보안 사전 PR (5건)**:
-- `_KIWOOM_SECRET_PATTERN` 화이트리스트 확장 (`client_secret` / `bearer` / `apikey` / `private_key`)
-- `_TOKEN_FIELDS_BY_API` allow-list 전환 (deny-list → allow-list)
-- SQLAlchemy `before_insert` event listener — raw_response scrub 자동 적용
-- CI grep 룰 — f-string 내 평문 secret/token 삽입 PR 차단
-- 자잘한 정리 — `_capture_stdlib_log` IndexError 가드 / deepcopy memo 변조 / `expires_dt` 마스킹
-
-**A2-α (5건)**: verify=True 명시 / admin rate-limiting / Kiwoom 평문 토큰 마스킹 회귀 강화 / readiness probe / router-level appkey 누설 회귀
-
-**A2-β (5건)**: pre-commit grep `model_dump+logger` / `/revoke-raw` rate-limiting / `TokenManager.frozen` shutdown 차단 / `RevokeRawTokenRequest.token` Field pattern / shutdown metric
-
-**A3-α (5건 — F1 + F3 ✅ 적용 완료, 3건 잔존)**:
-- ~~F1: auth.py `__context__` leak 백포트~~ ✅ **적용** (`035a68e`, 회귀 테스트 8 + ADR § 9)
-- F2: KiwoomBusinessError.message scrub
-- ~~F3: KiwoomMaxPagesExceededError 라우터 매핑~~ ✅ **적용** (A3-β 통합 — Retry-After 헤더 hint)
-- F4: KiwoomClient instance 단일성 강제 (Phase D 사용자 trigger 시)
-- F5: next-key 없이 cont-yn=Y edge case (운영 검증 후)
-
-### Known Limitations (ADR-0001 누적)
-
-- `copyreg.dispatch_table[KiwoomCredentials]` type-level 우회 (Python pickle 본질)
-- `object.__getstate__(creds)` 직접 호출 우회 (Python 3.11+)
-- `_KIWOOM_SECRET_PATTERN` prefix 없는 평문 임베딩 미매칭 — A2/A3 는 본문 logger 미전달 fail-closed
-- 한국어/자연어 prefix 변형 정규식 보조 한계 (CI grep 룰로 caller 책임 강제)
-
-### 의존성 그래프
-
+이번 세션 한정 (커밋 `bf9956a` 기준):
 ```
-A1 (12f46aa)
-   → 보안 사전 PR (265b720)
-   → A2-α (115fcce)
-   → A2-β (0ea955c)
-   → A3-α (cce855c)
-   → F1 auth.py __context__ 백포트 (035a68e)
-   → A3-β sector 도메인 영속화 + UseCase + 라우터 (6cd4371)
-   → A3-γ APScheduler weekly + lifespan 통합 (본 세션 마지막)
-   → 운영 dry-run (DoD §10.3, 다음 작업)
-   → B (종목 마스터) → C (OHLCV) → D~G
+docs/ADR/ADR-0001-backend-kiwoom-foundation.md     | § 12 추가
+docs/research/kiwoom-rest-feasibility.md           | § 10.5 / 10.6 갱신
+src/backend_kiwoom/app/adapter/out/kiwoom/stkinfo.py
+src/backend_kiwoom/app/adapter/out/persistence/models/__init__.py
+src/backend_kiwoom/app/adapter/out/persistence/models/stock.py        (신규)
+src/backend_kiwoom/app/adapter/out/persistence/repositories/stock.py  (신규)
+src/backend_kiwoom/app/adapter/web/_deps.py
+src/backend_kiwoom/app/adapter/web/routers/stocks.py                  (신규)
+src/backend_kiwoom/app/application/constants.py                       (신규)
+src/backend_kiwoom/app/application/service/sector_service.py          (M-2 백포트)
+src/backend_kiwoom/app/application/service/stock_master_service.py    (신규)
+src/backend_kiwoom/app/batch/stock_master_job.py                      (신규)
+src/backend_kiwoom/app/config/settings.py
+src/backend_kiwoom/app/main.py
+src/backend_kiwoom/app/scheduler.py                                   (StockMasterScheduler 추가)
+src/backend_kiwoom/migrations/versions/003_kiwoom_stock.py            (신규)
+src/backend_kiwoom/tests/test_kiwoom_stkinfo_stock_list.py            (신규, 36 tests)
+src/backend_kiwoom/tests/test_migration_003.py                        (신규, 7 tests)
+src/backend_kiwoom/tests/test_scheduler.py                            (stock alias env 추가)
+src/backend_kiwoom/tests/test_stock_master_scheduler.py               (신규, 11 tests)
+src/backend_kiwoom/tests/test_stock_master_service.py                 (신규, 14 tests)
+src/backend_kiwoom/tests/test_stock_repository.py                     (신규, 17 tests)
+src/backend_kiwoom/tests/test_stock_router.py                         (신규, 12 tests)
+src/backend_kiwoom/tests/test_stock_router_integration.py             (신규, 1 test)
 ```
 
-## Verification Summary (세션 종합)
-
-```
-누적 커밋:    6 (A2-α / A2-β / A3-α / F1 / A3-β / A3-γ)
-Tests:       345 passed (이전 161 → +184)
-Coverage:    93% (scheduler 96% / sector_sync_job 100% / sector_service 94% / sector_router 95% / sector_repository 100% / sector_model 100% / token_service 99% / stkinfo 100% / auth 91% / main 75%)
-Lint:        ruff 0 / mypy strict 0 (41 source files) / format 0
-Security:    bandit 0 / pip-audit 0 CVE
-Runtime:     FastAPI 라우트 + lifespan startup→shutdown 사이클 (scheduler enabled/disabled 양방향) smoke OK
-Reviews:     이중 리뷰 1R x 5 PR + 단일 리뷰 1R x 1 PR — CRITICAL 누적 4 + HIGH 누적 14+ → 전부 적용 → 0건 PASS
-             (A3-γ 단독 — 일반 기능 분류, 단일 리뷰 PASS)
-E2E:         라우터 → 실 UseCase factory → MockTransport → testcontainers DB 풀 체인 1 케이스
-Push:        대기 (사용자 명시 요청 시만)
-
-보안 일관성 종결 (F1 후):
-- backend_kiwoom 의 모든 외부 호출 어댑터 단일 예외 chain 정책 수렴
-- `from None` 코드에서 0건 (docstring/주석만 잔존)
-- __context__ 회귀 테스트 누적 12건 (A3-α 4 + F1 8)
-```
-
-## Open Questions / Risks
-
-- **운영 dry-run 보류 누적**: A2 + A3 모두 코드 검증만. 운영 자격증명 등록 후 일괄 검증 필요. 보류 길어질수록 통합 디버깅 부담 ↑
-- ~~F1 백포트 우선순위~~ ✅ 본 PR 에서 종결 — A3-β 진입 가능
-- **A3-γ APScheduler 통합**: lifespan 변경이 추가로 들어감. β 의 graceful shutdown hook 과 충돌 없는지 검증 필요
+24 files changed, ~3,100 insertions.

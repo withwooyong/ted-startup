@@ -7,6 +7,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase B-α — ka10099 종목 마스터 + StockMasterScheduler (이중 리뷰 1R, 443 tests / 93.38%) — `bf9956a`
+
+Phase B 의 첫 chunk — 백테스팅 진입점인 종목 마스터 적재 인프라 완성. ka10099 (종목정보 리스트) endpoint 의 어댑터·도메인·라우터·일간 cron 통합. sector 도메인 (ka10101) 패턴을 차용하면서 stock 특이사항 (zero-padded 정규화, nxt_enable, 14필드 응답, mock 환경 안전판, UNIQUE(stock_code) 단일키) 반영.
+
+자동 분류: **계약 변경 (contract)** — admin/cron 영향으로 `--force-2b` 적대적 리뷰 강제 실행. 1R HIGH 2 + MEDIUM 5 + LOW 5 → 전부 수정. 2R PASS (CRITICAL/HIGH 0).
+
+### Added — Stock 도메인
+
+- `app/application/constants.py` (신규) — `StockListMarketType` StrEnum 16종 + `STOCK_SYNC_DEFAULT_MARKETS` (KOSPI 0 / KOSDAQ 10 / KONEX 50 / ETN 60 / REIT 6)
+- `app/adapter/out/kiwoom/stkinfo.py` (확장) — `fetch_stock_list` (페이지네이션 max_pages=100) + `StockListRow` (14 필드) + `NormalizedStock` dataclass + `StockListResponse` (alias `list`→`items`) + `StockListRequest` (Pydantic 검증) + `_parse_yyyymmdd` + `_parse_zero_padded_int`
+- `app/adapter/out/persistence/models/stock.py` (신규) — `Stock` ORM (UNIQUE stock_code 단일키)
+- `app/adapter/out/persistence/repositories/stock.py` (신규) — `StockRepository` (list_by_filters / list_nxt_enabled / find_by_code / upsert_many / deactivate_missing)
+- `app/application/service/stock_master_service.py` (신규) — `SyncStockMasterUseCase` (5 시장 격리 + 빈 응답 deactivate skip + mock_env 안전판) + `MarketStockOutcome` + `StockMasterSyncResult`
+- `app/adapter/web/routers/stocks.py` (신규) — GET `/api/kiwoom/stocks` (필터: market_code/nxt_enable/only_active) + GET `/stocks/nxt-eligible` (Phase C 큐 source) + POST `/stocks/sync?alias=` (admin) + F3 max_pages hint 헤더
+
+### Added — Scheduler / 배치
+
+- `app/batch/stock_master_job.py` (신규) — `fire_stock_master_sync` (예외 swallow + 부분 실패 warning + nxt_enabled 로그)
+- `app/scheduler.py` (확장) — `StockMasterScheduler` (AsyncIOScheduler + CronTrigger KST mon-fri 17:30, sector scheduler 와 lifecycle 분리)
+- `app/main.py` (확장) — lifespan 에 stock factory + StockMasterScheduler 통합 (sector 와 동일 graceful shutdown 순서: stock_scheduler → sector_scheduler → revoke → dispose)
+
+### Added — Settings / 의존성
+
+- `Settings.scheduler_stock_sync_alias: str` — 일간 stock cron 자격증명 alias (fail-fast 가드 추가)
+- `app/adapter/web/_deps.py` (확장) — `SyncStockMasterUseCaseFactory` 싱글톤 + `set_/get_/reset_sync_stock_factory`
+
+### Added — Migration / DB
+
+- `migrations/versions/003_kiwoom_stock.py` (신규) — `kiwoom.stock` 테이블 (18 컬럼) + 4 인덱스 (market_code / nxt_enable partial / is_active partial / up_name partial) + 양방향 idempotent
+
+### Changed — sector 도메인 백포트 (1R M-2)
+
+- `app/application/service/sector_service.py` — `outcome.error` 클래스명 only (응답 본문 echo 차단). 메시지는 logger 경로로만 노출.
+
+### Changed — 1R 적용
+
+- **H1**: `to_normalized.market_code = requested_market_code` 항상 사용 (응답 marketCode 영속화 안 함) — cross-market zombie row 방지 + sector 패턴 일관 + deactivate_missing 격리 보장
+- **H-1**: mock_env 가 lifespan 1회 결정 (프로세스당 단일 env 운영 가정) — ADR 주석 명시
+- **M-1**: state VARCHAR(120) → VARCHAR(255) — 키움 다중값 (`"증거금20%|담보대출|..."`) 안전 마진
+- **L1**: `StockListRequest` Pydantic 모델 — wire 직전 검증 (sector 패턴 일관)
+- **L2**: `SectorSyncScheduler` docstring — B-α 후 코멘트 갱신
+
+### Tests +99 (444 → 443)
+
+- `test_kiwoom_stkinfo_stock_list.py` (36) — 어댑터 파싱·페이지네이션·정규화·mock_env·Pydantic 단위
+- `test_stock_repository.py` (17) — CRUD·디액티베이션·시장 격리·NXT 큐·중복 stock_code overwrite
+- `test_stock_master_service.py` (14) — 시장 단위 격리·멱등성·폐지/재등장·mock_env·빈 응답·비숫자 ValidationError
+- `test_stock_router.py` (12) — admin guard·F3 hint·DTO·예외 매핑·alias query
+- `test_stock_router_integration.py` (1) — 라우터 → 실 UseCase → MockTransport → DB 풀 체인 회귀
+- `test_migration_003.py` (7) — UNIQUE/4 인덱스/partial WHERE/타입/server_default/멱등성
+- `test_stock_master_scheduler.py` (11) — fire 콜백 + 등록·idempotent·shutdown + lifespan fail-fast
+- (기존 `test_kiwoom_stkinfo_stock_list.py` 의 2개 case 1개 함수로 합쳐 -1)
+
+### Documentation
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` — § 12 추가 (10 결정, 1R 조치 매핑, dry-run 항목)
+- `docs/research/kiwoom-rest-feasibility.md` — § 10.5 진행 상태 표 + § 10.6 다음 작업 갱신
+
+### 누적
+
+- **443 tests passed / coverage 93.38%** (B-α 신규 모듈 95-100%)
+- 적대적 이중 리뷰 누적 발견: CRITICAL 4 + HIGH 16 — 전부 적용 → PASS
+- ADR-0001 § 3·6·7·8·9·10·11·12 결정 기록 완료
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase A3-γ — APScheduler weekly cron + lifespan 통합 (단일 리뷰, 345 tests / 93%)
 
 ka10101 sector sync 의 자동 트리거 — 일요일 KST 03:00 cron 1개 등록. AsyncIOScheduler 를 lifespan 에 통합하되 graceful shutdown 순서를 명확히 정의: scheduler 먼저 정지 → token revoke → engine.dispose. 운영 실수 방어를 위한 fail-fast 가드 (`scheduler_enabled=True + alias=""` → startup RuntimeError).
