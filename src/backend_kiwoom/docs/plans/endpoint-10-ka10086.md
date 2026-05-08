@@ -750,23 +750,34 @@ async def test_ohlcv_consistency_between_endpoints():
 
 ### 10.1 코드
 
-- [ ] `app/adapter/out/kiwoom/mrkcond.py` — `KiwoomMarketCondClient.fetch_daily_market`
-- [ ] `app/adapter/out/kiwoom/_records.py` — `DailyMarketRow`, `DailyMarketResponse`, `NormalizedDailyFlow`, `_strip_double_sign_int`
-- [ ] `app/application/constants.py` — `DailyMarketDisplayMode` StrEnum
-- [ ] `app/adapter/out/persistence/models/stock_daily_flow.py` — `StockDailyFlow` ORM
-- [ ] `app/adapter/out/persistence/repositories/stock_daily_flow.py` — `StockDailyFlowRepository`
-- [ ] `app/application/service/daily_flow_service.py` — `IngestDailyFlowUseCase`, `IngestDailyFlowBulkUseCase`
+**C-2α (인프라, 커밋 `cddd268`)**:
+- [x] `app/adapter/out/kiwoom/mrkcond.py` — `KiwoomMarketCondClient.fetch_daily_market` (C-1α 2R H-1 cross-stock pollution 차단 적용)
+- [x] `app/adapter/out/kiwoom/_records.py` — `DailyMarketRow`, `DailyMarketResponse`, `NormalizedDailyFlow`, `_strip_double_sign_int` (가설 B)
+- [x] `app/application/constants.py` — `DailyMarketDisplayMode` StrEnum + `EXCHANGE_TYPE_MAX_LENGTH=4` Final (2b-M2)
+- [x] `app/adapter/out/persistence/models/stock_daily_flow.py` — `StockDailyFlow` ORM
+- [x] `app/adapter/out/persistence/repositories/stock_daily_flow.py` — `StockDailyFlowRepository` (`_SUPPORTED_EXCHANGES = {KRX, NXT}` 2b-M1)
+- [x] `migrations/versions/007_kiwoom_stock_daily_flow.py` (007 — 005/006 은 stock_price)
+
+**C-2β (자동화, 대기)**:
+- [ ] `app/application/service/daily_flow_service.py` — `IngestDailyFlowUseCase`
 - [ ] `app/adapter/web/routers/daily_flow.py` — POST/GET endpoints
 - [ ] `app/batch/daily_flow_job.py` — APScheduler (KST mon-fri 19:00)
-- [ ] `migrations/versions/005_stock_daily_flow.py`
+- [ ] `app/adapter/web/_deps.py` 확장 — `IngestDailyFlowUseCaseFactory`
+- [ ] `app/main.py` 확장 — lifespan factory + scheduler + router
 - [ ] `scripts/backfill_daily_flow.py` — CLI
 
 ### 10.2 테스트
 
-- [ ] Unit 12 시나리오 (§9.1) PASS
-- [ ] Integration 9 시나리오 (§9.2) PASS
-- [ ] coverage `KiwoomMarketCondClient`, `IngestDailyFlowUseCase`, `StockDailyFlowRepository`, `_strip_double_sign_int` ≥ 80%
-- [ ] (optional) ka10081 vs ka10086 OHLCV cross-check 통과
+**C-2α (인프라, 66 cases / 760 tests / 93.43% coverage)**:
+- [x] Unit — `_strip_double_sign_int` 23 cases (가설 B + BIGINT overflow + 혼합/3중 부호 + edge)
+- [x] Unit — `KiwoomMarketCondClient.fetch_daily_market` 15 cases (정상/exchange/페이지네이션/business error/검증/indc_mode/빈 응답/정규화/cross-stock pollution)
+- [x] Unit — `DailyMarketDisplayMode` StrEnum 7 cases
+- [x] Integration — Migration 007 8 cases (테이블/UNIQUE/FK/인덱스/컬럼 타입/server_default/CASCADE/downgrade 멱등)
+- [x] Integration — `StockDailyFlowRepository` 13 cases (10 신규 + 3 SOR 차단 회귀)
+
+**C-2β / 운영 (대기)**:
+- [ ] Integration — `IngestDailyFlowUseCase` (KRX/NXT 분리 ingest, partial failure 격리)
+- [ ] (optional) ka10081 vs ka10086 OHLCV cross-check
 
 ### 10.3 운영 검증
 
