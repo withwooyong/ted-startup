@@ -7,6 +7,81 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-08] feat(kiwoom): Phase B-γ-2 — ka10001 펀더멘털 자동화 (UseCase + Router + Scheduler + Lifespan, 이중 리뷰 1R + 2R, 589 tests / 93.24%) — Phase B 마무리
+
+Phase B-γ-1 인프라 위에 비즈니스 로직 + 운영 자동화 layer 추가. **Phase B 마무리** — 이후 Phase C (OHLCV 백테스팅) 진입 가능.
+
+자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제. 1R HIGH 1 + MEDIUM 4 + LOW 3 → 2R 5 적용 + 회귀 5 → 2R PASS (CRITICAL/HIGH 0). + ruff E402 후속 정정.
+
+### Decisions (사용자 승인)
+
+- **Partial-failure 정책 = (a) per-stock skip + counter** — 한 종목 KiwoomError 발생 시 try/except 후 success/failed counter 누적, 다음 종목 진행 (B-α 패턴 일관). ADR § 14.6 deferred 결정 / 2R C-M3 해소
+- **`ensure_exists` 미사용** — active stock 만 대상. 신규 상장 종목은 다음날 ka10099 sync 에서 자동 등장 (KISS + RPS 보존)
+
+### Added — UseCase + Result dataclass
+
+- `app/application/service/stock_fundamental_service.py` (신규) — `SyncStockFundamentalUseCase`:
+  - `execute(target_date=None, only_market_codes=None)` — active stock 순회 + per-stock try/except + KiwoomError catch + Exception fallback. 응답 본문 echo 차단 (B-α/B-β M-2 패턴 일관)
+  - `refresh_one(stock_code)` — Stock 마스터 active 검증 → 없으면 ValueError → 라우터 404. KiwoomError 그대로 전파
+  - `_sync_one_stock` 헬퍼 — 키움 호출 (트랜잭션 외) → normalize → mismatch alert → upsert with `expected_stock_code` cross-check (B-γ-1 invariant 활용)
+- `FundamentalSyncResult` (asof_date, total, success, failed, errors[]) + `FundamentalSyncOutcome` (stock_code, error_class)
+- **2R M-1 — `_safe_for_log()` helper**: vendor 응답 stk_nm 의 control char (`\r\n\t\x00\x1b`) strip + 길이 cap. mismatch alert sink injection 차단 (Sentry/CloudWatch line 분리/색상 spoof 방어)
+
+### Added — Router
+
+- `app/adapter/web/routers/fundamentals.py` (신규):
+  - `POST /api/kiwoom/fundamentals/sync?alias=` (admin) + `FundamentalSyncRequestIn` (target_date, only_market_codes 옵션)
+  - `POST /api/kiwoom/stocks/{stock_code}/fundamental/refresh?alias=` (admin) — KiwoomBusinessError → 400 + detail{return_code, error="KiwoomBusinessError"} (message echo 차단)
+  - `GET /api/kiwoom/stocks/{stock_code}/fundamental/latest?exchange=KRX|NXT|SOR` — DB only
+  - `StockFundamentalOut` (45 필드 from_attributes), `FundamentalSyncResultOut`, `FundamentalSyncOutcomeOut`
+  - 예외 매핑: business→400 / credential→400 / rate→503 / upstream/validation→502 / KiwoomError fallback→502 (B-β M-5 패턴) / ValueError→404
+
+### Added — Scheduler + Batch
+
+- `app/scheduler.py` (확장) — `StockFundamentalScheduler` 클래스 (KST mon-fri 18:00 cron, ka10099 17:30 의 30분 후) + `STOCK_FUNDAMENTAL_SYNC_JOB_ID = "stock_fundamental_sync_daily"`
+- `app/batch/stock_fundamental_job.py` (신규) — `fire_stock_fundamental_sync` callback:
+  - `failure_ratio > 0.10` 시 logger.error + sample_failed 10건 cap (작업계획서 § 11.1 #7 임계)
+  - partial 실패 시 logger.warning / 모든 정상 시 logger.info
+  - 모든 예외 swallow (다음 cron tick 정상 동작 보장)
+
+### Added — DI / Lifespan
+
+- `app/adapter/web/_deps.py` (확장) — `SyncStockFundamentalUseCaseFactory` 타입 + `_sync_fundamental_factory` 싱글톤 + get/set/reset 3 함수 + `reset_token_manager` 일괄 unset 추가
+- `app/main.py` (확장) — lifespan `_sync_fundamental_factory` (sync_stock factory 패턴 일관, KRX-only 라 mock_env 무관) + `StockFundamentalScheduler.start/shutdown` + `fundamentals_router` 등록 + teardown 순서 fundamental → stock → sector → reset_*_factory 4개 → revoke → engine.dispose
+- `app/config/settings.py` (확장) — `scheduler_fundamental_sync_alias` Field
+
+### Fixed — 2R H-1: lifespan fail-fast cleanup 우회 차단
+
+- `app/main.py` — alias 미설정 검증을 `set_token_manager` / `set_revoke_use_case` / `set_*_factory` 6개 호출 **앞으로** 이동. 새 message 형식 (list — 모든 missing alias 표시). 기존 set 후 검증 (line 246-253 구) 제거. cleanup (reset_*_factory + revoke + engine.dispose) 우회 차단
+
+### Added — 신규 테스트 4 파일 / 39 cases
+
+- `tests/test_stock_fundamental_service.py` (16 cases) — UseCase + per-stock skip + mismatch + only_market_codes + target_date + refresh_one + 2R 회귀 3 (control char strip + _safe_for_log 단위 + 길이 cap)
+- `tests/test_fundamental_router.py` (14 cases) — `_make_app` + `dependency_overrides` 패턴 (lifespan 진입 안 함, B-α `test_stock_router` 일관) + KiwoomError 6종 매핑
+- `tests/test_stock_fundamental_scheduler.py` (5 cases) — KST 18:00 cron + 멱등성
+- `tests/test_stock_fundamental_deps.py` (4 cases) — factory get/set/reset
+
+### Changed — 기존 테스트 갱신
+
+- `tests/test_scheduler.py` + `tests/test_stock_master_scheduler.py` — `SCHEDULER_FUNDAMENTAL_SYNC_ALIAS` env 추가, fail-fast match pattern 갱신 (substring 형식)
+
+### Documentation
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 15 신규 — B-γ-2 결정 + 1R/2R 이슈 매핑 + Phase B 회고 (CRITICAL 6 + HIGH 25 누적 적용) + Defer 8 + Phase C 진입 결정 사항
+- B-γ-2 패턴 학습 — `_safe_for_log` log injection 방어, lifespan fail-fast cleanup 우회 차단
+
+### Quality Gates
+
+- 테스트 **589 passed / coverage 93.24%** (이전 550 + B-γ-1 36 + B-γ-2 39 / 회귀 0)
+- mypy --strict ✅ / ruff ✅ / FastAPI app create + `/api/kiwoom/fundamentals/sync` 라우트 등록 검증
+- 2R PASS — 1R HIGH 1 + MEDIUM 1 + LOW 1 + 1R sonnet M-1 모두 적용 검증, 신규 회귀 LOW 2 (charset 부분 커버 / cosmetic) defer
+
+### 다음
+
+**Phase C 진입** — OHLCV 시계열 + 백테스팅 본체. 진입 전 결정 필수: lazy fetch RPS 보호 옵션 (a/b/c — ADR § 13.4.1) + 운영 dry-run 통합 (DoD § 10.3).
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase B-γ-1 — ka10001 펀더멘털 인프라 (Migration 004 + ORM + Repository + Adapter, 이중 리뷰 1R + 2R, 550 tests / 94.28%)
 
 Phase B-γ 1,164줄 작업계획서를 **B-γ-1 (인프라) + B-γ-2 (UseCase/Router/Scheduler)** 두 chunk 로 분할 (사용자 승인). 본 chunk 는 인프라만 — 백테스팅 진입점에 펀더멘털 (PER/EPS/ROE/PBR/EV/BPS + 시총/외인/250일통계/일중시세 45 필드) 일별 스냅샷 적재 인프라.

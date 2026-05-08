@@ -27,8 +27,13 @@ from apscheduler.job import Job
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.adapter.web._deps import SyncSectorUseCaseFactory, SyncStockMasterUseCaseFactory
+from app.adapter.web._deps import (
+    SyncSectorUseCaseFactory,
+    SyncStockFundamentalUseCaseFactory,
+    SyncStockMasterUseCaseFactory,
+)
 from app.batch.sector_sync_job import fire_sector_sync
+from app.batch.stock_fundamental_job import fire_stock_fundamental_sync
 from app.batch.stock_master_job import fire_stock_master_sync
 
 logger = logging.getLogger(__name__)
@@ -40,6 +45,9 @@ SECTOR_SYNC_JOB_ID: Final[str] = "sector_sync_weekly"
 
 STOCK_MASTER_SYNC_JOB_ID: Final[str] = "stock_master_sync_daily"
 """일간 stock master sync job 의 고유 ID (B-α)."""
+
+STOCK_FUNDAMENTAL_SYNC_JOB_ID: Final[str] = "stock_fundamental_sync_daily"
+"""일간 stock fundamental sync job 의 고유 ID (B-γ-2). KST 18:00 mon-fri — ka10099 (17:30) 30분 후."""
 
 
 class SectorSyncScheduler:
@@ -220,10 +228,97 @@ class StockMasterScheduler:
             self._started = False
 
 
+class StockFundamentalScheduler:
+    """일간 stock fundamental sync cron job 1개를 관리하는 단순 wrapper (B-γ-2).
+
+    StockMasterScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST mon-fri 18:00
+    (ADR § 14.1 결정 — ka10099 stock master cron 17:30 의 30분 후, master 갱신 완료 후
+    is_active stock 조회 시점에 마스터 최신화 보장. 작업계획서 § 7.2 의 17:45 와는 별도
+    결정).
+
+    enabled=False 시 start no-op.
+    """
+
+    def __init__(
+        self,
+        *,
+        factory: SyncStockFundamentalUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._scheduler.get_job(job_id)
+
+    def start(self) -> None:
+        """scheduler 기동 + stock fundamental sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("stock fundamental scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("stock fundamental scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_stock_fundamental_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=18,
+                minute=0,
+                timezone=KST,
+            ),
+            id=STOCK_FUNDAMENTAL_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "stock fundamental scheduler 시작 — job=%s alias=%s cron=mon-fri 18:00 KST",
+            STOCK_FUNDAMENTAL_SYNC_JOB_ID,
+            self._alias,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        """scheduler 정지. 미기동 상태에서 호출돼도 안전."""
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001 — shutdown 모든 예외 swallow
+            logger.exception("stock fundamental scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
 __all__ = [
     "KST",
     "SECTOR_SYNC_JOB_ID",
+    "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
     "SectorSyncScheduler",
+    "StockFundamentalScheduler",
     "StockMasterScheduler",
 ]

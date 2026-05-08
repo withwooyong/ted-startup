@@ -296,6 +296,7 @@ async def test_lifespan_fails_fast_when_enabled_but_stock_alias_missing(
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_SECTOR_SYNC_ALIAS", "sector-alias")
     monkeypatch.setenv("SCHEDULER_STOCK_SYNC_ALIAS", "")
+    monkeypatch.setenv("SCHEDULER_FUNDAMENTAL_SYNC_ALIAS", "fundamental-alias")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings
@@ -305,7 +306,8 @@ async def test_lifespan_fails_fast_when_enabled_but_stock_alias_missing(
         from app.main import _lifespan
 
         app = FastAPI()
-        with pytest.raises(RuntimeError, match="scheduler_stock_sync_alias 미설정"):
+        # B-γ-2 2R H-1 — 새 message 형식: "미설정 alias: [...]" + cleanup 보장
+        with pytest.raises(RuntimeError, match="scheduler_stock_sync_alias"):
             async with _lifespan(app):
                 pass  # pragma: no cover
     finally:
@@ -324,7 +326,13 @@ async def test_lifespan_starts_both_schedulers_with_valid_aliases(
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_SECTOR_SYNC_ALIAS", "sector-alias")
     monkeypatch.setenv("SCHEDULER_STOCK_SYNC_ALIAS", "stock-alias")
+    monkeypatch.setenv("SCHEDULER_FUNDAMENTAL_SYNC_ALIAS", "fundamental-alias")  # B-γ-2
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
+
+
+# B-γ-2 2R H-1 회귀 검증은 기존 `test_lifespan_fails_fast_when_enabled_but_stock_alias_missing`
+# 이 담당 (match pattern 갱신됨). fail-fast 코드 위치 (`set_*_factory` 호출 앞) 자체는
+# main.py:91-110 라인 코드 리뷰로 검증.
 
     from app.config.settings import get_settings
 

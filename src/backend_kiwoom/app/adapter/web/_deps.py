@@ -23,6 +23,7 @@ from contextlib import AbstractAsyncContextManager
 from fastapi import Depends, Header, HTTPException, status
 
 from app.application.service.sector_service import SyncSectorMasterUseCase
+from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
     LookupStockUseCase,
     SyncStockMasterUseCase,
@@ -48,6 +49,15 @@ LookupStockUseCaseFactory = Callable[[str], AbstractAsyncContextManager[LookupSt
 
 sync_stock factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌드 + close 보장.
 mock_env 는 lifespan 에서 settings.kiwoom_default_env 기반으로 결정.
+"""
+
+SyncStockFundamentalUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[SyncStockFundamentalUseCase]
+]
+"""alias → AsyncContextManager[SyncStockFundamentalUseCase] factory (B-γ-2 추가).
+
+sync_stock factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌드 + close 보장.
+KRX-only 라 mock_env 무관 (ka10001 응답에 nxtEnable 없음).
 """
 
 
@@ -85,6 +95,7 @@ _revoke_use_case_singleton: RevokeKiwoomTokenUseCase | None = None
 _sync_sector_factory: SyncSectorUseCaseFactory | None = None
 _sync_stock_factory: SyncStockMasterUseCaseFactory | None = None
 _lookup_stock_factory: LookupStockUseCaseFactory | None = None
+_sync_fundamental_factory: SyncStockFundamentalUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -167,6 +178,22 @@ def set_lookup_stock_factory(factory: LookupStockUseCaseFactory) -> None:
     _lookup_stock_factory = factory
 
 
+def get_sync_fundamental_factory() -> SyncStockFundamentalUseCaseFactory:
+    """alias → AsyncContextManager[SyncStockFundamentalUseCase] factory. lifespan 에서 set."""
+    if _sync_fundamental_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="fundamental UseCase factory 미초기화",
+        )
+    return _sync_fundamental_factory
+
+
+def set_sync_fundamental_factory(factory: SyncStockFundamentalUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — KiwoomClient 빌드 + UseCase 결합 factory (B-γ-2)."""
+    global _sync_fundamental_factory
+    _sync_fundamental_factory = factory
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋."""
     global \
@@ -174,12 +201,14 @@ def reset_token_manager() -> None:
         _revoke_use_case_singleton, \
         _sync_sector_factory, \
         _sync_stock_factory, \
-        _lookup_stock_factory
+        _lookup_stock_factory, \
+        _sync_fundamental_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
     _sync_stock_factory = None
     _lookup_stock_factory = None
+    _sync_fundamental_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -200,23 +229,33 @@ def reset_lookup_stock_factory() -> None:
     _lookup_stock_factory = None
 
 
+def reset_sync_fundamental_factory() -> None:
+    """테스트 전용 — fundamental factory 만 리셋 (B-γ-2)."""
+    global _sync_fundamental_factory
+    _sync_fundamental_factory = None
+
+
 __all__ = [
     "LookupStockUseCaseFactory",
     "SyncSectorUseCaseFactory",
+    "SyncStockFundamentalUseCaseFactory",
     "SyncStockMasterUseCaseFactory",
     "get_lookup_stock_factory",
     "get_revoke_use_case",
     "get_settings_dep",
+    "get_sync_fundamental_factory",
     "get_sync_sector_factory",
     "get_sync_stock_factory",
     "get_token_manager",
     "require_admin_key",
     "reset_lookup_stock_factory",
+    "reset_sync_fundamental_factory",
     "reset_sync_sector_factory",
     "reset_sync_stock_factory",
     "reset_token_manager",
     "set_lookup_stock_factory",
     "set_revoke_use_case",
+    "set_sync_fundamental_factory",
     "set_sync_sector_factory",
     "set_sync_stock_factory",
     "set_token_manager",

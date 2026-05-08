@@ -353,6 +353,8 @@ async def test_lifespan_fails_fast_when_enabled_but_alias_missing(
     valid_key = Fernet.generate_key().decode()
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_SECTOR_SYNC_ALIAS", "")
+    monkeypatch.setenv("SCHEDULER_STOCK_SYNC_ALIAS", "stock-alias")
+    monkeypatch.setenv("SCHEDULER_FUNDAMENTAL_SYNC_ALIAS", "fundamental-alias")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings
@@ -362,7 +364,8 @@ async def test_lifespan_fails_fast_when_enabled_but_alias_missing(
         from app.main import _lifespan
 
         app = FastAPI()
-        with pytest.raises(RuntimeError, match="scheduler_sector_sync_alias 미설정"):
+        # B-γ-2 2R H-1 — 새 message 형식: "미설정 alias: [...]"
+        with pytest.raises(RuntimeError, match="scheduler_sector_sync_alias"):
             async with _lifespan(app):
                 pass  # pragma: no cover — lifespan startup 에서 raise
     finally:
@@ -385,6 +388,7 @@ async def test_lifespan_startup_and_shutdown_cycle_with_scheduler_enabled(
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_SECTOR_SYNC_ALIAS", "smoke-test-alias")
     monkeypatch.setenv("SCHEDULER_STOCK_SYNC_ALIAS", "smoke-test-alias")  # B-α: stock 도 필수
+    monkeypatch.setenv("SCHEDULER_FUNDAMENTAL_SYNC_ALIAS", "smoke-test-alias")  # B-γ-2: fundamental 도 필수
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings

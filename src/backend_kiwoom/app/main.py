@@ -33,18 +33,22 @@ from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
 from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
     reset_lookup_stock_factory,
+    reset_sync_fundamental_factory,
     reset_sync_sector_factory,
     reset_sync_stock_factory,
     set_lookup_stock_factory,
     set_revoke_use_case,
+    set_sync_fundamental_factory,
     set_sync_sector_factory,
     set_sync_stock_factory,
     set_token_manager,
 )
 from app.adapter.web.routers.auth import router as auth_router
+from app.adapter.web.routers.fundamentals import router as fundamentals_router
 from app.adapter.web.routers.sectors import router as sectors_router
 from app.adapter.web.routers.stocks import router as stocks_router
 from app.application.service.sector_service import SyncSectorMasterUseCase
+from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
     LookupStockUseCase,
     SyncStockMasterUseCase,
@@ -56,7 +60,11 @@ from app.application.service.token_service import (
 )
 from app.config.settings import get_settings
 from app.observability.logging import setup_logging
-from app.scheduler import SectorSyncScheduler, StockMasterScheduler
+from app.scheduler import (
+    SectorSyncScheduler,
+    StockFundamentalScheduler,
+    StockMasterScheduler,
+)
 from app.security.kiwoom_credential_cipher import KiwoomCredentialCipher
 
 logger = logging.getLogger(__name__)
@@ -90,6 +98,26 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         log_level=settings.log_level,
         json_output=settings.app_env != "local",
     )
+
+    # B-γ-2 2R H-1 — fail-fast 검증을 set_*_factory 호출 **앞으로** 이동.
+    # set 호출 후 RuntimeError 가 raise 되면 try/finally 의 cleanup (reset_*_factory,
+    # revoke_all_aliases, engine.dispose) 절대 도달 안 함 → singleton/engine 누설.
+    # 운영 실수로 alias 미설정 시에도 cleanup 보장 (process boundary 안전망).
+    if settings.scheduler_enabled:
+        missing_aliases = [
+            name
+            for name, value in (
+                ("scheduler_sector_sync_alias", settings.scheduler_sector_sync_alias),
+                ("scheduler_stock_sync_alias", settings.scheduler_stock_sync_alias),
+                ("scheduler_fundamental_sync_alias", settings.scheduler_fundamental_sync_alias),
+            )
+            if not value
+        ]
+        if missing_aliases:
+            raise RuntimeError(
+                f"scheduler_enabled=True 인데 미설정 alias: {missing_aliases} — 운영 실수 방어 fail-fast"
+            )
+
     cipher = KiwoomCredentialCipher(master_key=settings.kiwoom_credential_master_key)
     sessionmaker = get_sessionmaker()
 
@@ -206,12 +234,36 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     set_lookup_stock_factory(_lookup_stock_factory)
 
+    # B-γ-2: SyncStockFundamentalUseCaseFactory — sync_stock factory 와 같은 패턴.
+    # KRX-only (ADR § 14) 라 mock_env 무관 (ka10001 응답에 nxtEnable 없음).
+    @asynccontextmanager
+    async def _sync_fundamental_factory(alias: str) -> AsyncIterator[SyncStockFundamentalUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            yield SyncStockFundamentalUseCase(
+                session_provider=_session_provider,
+                stkinfo_client=stkinfo,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    set_sync_fundamental_factory(_sync_fundamental_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
-    # alias 미설정 + scheduler_enabled=True 면 fail-fast (운영 실수 방어).
-    if settings.scheduler_enabled and not settings.scheduler_sector_sync_alias:
-        raise RuntimeError("scheduler_enabled=True 인데 scheduler_sector_sync_alias 미설정 — 운영 실수 방어 fail-fast")
-    if settings.scheduler_enabled and not settings.scheduler_stock_sync_alias:
-        raise RuntimeError("scheduler_enabled=True 인데 scheduler_stock_sync_alias 미설정 — 운영 실수 방어 fail-fast")
+    # alias fail-fast 검증은 lifespan 진입 직후로 이동 (B-γ-2 2R H-1) — set_*_factory 후
+    # raise 시 cleanup 우회 차단.
     scheduler = SectorSyncScheduler(
         factory=_sync_sector_factory,
         alias=settings.scheduler_sector_sync_alias,
@@ -226,17 +278,25 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     stock_scheduler.start()
 
+    fundamental_scheduler = StockFundamentalScheduler(
+        factory=_sync_fundamental_factory,
+        alias=settings.scheduler_fundamental_sync_alias,
+        enabled=settings.scheduler_enabled,
+    )
+    fundamental_scheduler.start()
+
     try:
         yield
     finally:
-        # A3-γ: scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient 호출이
-        # graceful token revoke 와 충돌하지 않도록 보장.
-        # B-α: stock scheduler 도 같은 시점에 정지.
+        # A3-γ / B-α / B-γ-2: scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient
+        # 호출이 graceful token revoke 와 충돌하지 않도록 보장.
+        fundamental_scheduler.shutdown(wait=True)
         stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
 
         # 1R 2b M4: factory 싱글톤 unset — close 후 stale factory 가 라우터에 노출되지
         # 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 (factory 미초기화) 반환.
+        reset_sync_fundamental_factory()
         reset_lookup_stock_factory()
         reset_sync_stock_factory()
         reset_sync_sector_factory()
@@ -284,6 +344,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(sectors_router)
     app.include_router(stocks_router)
+    app.include_router(fundamentals_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
