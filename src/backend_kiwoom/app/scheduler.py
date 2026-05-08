@@ -27,8 +27,9 @@ from apscheduler.job import Job
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.adapter.web._deps import SyncSectorUseCaseFactory
+from app.adapter.web._deps import SyncSectorUseCaseFactory, SyncStockMasterUseCaseFactory
 from app.batch.sector_sync_job import fire_sector_sync
+from app.batch.stock_master_job import fire_stock_master_sync
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,15 @@ KST: Final[ZoneInfo] = ZoneInfo("Asia/Seoul")
 SECTOR_SYNC_JOB_ID: Final[str] = "sector_sync_weekly"
 """주간 sector sync job 의 고유 ID — replace_existing 멱등성 키."""
 
+STOCK_MASTER_SYNC_JOB_ID: Final[str] = "stock_master_sync_daily"
+"""일간 stock master sync job 의 고유 ID (B-α)."""
+
 
 class SectorSyncScheduler:
     """주간 sector sync cron job 1개를 관리하는 단순 wrapper.
 
-    의도적으로 단일 job 만 보유 — Phase A3 의 sector sync 전용. 추가 cron 이 생기면
-    별도 Scheduler 클래스 또는 generic 래퍼로 분리.
+    Phase A3 의 sector sync 전용 — 단일 job. B-α 에서 stock master 용으로 별도
+    `StockMasterScheduler` 클래스가 같은 파일에 추가됨 (동일 패턴, 별도 lifecycle).
 
     enabled=False 일 때는 AsyncIOScheduler 자체를 만들지만 start 를 호출 안 함 →
     is_running=False, job_count=0.
@@ -133,8 +137,93 @@ class SectorSyncScheduler:
             self._started = False
 
 
+class StockMasterScheduler:
+    """일간 stock master sync cron job 1개를 관리하는 단순 wrapper (B-α).
+
+    sector scheduler 와 동일 패턴 — 별도 AsyncIOScheduler 보유 (sector cron 과 독립
+    lifecycle). enabled=False 시 start no-op.
+
+    cron: KST mon-fri 17:30 (장 마감 후 신규 상장/상장폐지 반영, §7.2).
+    """
+
+    def __init__(
+        self,
+        *,
+        factory: SyncStockMasterUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._scheduler.get_job(job_id)
+
+    def start(self) -> None:
+        """scheduler 기동 + stock master sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("stock master scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("stock master scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_stock_master_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=17,
+                minute=30,
+                timezone=KST,
+            ),
+            id=STOCK_MASTER_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "stock master scheduler 시작 — job=%s alias=%s cron=mon-fri 17:30 KST",
+            STOCK_MASTER_SYNC_JOB_ID,
+            self._alias,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        """scheduler 정지. 미기동 상태에서 호출돼도 안전."""
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001 — shutdown 모든 예외 swallow
+            logger.exception("stock master scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
 __all__ = [
     "KST",
     "SECTOR_SYNC_JOB_ID",
+    "STOCK_MASTER_SYNC_JOB_ID",
     "SectorSyncScheduler",
+    "StockMasterScheduler",
 ]

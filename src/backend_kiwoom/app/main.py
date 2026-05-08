@@ -34,11 +34,14 @@ from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
     set_revoke_use_case,
     set_sync_sector_factory,
+    set_sync_stock_factory,
     set_token_manager,
 )
 from app.adapter.web.routers.auth import router as auth_router
 from app.adapter.web.routers.sectors import router as sectors_router
+from app.adapter.web.routers.stocks import router as stocks_router
 from app.application.service.sector_service import SyncSectorMasterUseCase
+from app.application.service.stock_master_service import SyncStockMasterUseCase
 from app.application.service.token_service import (
     RevokeKiwoomTokenUseCase,
     TokenManager,
@@ -46,7 +49,7 @@ from app.application.service.token_service import (
 )
 from app.config.settings import get_settings
 from app.observability.logging import setup_logging
-from app.scheduler import SectorSyncScheduler
+from app.scheduler import SectorSyncScheduler, StockMasterScheduler
 from app.security.kiwoom_credential_cipher import KiwoomCredentialCipher
 
 logger = logging.getLogger(__name__)
@@ -132,10 +135,48 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     set_sync_sector_factory(_sync_sector_factory)
 
+    # B-α: SyncStockMasterUseCaseFactory — sector factory 와 동일 패턴.
+    #
+    # mock_env 결정 정책 (1R H-1 적대적 리뷰):
+    # - 운영 가정: **프로세스당 단일 env** (한 프로세스에서 prod alias + mock alias 혼용 안 함)
+    # - settings.kiwoom_default_env 가 진실의 원천 — 프로세스 시작 시 lifespan 1회 결정
+    # - 만약 향후 멀티 env 동시 운영이 필요하면, factory 안에서 alias 의 자격증명 row
+    #   (kiwoom_credential.env 컬럼) 를 조회해 alias 단위로 mock_env 를 결정하도록 변경 필요
+    # - 현재는 H-1 위험을 운영 가정으로 차단 (ADR-0001 § 운영 정책에 명시)
+    stock_mock_env = settings.kiwoom_default_env == "mock"
+
+    @asynccontextmanager
+    async def _sync_stock_factory(alias: str) -> AsyncIterator[SyncStockMasterUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            yield SyncStockMasterUseCase(
+                session_provider=_session_provider,
+                stkinfo_client=stkinfo,
+                mock_env=stock_mock_env,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    set_sync_stock_factory(_sync_stock_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
     # alias 미설정 + scheduler_enabled=True 면 fail-fast (운영 실수 방어).
     if settings.scheduler_enabled and not settings.scheduler_sector_sync_alias:
         raise RuntimeError("scheduler_enabled=True 인데 scheduler_sector_sync_alias 미설정 — 운영 실수 방어 fail-fast")
+    if settings.scheduler_enabled and not settings.scheduler_stock_sync_alias:
+        raise RuntimeError("scheduler_enabled=True 인데 scheduler_stock_sync_alias 미설정 — 운영 실수 방어 fail-fast")
     scheduler = SectorSyncScheduler(
         factory=_sync_sector_factory,
         alias=settings.scheduler_sector_sync_alias,
@@ -143,11 +184,20 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     scheduler.start()
 
+    stock_scheduler = StockMasterScheduler(
+        factory=_sync_stock_factory,
+        alias=settings.scheduler_stock_sync_alias,
+        enabled=settings.scheduler_enabled,
+    )
+    stock_scheduler.start()
+
     try:
         yield
     finally:
         # A3-γ: scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient 호출이
-        # graceful token revoke 와 충돌하지 않도록 보장
+        # graceful token revoke 와 충돌하지 않도록 보장.
+        # B-α: stock scheduler 도 같은 시점에 정지.
+        stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
 
         # H-3 적대적 리뷰: revoke 실패/hang/cancel 와 무관하게 engine.dispose() 도달 보장
@@ -192,6 +242,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(sectors_router)
+    app.include_router(stocks_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

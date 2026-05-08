@@ -384,6 +384,7 @@ async def test_lifespan_startup_and_shutdown_cycle_with_scheduler_enabled(
     valid_key = Fernet.generate_key().decode()
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_SECTOR_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_STOCK_SYNC_ALIAS", "smoke-test-alias")  # B-α: stock 도 필수
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings

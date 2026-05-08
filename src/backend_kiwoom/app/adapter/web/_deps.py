@@ -23,6 +23,7 @@ from contextlib import AbstractAsyncContextManager
 from fastapi import Depends, Header, HTTPException, status
 
 from app.application.service.sector_service import SyncSectorMasterUseCase
+from app.application.service.stock_master_service import SyncStockMasterUseCase
 from app.application.service.token_service import RevokeKiwoomTokenUseCase, TokenManager
 from app.config.settings import Settings, get_settings
 
@@ -30,6 +31,15 @@ SyncSectorUseCaseFactory = Callable[[str], AbstractAsyncContextManager[SyncSecto
 """alias → AsyncContextManager[SyncSectorMasterUseCase] factory.
 
 `async with factory(alias) as use_case:` 패턴 — exit 시 KiwoomClient.close 보장.
+"""
+
+SyncStockMasterUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[SyncStockMasterUseCase]
+]
+"""alias → AsyncContextManager[SyncStockMasterUseCase] factory (B-α 추가).
+
+sector factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌드 + close 보장.
+mock_env 는 lifespan 에서 settings.kiwoom_default_env 기반으로 결정 후 묶음.
 """
 
 
@@ -65,6 +75,7 @@ async def require_admin_key(
 _token_manager_singleton: TokenManager | None = None
 _revoke_use_case_singleton: RevokeKiwoomTokenUseCase | None = None
 _sync_sector_factory: SyncSectorUseCaseFactory | None = None
+_sync_stock_factory: SyncStockMasterUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -115,12 +126,29 @@ def set_sync_sector_factory(factory: SyncSectorUseCaseFactory) -> None:
     _sync_sector_factory = factory
 
 
+def get_sync_stock_factory() -> SyncStockMasterUseCaseFactory:
+    """alias → AsyncContextManager[UseCase] factory. lifespan 에서 set."""
+    if _sync_stock_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="stock UseCase factory 미초기화",
+        )
+    return _sync_stock_factory
+
+
+def set_sync_stock_factory(factory: SyncStockMasterUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — KiwoomClient 빌드 + UseCase 결합 factory."""
+    global _sync_stock_factory
+    _sync_stock_factory = factory
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋."""
-    global _token_manager_singleton, _revoke_use_case_singleton, _sync_sector_factory
+    global _token_manager_singleton, _revoke_use_case_singleton, _sync_sector_factory, _sync_stock_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
+    _sync_stock_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -129,16 +157,26 @@ def reset_sync_sector_factory() -> None:
     _sync_sector_factory = None
 
 
+def reset_sync_stock_factory() -> None:
+    """테스트 전용 — stock factory 만 리셋."""
+    global _sync_stock_factory
+    _sync_stock_factory = None
+
+
 __all__ = [
     "SyncSectorUseCaseFactory",
+    "SyncStockMasterUseCaseFactory",
     "get_revoke_use_case",
     "get_settings_dep",
     "get_sync_sector_factory",
+    "get_sync_stock_factory",
     "get_token_manager",
     "require_admin_key",
     "reset_sync_sector_factory",
+    "reset_sync_stock_factory",
     "reset_token_manager",
     "set_revoke_use_case",
     "set_sync_sector_factory",
+    "set_sync_stock_factory",
     "set_token_manager",
 ]

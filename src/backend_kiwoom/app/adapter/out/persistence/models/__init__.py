@@ -5,10 +5,12 @@ from __future__ import annotations
 from app.adapter.out.persistence.models.credential import KiwoomCredential, KiwoomToken
 from app.adapter.out.persistence.models.raw_response import RawResponse
 from app.adapter.out.persistence.models.sector import Sector
+from app.adapter.out.persistence.models.stock import Stock
 
 __all__ = [
     "KiwoomCredential",
     "KiwoomToken",
     "RawResponse",
     "Sector",
+    "Stock",
 ]

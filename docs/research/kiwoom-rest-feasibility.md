@@ -222,14 +222,31 @@ kiwoom_request_timeout_seconds: float = 15.0
 - DB: PostgreSQL 별도 스키마 `kiwoom`
 - KRX/NXT **물리 분리 테이블** (`stock_price_krx`, `stock_price_nxt`) + application 레이어 view 합성
 
-### 10.5 산출물 (2026-05-07)
+### 10.5 산출물 (2026-05-08 갱신 — Phase B-α 반영)
 
-```
-src/backend_kiwoom/docs/plans/
-  ├ master.md               # 통합 작업 계획서 (653줄, 12 섹션)
-  ├ endpoint-01-au10001.md  # 토큰 발급 (626줄)
-  ├ endpoint-02-au10002.md  # 토큰 폐기 (586줄)
-  └ endpoint-14-ka10101.md  # 업종코드 리스트 (668줄)
-```
+**계획서**: 25 endpoint 전체 100% 완성 (`master.md` + `endpoint-01~25.md`)
 
-코드는 아직 0줄 — 계획서만 선행. 다음 세션 Phase B (ka10099/ka10100/ka10001) 부터 NXT 종목 마스터 계획서 작성 예정.
+**구현 진행 상태** (커밋 기록 기준):
+
+| Phase | 커밋 | 범위 | 테스트 / 커버리지 |
+|-------|------|------|-------------------|
+| A1 기반 인프라 | `12f46aa` | Settings + Fernet Cipher + structlog 마스킹 + Migration 001 + KiwoomCredentialRepository | 117 / 94.61% |
+| 보안 사전 PR | `265b720` | ADR-0001 § 3 #1·#2·#3 — `_KIWOOM_SECRET_PATTERN` 정규식 보강 + KiwoomCredentials 직렬화 차단 + `scrub_token_fields` helper | 161 / 94.94% |
+| A2-α 토큰 발급 | `115fcce` | KiwoomAuthClient.issue_token + IssueKiwoomTokenUseCase + TokenManager (alias 별 Lock + max_aliases 캡 + session_provider) + POST /tokens (admin) + FastAPI 진입점 | 204 / 88.07% |
+| A2-β 토큰 폐기 + lifespan | `0ea955c` | KiwoomAuthClient.revoke_token + RevokeKiwoomTokenUseCase + TokenManager 확장 + DELETE/revoke-raw 라우터 + lifespan graceful shutdown + RequestValidationError 핸들러 (sensitive paths) | 239 / 89.95% |
+| A3-α 공통 트랜스포트 + ka10101 | `cce855c` | KiwoomClient (httpx + tenacity + Semaphore + paginated) + KiwoomStkInfoClient.fetch_sectors (ka10101) — 모든 후속 endpoint B~G 22개의 기반 | 277 / 90.36% |
+| F1 auth __context__ 백포트 | `035a68e` | auth.py issue_token / revoke_token 에 `_clear_chain` 일관 적용 | 285 / 91.0% |
+| A3-β sector 영속화 | `6cd4371` | Migration 002 + Sector ORM + Repository + UseCase + GET/POST 라우터 | 332 / 91% |
+| A3-γ weekly cron | `52c807b` | SectorSyncScheduler (KST 일 03:00) + lifespan 통합 | 345 / 93% |
+| **B-α ka10099 종목 마스터** | (이번 PR) | StockListMarketType StrEnum (16종) + KiwoomStkInfoClient.fetch_stock_list + Stock ORM + StockRepository + SyncStockMasterUseCase + GET/POST `/api/kiwoom/stocks` + StockMasterScheduler (KST mon-fri 17:30) + Migration 003. M-2 응답 echo 정책 sector 백포트 | **443 / 93.38%** |
+
+**적대적 이중 리뷰 누적 발견**: CRITICAL 4건 + HIGH 16건 — 모두 적용 후 PASS. 핵심 결정 ADR-0001 § 3·6·7·8·12 에 기록.
+
+### 10.6 다음 작업 (2026-05-08 시점)
+
+| # | 항목 | 우선순위 |
+|---|------|---------|
+| 운영 dry-run | DoD §10.3 일괄 — 키움 자격증명 1쌍으로 α/β/A3/B-α 전체 검증 (응답 marketCode 분포·NXT 비율·페이지네이션 마진) | B-α 직후 또는 B 챤크 사이 |
+| Phase B-β | ka10100 종목 정보 리스트 — gap-filler (NormalizedStock 변환 로직 공유) | B-α 후 |
+| Phase B-γ | ka10001 주식 기본 정보 — 펀더멘털 보강 | B-β 후 |
+| Phase C~G | OHLCV 백테스팅 본체 + 시그널 보강 + 순위 + 투자자별 (Phase B 완료 후) | 순차 |

@@ -103,19 +103,23 @@ class SyncSectorMasterUseCase:
         )
 
     async def _sync_one_market(self, mrkt_tp: MarketCode) -> MarketSyncOutcome:
-        """단일 시장 sync — 자체 트랜잭션. 실패 outcome 으로 격리."""
+        """단일 시장 sync — 자체 트랜잭션. 실패 outcome 으로 격리.
+
+        outcome.error 정책 (B-α 1R M-2 백포트): 클래스명 only — 응답 본문 echo 차단.
+        메시지는 logger 경로로만 노출.
+        """
         # 1. 키움 API 호출 — 트랜잭션 밖 (DB 락 점유 시간 최소화)
         try:
             response = await self._client.fetch_sectors(mrkt_tp)
         except KiwoomError as exc:
-            err_msg = f"{type(exc).__name__}: {exc}"
-            logger.warning("sector sync 실패 mrkt_tp=%s: %s", mrkt_tp, err_msg)
+            err_class = type(exc).__name__
+            logger.warning("sector sync 실패 mrkt_tp=%s: %s: %s", mrkt_tp, err_class, exc)
             return MarketSyncOutcome(
                 market_code=mrkt_tp,
                 fetched=0,
                 upserted=0,
                 deactivated=0,
-                error=err_msg,
+                error=err_class,
             )
 
         rows = [
@@ -137,14 +141,14 @@ class SyncSectorMasterUseCase:
                 upserted = await repo.upsert_many(rows)
                 deactivated = await repo.deactivate_missing(mrkt_tp, present_codes)
         except Exception as exc:  # noqa: BLE001 — DB 예외도 시장 단위로 격리
-            err_msg = f"{type(exc).__name__}: {exc}"
-            logger.warning("sector sync DB 실패 mrkt_tp=%s: %s", mrkt_tp, err_msg)
+            err_class = type(exc).__name__
+            logger.warning("sector sync DB 실패 mrkt_tp=%s: %s: %s", mrkt_tp, err_class, exc)
             return MarketSyncOutcome(
                 market_code=mrkt_tp,
                 fetched=fetched,
                 upserted=0,
                 deactivated=0,
-                error=err_msg,
+                error=err_class,
             )
 
         return MarketSyncOutcome(
