@@ -7,6 +7,79 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] feat(kiwoom): Phase C-2α — ka10086 일별 수급 인프라 (Migration 007 + ORM + Repository + Adapter + helpers, 이중 리뷰 1R PASS, 760 tests / 93.43%)
+
+**Phase C 세 번째 chunk** — ka10086 (일별주가요청) 의 인프라 (Migration + ORM + Repository + Adapter + helpers). ka10081 의 짝꿍 — 백테스팅 시그널 보강 (투자자별/외인/신용). UseCase + Router + Scheduler 는 C-2β 에서.
+
+자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제. 1R HIGH 0 / MEDIUM 3 (2a 1 + 2b 2) / LOW 9 → 3건 즉시 적용 + 회귀 4 추가 → **2R 진입 없이 PASS** (CRITICAL/HIGH 0).
+
+### Decisions (사용자 승인)
+
+- **chunk 분할** — C-2α (인프라) + C-2β (자동화) (B-γ-1/2, C-1α/β 패턴 일관)
+- **이중 부호 처리 = 가설 B** (`--714` → -714) — 운영 dry-run 후 raw 응답 + KOSCOM 공시 cross-check 확정 예정
+- **indc_mode 디폴트 = QUANTITY (수량)** — 백테스팅 시그널 다른 종목 비교 안정적
+- **OHLCV 중복 적재 안 함** — ka10081 stock_price_krx/nxt 정답. ka10086 의 OHLCV 8 필드 미적재
+- **cron = KST mon-fri 19:00** (ka10081 18:30 + 30분) — C-2β 에서 적용
+
+### Added — DailyMarketDisplayMode StrEnum + ExchangeType 길이 invariant
+
+- `app/application/constants.py` (확장) — `DailyMarketDisplayMode` (QUANTITY="0" / AMOUNT="1") + `EXCHANGE_TYPE_MAX_LENGTH=4` Final + import 시점 fail-fast (2b-M2)
+
+### Added — Migration 007 + ORM (KRX/NXT 분리 영속화)
+
+- `migrations/versions/007_kiwoom_stock_daily_flow.py` (신규) — `stock_daily_flow` 테이블 + UNIQUE(stock_id, trading_date, exchange) + FK CASCADE + 인덱스 3개 (trading_date / stock_id / exchange) + downgrade 가드 (데이터 0 일 때만)
+- `app/adapter/out/persistence/models/stock_daily_flow.py` (신규) — `StockDailyFlow` ORM (13 도메인 + 메타 4 + 타임스탬프 3)
+- `app/adapter/out/persistence/models/__init__.py` (수정) — export 추가
+
+### Added — `_records.py` (Pydantic + 정규화 + 이중 부호 헬퍼)
+
+- `app/adapter/out/kiwoom/_records.py` (신규):
+  - `DailyMarketRow` Pydantic 22 필드 (max_length=32 강제, B-γ-1 2R A-H1)
+  - `DailyMarketResponse` wrapper (`stk_cd` 메아리 + `daly_stkpc` list)
+  - `NormalizedDailyFlow` slots dataclass (OHLCV 8 무시, 13 도메인 + 메타)
+  - `_strip_double_sign_int` 가설 B 헬퍼 (`--714` → -714, `_to_int` BIGINT 가드 위임)
+
+### Added — KiwoomMarketCondClient adapter
+
+- `app/adapter/out/kiwoom/mrkcond.py` (신규) — `KiwoomMarketCondClient.fetch_daily_market`:
+  - C-1α 2R H-1 패턴 차용 (페이지 응답 stk_cd 메아리 base code 비교 → cross-stock pollution 차단)
+  - flag-then-raise-outside-except (B-β 1R 2b-H2)
+  - response message echo 차단 (B-α/B-β M-2 — 비식별 메타만)
+  - cont-yn 페이지네이션 자동
+
+### Added — StockDailyFlowRepository (SOR 차단 적용)
+
+- `app/adapter/out/persistence/repositories/stock_daily_flow.py` (신규) — `StockDailyFlowRepository`:
+  - `_SUPPORTED_EXCHANGES = {KRX, NXT}` 화이트리스트 (2b-M1 — Phase D 까지 SOR silent merge 차단)
+  - `upsert_many` ON CONFLICT (stock_id, trading_date, exchange) DO UPDATE
+  - `trading_date == date.min` 빈 응답 자동 skip
+  - 명시 update_set 16 항목 (B-γ-1 2R B-H3 패턴)
+  - `find_range(stock_id, *, exchange, start, end)` — exchange 필터 + asc 정렬 + start>end / SOR → ValueError
+
+### Added — 1R 회귀 테스트 (이중 리뷰 발견 사항)
+
+- `test_stock_daily_flow_repository.py` 보강:
+  - `test_upsert_many_rejects_sor_exchange` (2b-M1)
+  - `test_upsert_many_rejects_mixed_with_sor` (2b-M1)
+  - `test_find_range_rejects_sor_exchange` (2b-M1)
+- `test_daily_market_display_mode.py` 보강 — `test_exchange_type_values_within_varchar4_limit` (2b-M2)
+
+### Added — 신규 테스트 5 파일 / 66 cases
+
+- `tests/test_daily_market_display_mode.py` (7 — 6 신규 + 1 회귀)
+- `tests/test_strip_double_sign_int.py` (23 — 가설 B + BIGINT overflow + 혼합/이중 부호)
+- `tests/test_migration_007.py` (8 — 테이블/UNIQUE/FK/인덱스/컬럼 타입/server_default/CASCADE/downgrade 멱등)
+- `tests/test_stock_daily_flow_repository.py` (13 — 10 신규 + 3 회귀)
+- `tests/test_kiwoom_mrkcond_client.py` (15 — 정상/exchange suffix/페이지네이션/business error/검증/indc_mode/빈 응답/정규화/cross-stock pollution)
+
+### Defer (C-2β / 운영 dry-run / Phase F)
+
+- 가설 B 정확성 / R15 단위 / OHLCV cross-check (ka10081 vs ka10086) — 운영 dry-run 후 확정
+- NUMERIC(8,4) magnitude 가드 / `idx_daily_flow_exchange` cardinality / KRX/NXT 트랜잭션 deadlock — 후속 chunk
+- C-1α 에서 상속된 알려진 이슈 (NUMERIC magnitude / list cap / MappingProxyType / chart.py private import / GET 라우터 익명 공개)
+
+---
+
 ## [2026-05-08] feat(kiwoom): Phase C-1β — ka10081 OHLCV 자동화 (UseCase + Router + Scheduler, 이중 리뷰 1R PASS, 694 tests / 93.08%)
 
 **Phase C 두 번째 chunk** — C-1α 인프라 위에 자동화 (IngestDailyOhlcvUseCase + 라우터 3종 + OhlcvDailyScheduler) 추가. 백테스팅 OHLCV 의 자동 적재 파이프라인 완성.

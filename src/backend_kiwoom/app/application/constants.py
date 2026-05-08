@@ -60,6 +60,9 @@ class ExchangeType(StrEnum):
 
     Phase C-1α 는 KRX/NXT 만 영속화 (stock_price_krx + stock_price_nxt). SOR 은
     호출 가능하지만 영속화 미지원 — Phase D 시점 결정.
+
+    길이 invariant (C-2α 2b-M2): stock_price_*/stock_daily_flow 의 exchange 컬럼이
+    VARCHAR(4) 로 정의됨. 신규 멤버 추가 시 4자 이내 강제 — module import 시점 fail-fast.
     """
 
     KRX = "KRX"
@@ -67,8 +70,37 @@ class ExchangeType(StrEnum):
     SOR = "SOR"
 
 
+# 2b-M2 — VARCHAR(4) silent truncation 차단. 신규 거래소 추가 시 컬럼 확장 강제.
+EXCHANGE_TYPE_MAX_LENGTH: Final[int] = 4
+_invalid_exchanges = [e.value for e in ExchangeType if len(e.value) > EXCHANGE_TYPE_MAX_LENGTH]
+if _invalid_exchanges:
+    raise RuntimeError(
+        f"ExchangeType value 가 VARCHAR({EXCHANGE_TYPE_MAX_LENGTH}) 한도 초과: {_invalid_exchanges}. "
+        "Migration 005/006/007 의 exchange 컬럼 확장 또는 멤버 단축 필요"
+    )
+
+
+class DailyMarketDisplayMode(StrEnum):
+    """ka10086 `indc_tp` 표시구분 (C-2α).
+
+    설계: endpoint-10-ka10086.md § 2.3.
+
+    indc_tp 의미:
+    - "0" QUANTITY: 수량 (주식수). 백테스팅 시그널 디폴트 — 다른 종목 비교 안정적
+    - "1" AMOUNT: 백만원 단위
+
+    주의 (Excel R15): `for_netprps` / `orgn_netprps` / `ind_netprps` (외인/기관/개인 순매수)
+    는 indc_tp 무시하고 항상 수량으로 응답. 단위 mismatch 운영 검증 후 결정.
+    """
+
+    QUANTITY = "0"
+    AMOUNT = "1"
+
+
 __all__ = [
+    "EXCHANGE_TYPE_MAX_LENGTH",
     "STOCK_SYNC_DEFAULT_MARKETS",
+    "DailyMarketDisplayMode",
     "ExchangeType",
     "StockListMarketType",
 ]
