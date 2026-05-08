@@ -7,7 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
-## [2026-05-08] feat(kiwoom): Phase B-β — ka10100 단건 종목 조회 (gap-filler / lazy fetch, 이중 리뷰 1R, 498 tests / 93.73%)
+## [2026-05-08] feat(kiwoom): Phase B-β — ka10100 단건 종목 조회 (gap-filler / lazy fetch, 이중 리뷰 1R, 498 tests / 93.73%) — `abce7e0`
 
 Phase B 의 두 번째 chunk — ka10099 (bulk sync) 의 gap-filler. ka10100 (단건 종목 조회) endpoint 의 어댑터·Repository.upsert_one·LookupStockUseCase·라우터·lifespan 통합. Phase C OHLCV 적재가 stock 마스터 미스 시 호출할 lazy fetch 진입점 (`ensure_exists`) 마련.
 

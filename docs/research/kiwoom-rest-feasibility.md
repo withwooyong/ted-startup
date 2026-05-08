@@ -222,7 +222,7 @@ kiwoom_request_timeout_seconds: float = 15.0
 - DB: PostgreSQL 별도 스키마 `kiwoom`
 - KRX/NXT **물리 분리 테이블** (`stock_price_krx`, `stock_price_nxt`) + application 레이어 view 합성
 
-### 10.5 산출물 (2026-05-08 갱신 — Phase B-α 반영)
+### 10.5 산출물 (2026-05-08 갱신 — Phase B-β 반영)
 
 **계획서**: 25 endpoint 전체 100% 완성 (`master.md` + `endpoint-01~25.md`)
 
@@ -238,15 +238,16 @@ kiwoom_request_timeout_seconds: float = 15.0
 | F1 auth __context__ 백포트 | `035a68e` | auth.py issue_token / revoke_token 에 `_clear_chain` 일관 적용 | 285 / 91.0% |
 | A3-β sector 영속화 | `6cd4371` | Migration 002 + Sector ORM + Repository + UseCase + GET/POST 라우터 | 332 / 91% |
 | A3-γ weekly cron | `52c807b` | SectorSyncScheduler (KST 일 03:00) + lifespan 통합 | 345 / 93% |
-| **B-α ka10099 종목 마스터** | (이번 PR) | StockListMarketType StrEnum (16종) + KiwoomStkInfoClient.fetch_stock_list + Stock ORM + StockRepository + SyncStockMasterUseCase + GET/POST `/api/kiwoom/stocks` + StockMasterScheduler (KST mon-fri 17:30) + Migration 003. M-2 응답 echo 정책 sector 백포트 | **443 / 93.38%** |
+| B-α ka10099 종목 마스터 | `bf9956a` | StockListMarketType StrEnum (16종) + KiwoomStkInfoClient.fetch_stock_list + Stock ORM + StockRepository + SyncStockMasterUseCase + GET/POST `/api/kiwoom/stocks` + StockMasterScheduler (KST mon-fri 17:30) + Migration 003. M-2 응답 echo 정책 sector 백포트 | 443 / 93.38% |
+| **B-β ka10100 단건 조회** | `abce7e0` | STK_CD_LOOKUP_PATTERN 단일 정규식 (ASCII only) + StockLookupResponse + KiwoomStkInfoClient.lookup_stock + StockRepository.upsert_one (RETURNING + populate_existing) + LookupStockUseCase (execute + ensure_exists) + GET `/api/kiwoom/stocks/{stock_code}` (DB only) + POST `/api/kiwoom/stocks/{stock_code}/refresh` (admin) + lifespan factory + teardown reset. B-α M-2 정책 백포트 (return_msg echo 차단) + flag-then-raise-outside-except 패턴 | **498 / 93.73%** |
 
-**적대적 이중 리뷰 누적 발견**: CRITICAL 4건 + HIGH 16건 — 모두 적용 후 PASS. 핵심 결정 ADR-0001 § 3·6·7·8·12 에 기록.
+**적대적 이중 리뷰 누적 발견**: CRITICAL 4건 + HIGH 20건 — 모두 적용 후 PASS. 핵심 결정 ADR-0001 § 3·6·7·8·12·13 에 기록.
 
 ### 10.6 다음 작업 (2026-05-08 시점)
 
 | # | 항목 | 우선순위 |
 |---|------|---------|
-| 운영 dry-run | DoD §10.3 일괄 — 키움 자격증명 1쌍으로 α/β/A3/B-α 전체 검증 (응답 marketCode 분포·NXT 비율·페이지네이션 마진) | B-α 직후 또는 B 챤크 사이 |
-| Phase B-β | ka10100 종목 정보 리스트 — gap-filler (NormalizedStock 변환 로직 공유) | B-α 후 |
-| Phase B-γ | ka10001 주식 기본 정보 — 펀더멘털 보강 | B-β 후 |
+| 운영 dry-run | DoD §10.3 + §13.4.3 일괄 — 키움 자격증명 1쌍으로 α/β/A3/B-α/B-β 전체 검증 (응답 marketCode 분포·NXT 비율·페이지네이션·**ka10100 단건 응답 14 필드 + 존재하지 않는 종목 패턴 + ETF/코스닥 차이**) | B-β 직후 또는 B-γ 사이 |
+| Phase B-γ | ka10001 주식 기본 정보 — 펀더멘털 보강 (1,164 줄 계획서, chunk 분할 검토) | B-β 후 |
+| **Phase C 진입 전 lazy fetch RPS 보호 결정** | 1R 2b-M1 deferred — `ensure_exists` 의 KiwoomClient factory 단위 RPS 우회. 옵션 (a) lifespan 싱글톤 / (b) stock_code in-flight cache / (c) batch 후 fail-closed | C 진입 전 필수 |
 | Phase C~G | OHLCV 백테스팅 본체 + 시그널 보강 + 순위 + 투자자별 (Phase B 완료 후) | 순차 |
