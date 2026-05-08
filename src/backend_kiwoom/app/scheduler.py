@@ -28,11 +28,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.adapter.web._deps import (
+    IngestDailyFlowUseCaseFactory,
     IngestDailyOhlcvUseCaseFactory,
     SyncSectorUseCaseFactory,
     SyncStockFundamentalUseCaseFactory,
     SyncStockMasterUseCaseFactory,
 )
+from app.batch.daily_flow_job import fire_daily_flow_sync
 from app.batch.ohlcv_daily_job import fire_ohlcv_daily_sync
 from app.batch.sector_sync_job import fire_sector_sync
 from app.batch.stock_fundamental_job import fire_stock_fundamental_sync
@@ -53,6 +55,9 @@ STOCK_FUNDAMENTAL_SYNC_JOB_ID: Final[str] = "stock_fundamental_sync_daily"
 
 OHLCV_DAILY_SYNC_JOB_ID: Final[str] = "ohlcv_daily_sync_daily"
 """일간 OHLCV sync job 의 고유 ID (C-1β). KST 18:30 mon-fri — fundamental (18:00) 30분 후."""
+
+DAILY_FLOW_SYNC_JOB_ID: Final[str] = "daily_flow_sync_daily"
+"""일간 daily flow (ka10086) sync job 의 고유 ID (C-2β). KST 19:00 mon-fri — ohlcv (18:30) 30분 후."""
 
 
 class SectorSyncScheduler:
@@ -402,12 +407,98 @@ class OhlcvDailyScheduler:
             self._started = False
 
 
+class DailyFlowScheduler:
+    """일간 daily flow (ka10086) sync cron job 1개를 관리하는 단순 wrapper (C-2β).
+
+    OhlcvDailyScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST mon-fri 19:00
+    (ADR § 18 결정 — ohlcv cron 18:30 의 30분 후. ohlcv 적재 완료 후 수급 데이터 적재
+    시점에 stock master / OHLCV 가 모두 최신화 보장).
+
+    enabled=False 시 start no-op.
+    """
+
+    def __init__(
+        self,
+        *,
+        factory: IngestDailyFlowUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._scheduler.get_job(job_id)
+
+    def start(self) -> None:
+        """scheduler 기동 + daily flow sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("daily flow scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("daily flow scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_daily_flow_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=19,
+                minute=0,
+                timezone=KST,
+            ),
+            id=DAILY_FLOW_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "daily flow scheduler 시작 — job=%s alias=%s cron=mon-fri 19:00 KST",
+            DAILY_FLOW_SYNC_JOB_ID,
+            self._alias,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        """scheduler 정지. 미기동 상태에서 호출돼도 안전."""
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001 — shutdown 모든 예외 swallow
+            logger.exception("daily flow scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
 __all__ = [
+    "DAILY_FLOW_SYNC_JOB_ID",
     "KST",
     "OHLCV_DAILY_SYNC_JOB_ID",
     "SECTOR_SYNC_JOB_ID",
     "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
+    "DailyFlowScheduler",
     "OhlcvDailyScheduler",
     "SectorSyncScheduler",
     "StockFundamentalScheduler",

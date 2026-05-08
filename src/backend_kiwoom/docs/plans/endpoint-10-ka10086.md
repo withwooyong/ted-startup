@@ -758,13 +758,15 @@ async def test_ohlcv_consistency_between_endpoints():
 - [x] `app/adapter/out/persistence/repositories/stock_daily_flow.py` — `StockDailyFlowRepository` (`_SUPPORTED_EXCHANGES = {KRX, NXT}` 2b-M1)
 - [x] `migrations/versions/007_kiwoom_stock_daily_flow.py` (007 — 005/006 은 stock_price)
 
-**C-2β (자동화, 대기)**:
-- [ ] `app/application/service/daily_flow_service.py` — `IngestDailyFlowUseCase`
-- [ ] `app/adapter/web/routers/daily_flow.py` — POST/GET endpoints
-- [ ] `app/batch/daily_flow_job.py` — APScheduler (KST mon-fri 19:00)
-- [ ] `app/adapter/web/_deps.py` 확장 — `IngestDailyFlowUseCaseFactory`
-- [ ] `app/main.py` 확장 — lifespan factory + scheduler + router
-- [ ] `scripts/backfill_daily_flow.py` — CLI
+**C-2β (자동화, 완료)**:
+- [x] `app/application/service/daily_flow_service.py` — `IngestDailyFlowUseCase` + `DailyFlowSyncOutcome` + `DailyFlowSyncResult`
+- [x] `app/adapter/web/routers/daily_flow.py` — POST `/daily-flow/sync` + POST `/stocks/{code}/daily-flow/refresh` + GET `/stocks/{code}/daily-flow`
+- [x] `app/batch/daily_flow_job.py` — `fire_daily_flow_sync` (실패율 10% 알람)
+- [x] `app/scheduler.py` — `DailyFlowScheduler` (KST mon-fri 19:00)
+- [x] `app/adapter/web/_deps.py` 확장 — `IngestDailyFlowUseCaseFactory` + get/set/reset
+- [x] `app/config/settings.py` — `scheduler_daily_flow_sync_alias` 필드
+- [x] `app/main.py` 확장 — lifespan factory (indc_mode=QUANTITY) + scheduler start/shutdown + router include + reset_*
+- [ ] `scripts/backfill_daily_flow.py` — CLI (C-1β 동일 방식 — 별도 chunk 보류)
 
 ### 10.2 테스트
 
@@ -775,8 +777,14 @@ async def test_ohlcv_consistency_between_endpoints():
 - [x] Integration — Migration 007 8 cases (테이블/UNIQUE/FK/인덱스/컬럼 타입/server_default/CASCADE/downgrade 멱등)
 - [x] Integration — `StockDailyFlowRepository` 13 cases (10 신규 + 3 SOR 차단 회귀)
 
-**C-2β / 운영 (대기)**:
-- [ ] Integration — `IngestDailyFlowUseCase` (KRX/NXT 분리 ingest, partial failure 격리)
+**C-2β (자동화, 52 cases / 812 tests / 93.13% coverage, 이중 리뷰 1R PASS)**:
+- [x] Integration — `IngestDailyFlowUseCase` (KRX/NXT 분리 ingest, partial failure 격리, indc_mode 전달, base_date 검증, only_market_codes 화이트리스트, refresh_one NXT 격리)
+- [x] Integration — `daily_flow_router` (admin guard 401, KiwoomError 5계층 매핑, message echo 차단 회귀, GET range cap, SOR 차단)
+- [x] Integration — `DailyFlowScheduler` (cron 19:00 mon-fri, 멱등성, fire 콜백 실패율 알람)
+- [x] Integration — `IngestDailyFlowUseCaseFactory` deps (get/set/reset/503 fail-closed)
+- [x] Integration — lifespan startup/shutdown 사이클 (test_scheduler.py 환경변수 확장 + test_stock_master_scheduler.py)
+
+**운영 (대기)**:
 - [ ] (optional) ka10081 vs ka10086 OHLCV cross-check
 
 ### 10.3 운영 검증

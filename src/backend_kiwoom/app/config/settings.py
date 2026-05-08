@@ -112,6 +112,13 @@ class Settings(BaseSettings):
             "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
         ),
     )
+    scheduler_daily_flow_sync_alias: str = Field(
+        default="",
+        description=(
+            "일간 daily flow (ka10086) sync cron job 이 사용할 키움 자격증명 alias (C-2β 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

@@ -328,6 +328,7 @@ async def test_lifespan_starts_both_schedulers_with_valid_aliases(
     monkeypatch.setenv("SCHEDULER_STOCK_SYNC_ALIAS", "stock-alias")
     monkeypatch.setenv("SCHEDULER_FUNDAMENTAL_SYNC_ALIAS", "fundamental-alias")  # B-γ-2
     monkeypatch.setenv("SCHEDULER_OHLCV_DAILY_SYNC_ALIAS", "ohlcv-alias")  # C-1β
+    monkeypatch.setenv("SCHEDULER_DAILY_FLOW_SYNC_ALIAS", "daily-flow-alias")  # C-2β
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
 
