@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-09 (Phase C R1 — 3 도메인 일관 개선 완료)
+> **마지막 갱신**: 2026-05-09 (Phase C-3α — 주/월봉 OHLCV 인프라 완료)
 
 ---
 
@@ -11,12 +11,12 @@
 
 | 항목 | 값 |
 |------|-----|
-| 진행 Phase | **Phase C** (OHLCV + 일별 수급, Refactor R1 완료) |
-| 마지막 완료 chunk | **R1** (3 도메인 일관 개선 — errors→tuple / StockMasterNotFoundError / LOW 3건) |
-| 다음 chunk | **C-3** (ka10082/83 주봉/월봉) **또는** scripts/backfill_*.py CLI |
-| 25 Endpoint 진행 | **8 / 25 완료** (32%). P0 5/5 완료. P1 4/8 완료 |
-| 테스트 | **822 cases / 92.86% coverage** (+6: 5 exception 신규 + 1 except 순서 회귀) |
-| 누적 chunk | 19 commits (Phase A: 8 / Phase B: 4 / Phase C: 6 / R1: 1 / 보안 PR 2) |
+| 진행 Phase | **Phase C** (OHLCV + 일별 수급, **C-3α 인프라 완료** / C-3β 자동화 다음) |
+| 마지막 완료 chunk | **C-3α** (ka10082/83 주/월봉 인프라 — Migration 4 + ORM 4 + Repository + chart.py 확장) |
+| 다음 chunk | **C-3β** (자동화 — UseCase + Router 4 path + Scheduler 2 job) |
+| 25 Endpoint 진행 | **8 / 25 완료** (32%, ka10082/83 인프라만 — 자동화 후 +2). P0 5/5 완료. P1 4/8 완료 |
+| 테스트 | **897 cases / 97% coverage** (+75: chart adapter 23 / Repository 18 / Migration 26 / Period enum 8) |
+| 누적 chunk | 20 commits (Phase A: 8 / Phase B: 4 / Phase C: 7 / R1: 1 / 보안 PR 2) |
 
 ---
 
@@ -26,7 +26,7 @@
 |-------|------|------|------------|---------------|
 | **A — 기반 인프라** | Settings/Cipher/structlog/Migration 001/Auth/KiwoomClient/Scheduler | ✅ **완료** | A1 / 보안PR / A2-α/β / A3-α/β/γ + F1 (8) | au10001, au10002, ka10101 |
 | **B — 종목 마스터** | stock + nxt_enable / 단건 조회 / 펀더멘털 | ✅ **완료** | B-α / B-β / B-γ-1 / B-γ-2 (4) | ka10099, ka10100, ka10001 |
-| **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 | 🔄 **진행중 (75%)** | C-1α/β / C-2α/β/γ + dry-run + R1 (7) | ka10081 ✅, ka10086 ✅, ka10082/83/94 ⏳ |
+| **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 | 🔄 **진행중 (80%)** | C-1α/β / C-2α/β/γ / R1 / C-3α + dry-run (8) | ka10081 ✅, ka10086 ✅, ka10082/83 인프라 ✅ (자동화 ⏳), ka10094 ⏳ |
 | **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | ⏳ 대기 | — | ka10079, ka10080, ka20006 |
 | **E — 시그널 보강** | 공매도 / 대차거래 | ⏳ 대기 | — | ka10014, ka10068, ka20068 |
 | **F — 순위** | 등락률/거래량/거래대금 5종 통합 | ⏳ 대기 | — | ka10027, ka10030, ka10031, ka10032, ka10023 |
@@ -52,9 +52,11 @@
 | 7 | ka10086 | 일별주가 (수급) | C-2α/β/γ | 인프라 + 자동화 + Migration 008 (D-E 중복 DROP) | `cddd268` / `e442416` / (C-2γ) |
 | 8 | ka10101 | 업종코드 리스트 | A3-α/β | KiwoomClient 공통 + sector 영속화 | `cce855c` / `6cd4371` |
 
-### 2.2 진행중 / 다음 (0)
+### 2.2 진행중 / 다음 (2 인프라 완료, 자동화 대기)
 
-C-2γ 완료. Phase C-2 (ka10086 도메인) 모든 chunk 완료. 다음은 Phase C-3 (ka10082/83 주봉/월봉) 또는 refactor chunk.
+**ka10082 / ka10083 — 인프라(C-3α) 완료, 자동화(C-3β) 다음**:
+- C-3α (`<commit>`): Migration 009-012 + ORM 4 + Repository + chart.py fetch_weekly/fetch_monthly + Period enum
+- C-3β: IngestPeriodicOhlcvUseCase + Router 4 path + Scheduler (금 19:00 / 매월 1일 03:00) — 다음 chunk
 
 ### 2.3 대기 (17 / 25)
 
@@ -95,10 +97,11 @@ P3 (선택):
 | C-2β | ka10086 일별 수급 자동화 (UseCase + Router + Scheduler + Lifespan) | ✅ | `e442416` (1R, 812 tests) |
 | dry-run | 운영 raw 1,200 row 분석 (가설 B / NXT mirror / D-E 중복) | ✅ | `bf7320c` (ADR § 19/20) |
 | C-2γ | Migration 008 — D-E 중복 컬럼 3개 DROP (13→10) | ✅ | 1R PASS, 816 tests / 93.11% (ADR § 21) |
-| **R1** | 3 도메인 일관 개선 (errors→tuple / StockMasterNotFoundError / LOW 3건) | ✅ | 1R PASS, 822 tests / 92.86% (ADR § 22) |
-| C-3 | ka10082/83 (주봉/월봉) — chart endpoint 재사용 | ⏳ | `endpoint-07-ka10082.md` / `endpoint-08-ka10083.md` |
+| R1 | 3 도메인 일관 개선 (errors→tuple / StockMasterNotFoundError / LOW 3건) | ✅ | 1R PASS, 822 tests / 92.86% (ADR § 22) |
+| **C-3α** | ka10082/83 인프라 — Migration 4 + ORM 4 + Repository + chart.py 확장 + Period enum | ✅ | 1R PASS, 897 tests / 97% (ADR § 23) |
+| C-3β | ka10082/83 자동화 — UseCase period dispatch + Router 4 path + Scheduler 2 job | ⏳ | `endpoint-07-ka10082.md` / `endpoint-08-ka10083.md` § 6.3 |
 | C-4 (선택) | ka10094 (년봉) — P2 | ⏳ | `endpoint-09-ka10094.md` |
-| C-backfill | `scripts/backfill_*.py` CLI + 3년 백필 실측 | ⏳ | C-1β/C-2β 공용 chunk |
+| C-backfill | `scripts/backfill_*.py` CLI + 3년 백필 실측 | ⏳ | C-1β/C-2β/C-3β 공용 chunk |
 
 ---
 
@@ -120,10 +123,10 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| 1 | **C-3 (ka10082/83 주봉/월봉)** | chart endpoint 재사용 / 새 도메인 / R1 정리된 패턴 그대로 복제 | 신규 Migration 1 + 도메인 2 |
-| 2 | C-backfill (`scripts/backfill_*.py` CLI) | Phase C-2 마무리 + 운영 실측 | CLI 1 + 시간 측정 |
+| 1 | **C-3β (ka10082/83 자동화)** | C-3α 인프라 정착 직후 자동화 마무리. UseCase period dispatch + Router 4 path + Scheduler 2 job. R1 패턴 5종 전면 적용 | UseCase 1 + Router 4 path + Scheduler 2 |
+| 2 | C-backfill (`scripts/backfill_ohlcv.py` CLI) | C-1β/C-2β/C-3β 통합 마무리 + 운영 실측 (페이지네이션/3년 시간/NUMERIC magnitude) | CLI 1 + 시간 측정 |
 | 3 | KOSCOM cross-check 수동 | 가설 B 최종 확정 (스크립트 외) | 수동 1~2건 |
-| 4 | ka10094 (년봉, P2) | C-3 와 동일 패턴 | 신규 Migration 1 + 도메인 1 |
+| 4 | ka10094 (년봉, P2) | C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화) | Migration 1 + ~200줄 |
 | 5 | Phase D 진입 — ka10080 분봉 | 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
 
 ---
@@ -145,6 +148,15 @@ P3 (선택):
 - B-β — ka10100 단건 조회 (gap-filler / lazy fetch) `abce7e0`
 - B-γ-1 — ka10001 펀더멘털 인프라 (Migration 004) `a287172`
 - B-γ-2 — ka10001 펀더멘털 자동화 (Phase B 마무리) `56dbad9`
+
+### Phase C 진행 (7 chunks)
+- C-1α — ka10081 일봉 OHLCV 인프라 (Migration 005/006) `a98e37b`
+- C-1β — ka10081 OHLCV 자동화 `993874c`
+- C-2α — ka10086 일별 수급 인프라 (Migration 007) `cddd268`
+- C-2β — ka10086 일별 수급 자동화 `e442416`
+- C-2γ — Migration 008 (D-E 중복 컬럼 DROP) `f8cece0`
+- R1 — 3 도메인 일관 개선 `c3e0952`
+- **C-3α** — ka10082/83 주/월봉 인프라 (Migration 009-012 + ORM 4 + Repository + chart.py 확장 + Period enum) `<commit>`
 
 ---
 

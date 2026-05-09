@@ -1448,3 +1448,65 @@ C-1β 패턴 mechanical 차용. C-2α (인프라) 위에 자동화 레이어만 
 2. **scripts/backfill_*.py CLI + 3년 백필 실측** — Phase C-2 마무리
 3. **KOSCOM cross-check 수동** — 가설 B 최종 확정
 4. **Phase D 진입** — ka10080 분봉 (대용량 파티션 결정 선행)
+
+
+## 23. Phase C-3α — 주/월봉 OHLCV 인프라 (ka10082/83, 2026-05-09)
+
+### 23.1 결정
+
+ka10082 (주봉) + ka10083 (월봉) 의 **인프라 레이어** 일괄 도입. ka10081 (일봉) 패턴 ~95% 복제 + R1 정착 패턴 (fetched_at non-Optional / Mixin 재사용 / Repository dispatch) 사전 적용. 자동화 (UseCase + Router + Scheduler) 는 C-3β.
+
+### 23.2 핵심 설계 결정
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | Migration 분리 vs 통합 (4 테이블) | **분리** — 009/010/011/012 직선 체인. C-1α (005/006 KRX/NXT 분리) 패턴 일관 + 운영 시 토글 가능 (NXT 비활성화 등). testcontainers up→down→up 사이클 검증 (test_migration_009_012) |
+| 2 | `_DailyOhlcvMixin` 재사용 (4 테이블 컬럼 동일) | **재사용** — period 별 의미 차이 (일/주/월) 는 영속화 테이블 이름으로 식별. `prev_compare_*` 가 일/주/월 다름은 컬럼 COMMENT 로 명시. private import 정당화 (계획서 H-2) |
+| 3 | `Period(StrEnum)` 범위 (DAILY 제외) | WEEKLY/MONTHLY/YEARLY **3값**. DAILY 는 IngestDailyOhlcvUseCase 가 별도 처리 (hot path 분리). YEARLY 는 enum 노출하되 Migration/Repository 미구현 — caller 호출 시 ValueError. 계획서 H-3 결정 |
+| 4 | `StockPricePeriodicRepository` 도입 (StockPriceRepository 와 분리) | 일봉은 호출 빈도 + row 수 압도적 → 별도 hot path. 주/월봉은 통합 인터페이스 (`_MODEL_BY_PERIOD_AND_EXCHANGE` dict, 4 매핑 — YEARLY 매핑 미존재 시 ValueError). NormalizedDailyOhlcv 는 컬럼 구조 period 무관이므로 재사용 (이름은 도메인 출처 표시) |
+| 5 | `chart.py` 의 `fetch_weekly`/`fetch_monthly` 별도 메서드 (helper 추출 보류) | fetch_daily 와 ~80% 중복이지만, list 키 (`stk_stk_pole_chart_qry` / `stk_mth_pole_chart_qry`) + api_id 분기 명시성 우선. ka10094 (P2) 추가 후 helper 추출 검토 (R2 후보). 계획서 H-6 — fetch_daily 변경 0줄 |
+| 6 | revision id 32자 한도 준수 | Alembic `alembic_version.version_num VARCHAR(32)` 한도. 신규 4 마이그레이션을 `kiwoom_` prefix 제거해 26~27자 (009_stock_price_weekly_krx 등). 005/006 패턴과 약간 차이 있지만 길이 한도 우선 |
+| 7 | R1 정착 패턴 사전 적용 (인프라 레이어) | `fetched_at` non-Optional ORM (`_DailyOhlcvMixin` `nullable=False` + server_default) — 4 신규 테이블 모두 상속. 다른 R1 패턴 (errors tuple / StockMasterNotFoundError / max_length=2 / NXT Exception 격리) 은 UseCase/Router 도입되는 C-3β 적용 |
+
+### 23.3 1차 리뷰 결과 (sonnet, M-1 + L-1 + L-2 적용)
+
+| # | 등급 | 이슈 | Fix |
+|---|------|------|-----|
+| H-1 | HIGH | test_migration_008.py head 동적 단언 권고 | LOW 강등 — 잠재 위험만 (head 동적 단언으로 견고화). C-3 chunk 진입 시 동시 적용 |
+| M-1 | MEDIUM | `NormalizedDailyOhlcv` 일봉 전용 이름이 periodic 도메인 사용 시 혼란 | Repository docstring 추가 — "Daily 접두는 도메인 출처 표시, 컬럼 구조 period 무관" 명시 |
+| M-2 | MEDIUM | chart.py 함수 사이 빈줄 PEP 8 위반 | ruff format 자동 처리 (Step 3-2) |
+| M-3 | MEDIUM | `# type: ignore[arg-type]` vs `cast()` | 기존 일봉 Repository 패턴 답습 — 별도 refactor chunk 권고 |
+| L-1 | LOW | NXT migration 010/012 의 trading_date / prev_compare_* COMMENT 누락 (KRX/NXT 비대칭) | 4 컬럼 COMMENT 추가 — KRX/NXT 대칭성 회복 |
+| L-2 | LOW | `update_set` 의 ON CONFLICT key 컬럼 제외 의도 주석 부재 | 주석 추가 — 미래 컬럼 추가 시 silent contract change 차단 명시 |
+| L-3 | LOW | `Period.YEARLY` 호출 시 `ValueError` vs plan doc 의 `NotImplementedError` 불일치 | Repository 는 ValueError 유지 (지원 안 하는 매핑). C-3β UseCase 에서 NotImplementedError 매핑 (계층 분리) |
+
+→ M-1 + L-1 + L-2 즉시 적용. CRITICAL/HIGH 0건. 자동 분류 = 계약 변경 → 2b 적대적 자동 생략.
+
+### 23.4 결과
+
+- **테스트**: 822 → **897 cases** (+75: chart adapter 23 / Repository 18 / Migration 26 / Period enum 8). coverage **97%** (이전 92.86%, 신규 코드 100%)
+- **mypy --strict**: 68 source files / 0 errors
+- **ruff check + format**: All passed
+- **신규 파일 (13)**: ORM 1 / Repository 1 / Migration 4 / 테스트 4 + plan doc 1 + chart.py 확장 + constants.py Period
+- **수정 파일 (4)**: chart.py / models/__init__.py / test_migration_008.py / repositories/stock_price_periodic.py docstring
+- **외부 API contract**: 무변 (Router 신규 path 없음 — 모두 C-3β)
+
+### 23.5 운영 검증 미해결 (C-3β + Phase H)
+
+- **`dt` 의미** (주 시작/종료 / 달 첫일/말일) — 운영 first-call 후 1주 모니터로 확정 (계획서 H-4). 가설 = "기간의 시작일"
+- **응답 list 키 검증** — `stk_stk_pole_chart_qry` / `stk_mth_pole_chart_qry` 가 Excel R31 표기와 실제 응답 일치하는지 (오타 가능성)
+- **일봉 합성 vs 키움 주/월봉 cross-check** — Phase H 데이터 품질 리포트로 연기
+- **백필 페이지네이션 빈도** — 3년 = 156 주 / 36 월. 1 페이지 추정 — 운영 실측 (C-backfill chunk)
+
+### 23.6 Defer (다음 chunk)
+
+- **C-3β** — UseCase + Router + Scheduler. R1 패턴 5종 모두 적용 (errors tuple / StockMasterNotFoundError / fetched_at non-Optional / max_length=2 / NXT Exception 격리)
+- C-1α 상속 (NUMERIC magnitude / list cap / MappingProxyType / chart.py private import) — 운영 dry-run 후
+- M-3 (`# type: ignore` → `cast()`) — 기존 패턴 동시 정리하는 별도 refactor chunk
+
+### 23.7 다음 chunk 후보
+
+1. **C-3β (자동화, P1)** — UseCase period dispatch + Router 4 path + Scheduler 2 job. R1 패턴 5종 전면 적용
+2. **C-backfill** — `scripts/backfill_ohlcv.py --period {daily|weekly|monthly}` CLI
+3. **KOSCOM cross-check 수동** — 가설 B 최종 확정
+4. **ka10094 (년봉, P2)** — C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화)

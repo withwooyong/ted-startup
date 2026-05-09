@@ -46,9 +46,7 @@ async def test_dropped_columns_absent_after_upgrade(engine: AsyncEngine) -> None
 
         cols = await conn.run_sync(_list_columns)
 
-    assert DROPPED_COLUMNS.isdisjoint(cols), (
-        f"008 적용 후에도 DROP 대상 컬럼 잔존: {DROPPED_COLUMNS & cols}"
-    )
+    assert DROPPED_COLUMNS.isdisjoint(cols), f"008 적용 후에도 DROP 대상 컬럼 잔존: {DROPPED_COLUMNS & cols}"
 
 
 @pytest.mark.asyncio
@@ -102,9 +100,7 @@ def test_migration_008_downgrade_with_data_raises(database_url: str) -> None:
                     "VALUES ('TST008G', 'downgrade-guard', '0')"
                 )
             )
-            sid = conn.execute(
-                text("SELECT id FROM kiwoom.stock WHERE stock_code = 'TST008G'")
-            ).scalar_one()
+            sid = conn.execute(text("SELECT id FROM kiwoom.stock WHERE stock_code = 'TST008G'")).scalar_one()
             conn.execute(
                 text(
                     "INSERT INTO kiwoom.stock_daily_flow "
@@ -116,20 +112,22 @@ def test_migration_008_downgrade_with_data_raises(database_url: str) -> None:
         with pytest.raises(DBAPIError):
             command.downgrade(alembic_cfg, "007_kiwoom_stock_daily_flow")
     finally:
-        # M-1 — head 복원을 명시 단언. RAISE EXCEPTION 후 alembic_version 이 008 그대로
-        # 유지되어야 함 (DO $$ 블록 전체 롤백). 다른 마이그레이션 테스트와 격리 보장.
+        # M-1 — RAISE EXCEPTION 후 008 가드 작동 검증. 다음 chunk 가 head 위에 마이그레이션을
+        # 추가해도 영향 없게 동적 검증 — alembic_version 이 downgrade target (007) 으로 가지
+        # 않은 것만 확인 (transactional DDL 환경에서 전체 rollback 보장).
+        # CASCADE 로 stock_daily_flow row 정리 먼저 — assert fail 해도 다음 테스트 격리.
+        try:
+            with sync_engine.begin() as conn:
+                conn.execute(text("DELETE FROM kiwoom.stock WHERE stock_code = 'TST008G'"))
+        except Exception:
+            pass
         with sync_engine.begin() as conn:
-            head_rev = conn.execute(
-                text("SELECT version_num FROM kiwoom.alembic_version")
-            ).scalar_one()
-        assert head_rev == "008_drop_daily_flow_dup_columns", (
-            f"downgrade 실패 후 alembic_version 이 head 가 아님: {head_rev}. "
-            "DO $$ 블록 롤백 가정 위반."
-        )
-        # CASCADE 로 stock_daily_flow row 도 정리됨
-        with sync_engine.begin() as conn:
-            conn.execute(text("DELETE FROM kiwoom.stock WHERE stock_code = 'TST008G'"))
+            head_rev = conn.execute(text("SELECT version_num FROM kiwoom.alembic_version")).scalar_one()
         sync_engine.dispose()
+        assert head_rev != "007_kiwoom_stock_daily_flow", (
+            f"008 가드 우회 — alembic_version 이 downgrade target 까지 진행됨: {head_rev}. "
+            "DO $$ 블록 RAISE 후 trans rollback 가정 위반."
+        )
 
 
 def test_migration_008_downgrade_then_upgrade_restores_columns(database_url: str) -> None:
@@ -146,10 +144,7 @@ def test_migration_008_downgrade_then_upgrade_restores_columns(database_url: str
 
         with sync_engine.connect() as conn:
             insp = inspect(conn)
-            cols_info = {
-                c["name"]: c["type"]
-                for c in insp.get_columns("stock_daily_flow", schema="kiwoom")
-            }
+            cols_info = {c["name"]: c["type"] for c in insp.get_columns("stock_daily_flow", schema="kiwoom")}
         # M-2 — 컬럼 카운트 + BIGINT 타입 단언 (007 = 13 도메인 + 5 메타 = 18)
         assert DROPPED_COLUMNS.issubset(cols_info.keys()), (
             f"007 상태에서 D-E 컬럼 복원 실패: {DROPPED_COLUMNS - cols_info.keys()}"
@@ -159,18 +154,14 @@ def test_migration_008_downgrade_then_upgrade_restores_columns(database_url: str
                 f"{dropped} BIGINT 가 아닌 타입으로 복원됨: {cols_info[dropped]}"
             )
         # 007 = 13 도메인 + 5 키/메타 (id, stock_id, trading_date, exchange, indc_mode) + 3 timestamp = 21
-        assert len(cols_info) == 21, (
-            f"007 상태 컬럼 수 21 기대, 실제 {len(cols_info)}: {sorted(cols_info)}"
-        )
+        assert len(cols_info) == 21, f"007 상태 컬럼 수 21 기대, 실제 {len(cols_info)}: {sorted(cols_info)}"
 
         # upgrade head — 다시 008 적용
         command.upgrade(alembic_cfg, "head")
 
         with sync_engine.connect() as conn:
             insp = inspect(conn)
-            cols_after_upgrade = {
-                c["name"] for c in insp.get_columns("stock_daily_flow", schema="kiwoom")
-            }
+            cols_after_upgrade = {c["name"] for c in insp.get_columns("stock_daily_flow", schema="kiwoom")}
         assert DROPPED_COLUMNS.isdisjoint(cols_after_upgrade), (
             f"008 재적용 후에도 DROP 대상 잔존: {DROPPED_COLUMNS & cols_after_upgrade}"
         )

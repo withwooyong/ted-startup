@@ -80,6 +80,23 @@ if _invalid_exchanges:
     )
 
 
+class Period(StrEnum):
+    """OHLCV 시계열 분류 — 주봉/월봉/년봉 (C-3α).
+
+    설계: phase-c-3-weekly-monthly-ohlcv.md § H-3.
+
+    DAILY 는 본 enum 외 — IngestDailyOhlcvUseCase 가 별도 처리 (hot path 분리).
+    YEARLY 는 enum 노출 (3값 일관) but Migration / Repository 미구현 — caller 에서 검증.
+    P2 chunk (ka10094) 진입 시 활성화.
+
+    value 는 소문자 string — 라우터 path / cron job id / DB 메타필드 일관.
+    """
+
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    YEARLY = "yearly"
+
+
 class DailyMarketDisplayMode(StrEnum):
     """ka10086 `indc_tp` 표시구분 (C-2α).
 
@@ -102,5 +119,6 @@ __all__ = [
     "STOCK_SYNC_DEFAULT_MARKETS",
     "DailyMarketDisplayMode",
     "ExchangeType",
+    "Period",
     "StockListMarketType",
 ]

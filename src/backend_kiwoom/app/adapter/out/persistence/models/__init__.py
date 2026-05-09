@@ -9,6 +9,12 @@ from app.adapter.out.persistence.models.stock import Stock
 from app.adapter.out.persistence.models.stock_daily_flow import StockDailyFlow
 from app.adapter.out.persistence.models.stock_fundamental import StockFundamental
 from app.adapter.out.persistence.models.stock_price import StockPriceKrx, StockPriceNxt
+from app.adapter.out.persistence.models.stock_price_periodic import (
+    StockPriceMonthlyKrx,
+    StockPriceMonthlyNxt,
+    StockPriceWeeklyKrx,
+    StockPriceWeeklyNxt,
+)
 
 __all__ = [
     "KiwoomCredential",
@@ -19,5 +25,9 @@ __all__ = [
     "StockDailyFlow",
     "StockFundamental",
     "StockPriceKrx",
+    "StockPriceMonthlyKrx",
+    "StockPriceMonthlyNxt",
     "StockPriceNxt",
+    "StockPriceWeeklyKrx",
+    "StockPriceWeeklyNxt",
 ]

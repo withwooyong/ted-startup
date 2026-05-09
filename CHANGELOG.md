@@ -7,6 +7,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] feat(kiwoom): Phase C-3α — ka10082/83 주/월봉 OHLCV 인프라 (Migration 009-012 + Period enum + Periodic Repository) — 1R PASS, 897 tests / 97% coverage
+
+**Phase C-3α** — ka10082 (주봉) + ka10083 (월봉) **인프라 레이어** 일괄 도입. ka10081 (일봉) 패턴 ~95% 복제 + R1 정착 패턴 (`fetched_at` non-Optional / Mixin 재사용 / Repository dispatch) 사전 적용. 자동화 (UseCase + Router + Scheduler) 는 C-3β.
+
+### Added
+
+- **Migration 009-012** — `kiwoom.stock_price_weekly_krx` / `weekly_nxt` / `monthly_krx` / `monthly_nxt` 4 테이블. `_DailyOhlcvMixin` 컬럼 구조 100% 동일. UNIQUE(stock_id, trading_date, adjusted) + FK CASCADE + 인덱스 2 each. C-1α (005/006) 패턴 일관 직선 체인. testcontainers 26 cases (test_migration_009_012)
+- **`Period(StrEnum)`** in `app/application/constants.py` — WEEKLY/MONTHLY/YEARLY 3값. DAILY 는 IngestDailyOhlcvUseCase 별도 처리 (hot path). YEARLY 는 enum 노출하되 Migration/Repository 미구현 (P2). 8 cases (test_period_enum)
+- **`StockPriceWeeklyKrx`/`Nxt` + `StockPriceMonthlyKrx`/`Nxt` ORM** in `app/adapter/out/persistence/models/stock_price_periodic.py` — `_DailyOhlcvMixin` 재사용 (계획서 H-2). 4 모델 모두 `models/__init__.py` 에 re-export
+- **`StockPricePeriodicRepository`** in `app/adapter/out/persistence/repositories/stock_price_periodic.py` — `_MODEL_BY_PERIOD_AND_EXCHANGE` dict 4 매핑 (period+exchange dispatch). `upsert_many` (ON CONFLICT DO UPDATE, B-γ-1 명시 update_set 패턴) + `find_range` (start>end ValueError). YEARLY/SOR 호출 시 ValueError. NormalizedDailyOhlcv 재사용 (period 무관). 18 cases (test_stock_price_periodic_repository)
+- **`KiwoomChartClient.fetch_weekly` + `fetch_monthly`** in `app/adapter/out/kiwoom/chart.py` — fetch_daily 패턴 복제 (cont-yn 페이지네이션 + stk_cd 메아리 검증 + flag-then-raise). list 키 분기: weekly = `stk_stk_pole_chart_qry` / monthly = `stk_mth_pole_chart_qry`. 클래스 상수 `WEEKLY_API_ID`/`MONTHLY_API_ID`/`*_MAX_PAGES` 추가. fetch_daily 변경 0줄 (계획서 H-6)
+- **`WeeklyChartRow` / `MonthlyChartRow` + Response 4 Pydantic** — DailyChartRow 상속 (필드 동일, `to_normalized` 부모 메서드 재사용). 23 cases (test_kiwoom_chart_client_periodic)
+- `docs/plans/phase-c-3-weekly-monthly-ohlcv.md` (신규) — chunk 단위 plan doc (영향 범위 + self-check H-1~H-7 + DoD α/β 분리). R1 plan doc 패턴 복제
+
+### Changed
+
+- `app/adapter/out/persistence/models/__init__.py` — Weekly/Monthly 4 모델 re-export 추가
+- `tests/test_migration_008.py` — `head_rev == "008_..."` 단언을 동적 단언 (`head_rev != downgrade_target`) 으로 견고화. 본 chunk 의 9-12 마이그레이션이 head 위에 추가되면서 transactional DDL 환경의 단일 트랜잭션 rollback 영향. 다음 chunk 마이그레이션 추가에도 영향 없게 보정
+
+### Fixed
+
+- 1차 리뷰 (sonnet) 적용:
+  - **M-1**: `StockPricePeriodicRepository.upsert_many` docstring — "NormalizedDailyOhlcv 의 Daily 접두는 도메인 출처 표시, 컬럼 구조 period 무관" 명시
+  - **L-1**: Migration 010/012 (NXT) 의 `trading_date` / `prev_compare_amount` / `prev_compare_sign` COMMENT 추가 — KRX/NXT 대칭성 회복
+  - **L-2**: `update_set` 위 주석 추가 — ON CONFLICT key 컬럼 (stock_id, trading_date, adjusted) 의도적 제외 + 미래 컬럼 추가 시 silent contract change 차단
+
+### Verification
+
+- mypy --strict: 68 source files / 0 errors
+- ruff check + format: All passed
+- pytest: **822 → 897 cases** (+75) / coverage **92.86% → 97%** (신규 코드 100%)
+- testcontainers up→down(008)→up(head) 사이클 PASS (Migration 멱등성 + H-1 검증)
+
+### Defer (다음 chunk)
+
+- **C-3β** — UseCase + Router + Scheduler. R1 패턴 5종 전면 적용 (errors tuple / StockMasterNotFoundError / fetched_at non-Optional / max_length=2 / NXT Exception 격리)
+- 운영 검증 — `dt` 의미 (주/달 시작 vs 종료) / 응답 list 키 명 검증 / 일봉 vs 키움 주월봉 cross-check (Phase H)
+- M-3 (`# type: ignore` → `cast()`) — 기존 일봉 Repository 패턴과 함께 별도 refactor chunk
+
+---
+
 ## [2026-05-09] refactor(kiwoom): Phase C R1 — 3 도메인 일관 개선 (errors→tuple / StockMasterNotFoundError / LOW 3건) — 1R PASS, 822 tests / 92.86%
 
 **Phase C R1 (Refactor 1)** — ADR-0001 § 19.5 (C-2β Defer 5건) + B-γ-2 동일 패턴을 3 도메인 (fundamental / OHLCV / daily_flow) 횡단 일관 정리. 외부 API contract 무변, 내부 타입·예외 안전성 강화. 다음 chunk (C-3 / Phase D) 진입 전 베이스 정착.

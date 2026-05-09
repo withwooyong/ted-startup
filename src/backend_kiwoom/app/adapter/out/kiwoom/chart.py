@@ -100,6 +100,50 @@ class DailyChartResponse(BaseModel):
     return_msg: Annotated[str, Field(max_length=200)] = ""
 
 
+class WeeklyChartRow(DailyChartRow):
+    """ka10082 응답 row — DailyChartRow 와 필드 동일 (C-3α).
+
+    설계: endpoint-07-ka10082.md § 3.3.
+
+    `to_normalized` 부모 메서드 그대로 재사용 (NormalizedDailyOhlcv 반환). period 정보는
+    Repository 가 분기.
+
+    `dt` 의미: 주의 첫 거래일 (가설 — 운영 first-call 후 확정).
+    영속화 시 trading_date = dt 그대로.
+    """
+
+
+class WeeklyChartResponse(BaseModel):
+    """ka10082 응답 — `stk_stk_pole_chart_qry` list 키 (ka10081 와 다름)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    stk_cd: Annotated[str, Field(max_length=20)] = ""
+    stk_stk_pole_chart_qry: list[WeeklyChartRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+class MonthlyChartRow(DailyChartRow):
+    """ka10083 응답 row — DailyChartRow 와 필드 동일 (C-3α).
+
+    설계: endpoint-08-ka10083.md § 3.3.
+
+    `dt` 의미: 달의 첫 거래일 (가설 — 운영 first-call 후 확정).
+    """
+
+
+class MonthlyChartResponse(BaseModel):
+    """ka10083 응답 — `stk_mth_pole_chart_qry` list 키."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    stk_cd: Annotated[str, Field(max_length=20)] = ""
+    stk_mth_pole_chart_qry: list[MonthlyChartRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
 @dataclass(frozen=True, slots=True)
 class NormalizedDailyOhlcv:
     """ka10081 정규화 도메인 — Repository 가 보는 형태.
@@ -124,11 +168,17 @@ class NormalizedDailyOhlcv:
 
 
 class KiwoomChartClient:
-    """`/api/dostk/chart` 어댑터 (C-1α — ka10081 주식 일봉)."""
+    """`/api/dostk/chart` 어댑터 — ka10081 (일봉) + ka10082 (주봉) + ka10083 (월봉)."""
 
     PATH = "/api/dostk/chart"
     DAILY_API_ID = "ka10081"
     DAILY_MAX_PAGES = 10  # 키움 일봉 1 페이지 ~600 거래일 추정. 3년 백필 = 2 페이지 + 여유
+
+    # C-3α — 주/월봉 (백필 시 페이지 수 적음. 3년 = 156 주 / 36 월. 1 페이지면 충분 + 여유)
+    WEEKLY_API_ID = "ka10082"
+    WEEKLY_MAX_PAGES = 3
+    MONTHLY_API_ID = "ka10083"
+    MONTHLY_MAX_PAGES = 2
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
@@ -224,10 +274,142 @@ class KiwoomChartClient:
 
         return all_rows
 
+    async def fetch_weekly(
+        self,
+        stock_code: str,
+        *,
+        base_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        adjusted: bool = True,
+        max_pages: int | None = None,
+    ) -> list[WeeklyChartRow]:
+        """ka10082 주봉 OHLCV — fetch_daily 패턴 복제. list 키 + api_id 만 다름.
+
+        Parameters / Raises 는 fetch_daily 와 동일 (api_id="ka10082", list 키
+        `stk_stk_pole_chart_qry`).
+
+        `dt` 의미는 주의 첫 거래일 (가설 — 운영 first-call 후 확정).
+        """
+        expected_stk_cd = build_stk_cd(stock_code, exchange)
+
+        body: dict[str, Any] = {
+            "stk_cd": expected_stk_cd,
+            "base_dt": base_date.strftime("%Y%m%d"),
+            "upd_stkpc_tp": "1" if adjusted else "0",
+        }
+
+        cap = max_pages if max_pages is not None else self.WEEKLY_MAX_PAGES
+        all_rows: list[WeeklyChartRow] = []
+
+        async for page in self._client.call_paginated(
+            api_id=self.WEEKLY_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=cap,
+        ):
+            validation_failed = False
+            parsed: WeeklyChartResponse | None = None
+            try:
+                parsed = WeeklyChartResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(f"{self.WEEKLY_API_ID} 응답 검증 실패")
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+
+            if parsed.stk_cd:
+                response_base = strip_kiwoom_suffix(parsed.stk_cd)
+                expected_base = strip_kiwoom_suffix(expected_stk_cd)
+                if response_base != expected_base:
+                    raise KiwoomResponseValidationError(
+                        f"{self.WEEKLY_API_ID} 응답 stk_cd 메아리 mismatch (요청 vs 응답)"
+                    )
+
+            if parsed.return_code != 0:
+                raise KiwoomBusinessError(
+                    api_id=self.WEEKLY_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+
+            all_rows.extend(parsed.stk_stk_pole_chart_qry)
+
+        return all_rows
+
+    async def fetch_monthly(
+        self,
+        stock_code: str,
+        *,
+        base_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        adjusted: bool = True,
+        max_pages: int | None = None,
+    ) -> list[MonthlyChartRow]:
+        """ka10083 월봉 OHLCV — fetch_daily 패턴 복제. list 키 + api_id 만 다름.
+
+        Parameters / Raises 는 fetch_daily 와 동일 (api_id="ka10083", list 키
+        `stk_mth_pole_chart_qry`).
+
+        `dt` 의미는 달의 첫 거래일 (가설 — 운영 first-call 후 확정).
+        """
+        expected_stk_cd = build_stk_cd(stock_code, exchange)
+
+        body: dict[str, Any] = {
+            "stk_cd": expected_stk_cd,
+            "base_dt": base_date.strftime("%Y%m%d"),
+            "upd_stkpc_tp": "1" if adjusted else "0",
+        }
+
+        cap = max_pages if max_pages is not None else self.MONTHLY_MAX_PAGES
+        all_rows: list[MonthlyChartRow] = []
+
+        async for page in self._client.call_paginated(
+            api_id=self.MONTHLY_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=cap,
+        ):
+            validation_failed = False
+            parsed: MonthlyChartResponse | None = None
+            try:
+                parsed = MonthlyChartResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(f"{self.MONTHLY_API_ID} 응답 검증 실패")
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+
+            if parsed.stk_cd:
+                response_base = strip_kiwoom_suffix(parsed.stk_cd)
+                expected_base = strip_kiwoom_suffix(expected_stk_cd)
+                if response_base != expected_base:
+                    raise KiwoomResponseValidationError(
+                        f"{self.MONTHLY_API_ID} 응답 stk_cd 메아리 mismatch (요청 vs 응답)"
+                    )
+
+            if parsed.return_code != 0:
+                raise KiwoomBusinessError(
+                    api_id=self.MONTHLY_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+
+            all_rows.extend(parsed.stk_mth_pole_chart_qry)
+
+        return all_rows
+
 
 __all__ = [
     "DailyChartResponse",
     "DailyChartRow",
     "KiwoomChartClient",
+    "MonthlyChartResponse",
+    "MonthlyChartRow",
     "NormalizedDailyOhlcv",
+    "WeeklyChartResponse",
+    "WeeklyChartRow",
 ]
