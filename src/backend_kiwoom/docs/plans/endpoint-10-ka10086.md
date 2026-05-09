@@ -863,4 +863,132 @@ async def test_ohlcv_consistency_between_endpoints():
 
 ---
 
+## 12. Phase C-2γ — Migration 008 (D-E 중복 컬럼 DROP)
+
+> **추가일**: 2026-05-09 (운영 dry-run 1회차 결과 반영, ADR-0001 § 20.3 #1)
+> **선행 조건**: C-2α 인프라 (`cddd268`) + C-2β 자동화 (`e442416`) + dry-run ADR (`bf7320c`) 완료
+> **분류**: refactor (스키마 단순화 + 백엔드/테스트/응답 DTO 동시 정리). 외부 동작 변화 = **응답 DTO 에서 3 필드 제거** (breaking — 그러나 운영 미가동, 영향 없음)
+
+### 12.1 배경 (운영 dry-run § 20.2 #1)
+
+ka10086 응답에서 **D 카테고리 ↔ E 카테고리 컬럼 3쌍이 100% 동일값** (1,200/1,200 row):
+
+| D (투자자별 net) | E (순매수) | 정규화 후 컬럼 (DROP 대상) |
+|------------------|-----------|----------------------------|
+| `ind` ≡ `ind_netprps` | (E) | `individual_net_purchase` |
+| `orgn` ≡ `orgn_netprps` | (E) | `institutional_net_purchase` |
+| `for_qty` ≡ `for_netprps` | (E) | `foreign_net_purchase` |
+
+**결론**: stock_daily_flow 13 영속 컬럼 중 3 컬럼이 데이터 중복. 스토리지 ~23% 낭비 + ORM/Repository/DTO 3중 mapping 불필요. 13 → **10 컬럼**.
+
+> 참고: `frgn` (외국계 brokerage) ↔ `for_netprps` 는 0% 동일 (다른 의미). `frgn` = `foreign_brokerage_net` 은 그대로 유지.
+
+### 12.2 결정 (ADR-0001 § 20.3)
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | D-E 중복 컬럼 3개 | **Migration 008 — DROP** (사용자 승인) |
+| 2 | downgrade 정책 | **데이터 가드 + 컬럼 ADD (NULL)** — 007 와 동일 패턴. 데이터 손실 차단 우선 |
+| 3 | 응답 DTO breaking | **수용** — 운영 미가동, downstream 0. C-2β 커밋(`e442416`) 이후 외부 호출 없음 |
+| 4 | 명세 doc 동기화 | § 4 (필드 매핑) / § 5.1 (스키마 SQL) / § 5.2 (ORM) / § 5.3 (Repository) / § 9 (예시) 갱신 — Migration 007 그대로 두고 § 12 가 정답 |
+
+### 12.3 영향 범위 (5 코드 + 4 테스트)
+
+**코드 (5 files)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `migrations/versions/008_drop_daily_flow_dup_columns.py` (신규) | UPGRADE: `DROP COLUMN` × 3. DOWNGRADE: 데이터 가드 + `ADD COLUMN` × 3 (NULL) |
+| 2 | `app/adapter/out/persistence/models/stock_daily_flow.py` | `Mapped[int \| None]` 3 필드 + `__table_args__`/`Index` 영향 없음 — 단순 컬럼 정의만 제거 |
+| 3 | `app/adapter/out/persistence/repositories/stock_daily_flow.py` | `_payload` 3 매핑 + `excluded` 3 매핑 제거 (총 6줄) |
+| 4 | `app/adapter/out/kiwoom/_records.py` | `NormalizedDailyFlow` 3 필드 + `from_row` 3 매핑 제거. `_strip_double_sign_int` 호출은 `for_netprps`/`orgn_netprps`/`ind_netprps` raw 자체에 대해서는 더 이상 필요 없음 — D 컬럼 (`ind`/`orgn`/`for_qty`) 가 정답 (이미 normalize 됨) |
+| 5 | `app/adapter/web/routers/daily_flow.py` | `_DailyFlowOut` 3 필드 제거 |
+
+**테스트 (4 갱신 + 1 신규)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `tests/test_migration_008.py` (신규) | (a) 007 적용 후 13 컬럼 확인 (b) 008 적용 후 10 컬럼 + 3 컬럼 부재 확인 (c) downgrade 가드 — 데이터 있을 시 RAISE (d) downgrade — 데이터 0건 시 컬럼 복원 |
+| 2 | `tests/test_migration_007.py` | **유지** — 007 history 불변 보장. 13 컬럼 셋 그대로 |
+| 3 | `tests/test_stock_daily_flow_repository.py` | `foreign_net_purchase`/`institutional_net_purchase`/`individual_net_purchase` kwarg + assertion 제거 (2 곳) |
+| 4 | `tests/test_daily_flow_router.py` | 응답 fixture 의 3 필드 제거 (1 곳) + JSON snapshot assertion 갱신 |
+| 5 | `tests/test_kiwoom_mrkcond_client.py` | `NormalizedDailyFlow` assertion 의 3 필드 제거 (1 곳). `_strip_double_sign_int` 23 cases 유지 (가설 B 회귀) |
+
+**문서 (3)**:
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 21 추가 (C-2γ 결과)
+- `docs/plans/endpoint-10-ka10086.md` 본 doc § 4/§ 5 영향 범위만 inline 주석 (`-- C-2γ 후 DROP`) — full rewrite 지양
+- `CHANGELOG.md` / `HANDOFF.md` 갱신
+
+### 12.4 Migration 008 SQL 초안
+
+```sql
+-- UPGRADE
+ALTER TABLE kiwoom.stock_daily_flow
+    DROP COLUMN IF EXISTS individual_net_purchase,
+    DROP COLUMN IF EXISTS institutional_net_purchase,
+    DROP COLUMN IF EXISTS foreign_net_purchase;
+
+-- DOWNGRADE (007 와 동일한 데이터 가드 패턴)
+DO $$
+DECLARE v_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM kiwoom.stock_daily_flow;
+    IF v_count > 0 THEN
+        RAISE EXCEPTION 'stock_daily_flow 데이터(%건) 가 있어 downgrade 차단. 수동 백업 후 재시도.', v_count;
+    END IF;
+END $$;
+
+ALTER TABLE kiwoom.stock_daily_flow
+    ADD COLUMN foreign_net_purchase BIGINT,
+    ADD COLUMN institutional_net_purchase BIGINT,
+    ADD COLUMN individual_net_purchase BIGINT;
+```
+
+> 컬럼 순서는 downgrade 시 007 와 다르게 마지막에 추가됨 — `__table_args__` / 명시 SELECT 패턴이라 동작 무관, 데이터 0 가드라 row hydrate 위험 없음.
+
+### 12.5 적대적 이중 리뷰 — 사전 self-check (ted-run 진입 전)
+
+| # | 위험 | 완화 |
+|---|------|------|
+| H-1 | C-2β 응답 DTO 가 외부 downstream 에 노출됐다면 breaking | 운영 미가동 — `master` 외 deploy 0. HANDOFF 확인 |
+| H-2 | downgrade 시 NULL 컬럼 복원 → 과거 백업 restore 불일치 | 데이터 가드로 빈 테이블만 허용. 운영 데이터 있을 시 RAISE |
+| H-3 | normalize 함수에서 `_strip_double_sign_int` 호출이 더 이상 필요한가 | `_strip_double_sign_int` 자체는 `ind`/`orgn`/`for_qty` (D 카테고리, raw `--714` 형태) 정규화에 여전히 필요. 단 `for_netprps`/`orgn_netprps`/`ind_netprps` 호출 라인은 제거 (D 와 동일값이라 D 만 처리하면 됨) |
+| H-4 | Migration 007 test 가 13 컬럼 hard-coded | 007 test 는 그대로 유지. 008 test 가 10 컬럼 검증. 두 test 가 마이그레이션 history 의 각 단계를 독립 검증 |
+| H-5 | upsert payload 가 3 필드 제거 후 idempotent 인가 | UNIQUE (stock_id, trading_date, exchange) 그대로. payload 필드 줄어들면 ON CONFLICT 에서 더 적은 컬럼 갱신 — 의미 동일 |
+| H-6 | NXT row mirror 정책 (§ 20.2 #2) 영향 | 코드 변경 없음. NXT 는 외인 컬럼 KRX 중복 그대로 — 정책 결정대로 유지 |
+
+### 12.6 DoD (C-2γ)
+
+**코드**:
+- [ ] `migrations/versions/008_drop_daily_flow_dup_columns.py`
+- [ ] `app/adapter/out/persistence/models/stock_daily_flow.py` 3 컬럼 제거
+- [ ] `app/adapter/out/persistence/repositories/stock_daily_flow.py` payload + excluded 6줄 제거
+- [ ] `app/adapter/out/kiwoom/_records.py` `NormalizedDailyFlow` 3 필드 + `from_row` 3 매핑 제거
+- [ ] `app/adapter/web/routers/daily_flow.py` `_DailyFlowOut` 3 필드 제거
+
+**테스트** (목표: 812 → ~810 cases / coverage 유지 ≥ 93%):
+- [ ] `tests/test_migration_008.py` 신규 — 4 cases (UPGRADE 컬럼 셋 / DOWNGRADE 가드 / DOWNGRADE 컬럼 복원 / 멱등)
+- [ ] `tests/test_migration_007.py` 그대로 유지 — 13 컬럼
+- [ ] `tests/test_stock_daily_flow_repository.py` 갱신 (2 fixture)
+- [ ] `tests/test_daily_flow_router.py` 갱신 (1 fixture + assertion)
+- [ ] `tests/test_kiwoom_mrkcond_client.py` 갱신 (1 assertion 블록)
+- [ ] `ruff check` + `mypy --strict` PASS
+
+**이중 리뷰**:
+- [ ] 1R PASS (Reviewer A: 스키마/마이그레이션 / Reviewer B: 응답 DTO breaking)
+
+**문서**:
+- [ ] ADR-0001 § 21 추가 (C-2γ 결과)
+- [ ] CHANGELOG: `refactor(kiwoom): Phase C-2γ — Migration 008 (D-E 중복 3 컬럼 DROP, 13→10)`
+- [ ] HANDOFF.md 갱신
+
+### 12.7 다음 chunk (C-2γ 이후)
+
+1. **C-1β/C-2β MEDIUM 일관 개선** — `errors → tuple` / `StockMasterNotFoundError` 전용 예외 (§ 19.5 + C-1β 동일 이슈)
+2. **scripts/backfill_daily_flow.py CLI** + 3년 백필 시간 실측 — Phase C-2 마무리
+3. **C-3 (ka10082/83 주봉/월봉)** — chart endpoint 재사용
+4. **KOSCOM cross-check 수동** — 가설 B 최종 확정 (스크립트 외)
+
+---
+
 _Phase C 의 마지막 endpoint. ka10081 (가격) + 본 endpoint (수급) 의 짝꿍이 백테스팅의 base. 이중 부호 + 외인순매수 단위가 운영 first call 의 가장 큰 검증 포인트._
