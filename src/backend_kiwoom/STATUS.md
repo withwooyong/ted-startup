@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-09 (Phase C-backfill — OHLCV 통합 백필 CLI 완료)
+> **마지막 갱신**: 2026-05-09 (운영 실측 사전 준비 — runbook + 결과 템플릿 + ADR § 26 작성)
 
 ---
 
@@ -11,12 +11,12 @@
 
 | 항목 | 값 |
 |------|-----|
-| 진행 Phase | **Phase C** (OHLCV + 일별 수급, **C-backfill 완료** — Phase C 95%) |
-| 마지막 완료 chunk | **C-backfill** (OHLCV 통합 백필 CLI — daily/weekly/monthly period dispatch + dry-run + resume) |
-| 다음 chunk | **운영 실측** (사용자 수동) **또는** daily_flow 백필 / refactor R2 / ka10094 (P2) |
-| 25 Endpoint 진행 | **10 / 25 완료** (40%). P0 5/5 완료. P1 6/8 완료. CLI 도구 1건 추가 |
-| 테스트 | **972 cases / 96% coverage** (+33: skip_base_date_validation 8 / backfill_ohlcv_cli 25) |
-| 누적 chunk | 22 commits (Phase A: 8 / Phase B: 4 / Phase C: 9 / R1: 1 / 보안 PR 2) |
+| 진행 Phase | **Phase C** (OHLCV + 일별 수급, **C-backfill 완료** + 운영 실측 사전 준비 완료 — Phase C 95%) |
+| 마지막 완료 chunk | **운영 실측 사전 준비** (runbook + 결과 템플릿 + ADR § 26, 코드 0 변경) |
+| 다음 chunk | **운영 실측 측정** (사용자 수동, runbook 따라) **또는** daily_flow 백필 / refactor R2 / ka10094 (P2) |
+| 25 Endpoint 진행 | **10 / 25 완료** (40%). P0 5/5 완료. P1 6/8 완료. CLI 도구 1건 |
+| 테스트 | **972 cases / 96% coverage** (변경 없음 — 본 chunk 코드 0 변경) |
+| 누적 chunk | 23 commits (Phase A: 8 / Phase B: 4 / Phase C: 10 / R1: 1 / 보안 PR 2) |
 
 ---
 
@@ -26,7 +26,7 @@
 |-------|------|------|------------|---------------|
 | **A — 기반 인프라** | Settings/Cipher/structlog/Migration 001/Auth/KiwoomClient/Scheduler | ✅ **완료** | A1 / 보안PR / A2-α/β / A3-α/β/γ + F1 (8) | au10001, au10002, ka10101 |
 | **B — 종목 마스터** | stock + nxt_enable / 단건 조회 / 펀더멘털 | ✅ **완료** | B-α / B-β / B-γ-1 / B-γ-2 (4) | ka10099, ka10100, ka10001 |
-| **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 | 🔄 **진행중 (95%)** | C-1α/β / C-2α/β/γ / R1 / C-3α/β / C-backfill (10) | ka10081 ✅, ka10086 ✅, ka10082 ✅, ka10083 ✅, C-backfill ✅, ka10094 ⏳, daily_flow 백필 ⏳ |
+| **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 | 🔄 **진행중 (95%)** | C-1α/β / C-2α/β/γ / R1 / C-3α/β / C-backfill / C-운영실측 준비 (11) | ka10081 ✅, ka10086 ✅, ka10082 ✅, ka10083 ✅, C-backfill ✅, 운영 실측 준비 ✅ / 측정 ⏳, ka10094 ⏳, daily_flow 백필 ⏳ |
 | **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | ⏳ 대기 | — | ka10079, ka10080, ka20006 |
 | **E — 시그널 보강** | 공매도 / 대차거래 | ⏳ 대기 | — | ka10014, ka10068, ka20068 |
 | **F — 순위** | 등락률/거래량/거래대금 5종 통합 | ⏳ 대기 | — | ka10027, ka10030, ka10031, ka10032, ka10023 |
@@ -99,7 +99,9 @@ P3 (선택):
 | R1 | 3 도메인 일관 개선 (errors→tuple / StockMasterNotFoundError / LOW 3건) | ✅ | 1R PASS, 822 tests / 92.86% (ADR § 22) |
 | C-3α | ka10082/83 인프라 — Migration 4 + ORM 4 + Repository + chart.py 확장 + Period enum | ✅ | 1R PASS, 897 tests / 97% (ADR § 23) `8fcabe4` |
 | C-3β | ka10082/83 자동화 — IngestPeriodicOhlcvUseCase + Router 4 path + Scheduler 2 job | ✅ | 1R CONDITIONAL → PASS, 939 tests / 97% (ADR § 24) `2d4e2ae` |
-| **C-backfill** | OHLCV 통합 백필 CLI — daily/weekly/monthly period dispatch + dry-run + resume | ✅ | 1R CONDITIONAL → PASS, 972 tests / 96% (ADR § 25) |
+| **C-backfill** | OHLCV 통합 백필 CLI — daily/weekly/monthly period dispatch + dry-run + resume | ✅ | 1R CONDITIONAL → PASS, 972 tests / 96% (ADR § 25) `055e81e` |
+| **C-운영실측 준비** | runbook + 결과 템플릿 + ADR § 26 (코드 0 변경) | ✅ | 문서 3 신규 + 3 갱신, 972 tests 그대로 (ADR § 26) |
+| C-운영실측 측정 | 사용자 수동 — runbook 따라 active 3000 KRX+NXT 3년 백필 + NUMERIC 분포 SQL | ⏳ | `backfill-measurement-results.md` 채움 + ADR § 26.5 갱신 |
 | C-4 (선택) | ka10094 (년봉) — P2 | ⏳ | `endpoint-09-ka10094.md` |
 | C-backfill-flow | `scripts/backfill_daily_flow.py` (ka10086) | ⏳ | OHLCV 와 구조 다름, 별도 chunk |
 
@@ -123,12 +125,13 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| 1 | **운영 실측** (사용자 수동) | C-backfill CLI 로 100 종목 → active 3000 실측. 운영 미해결 4건 (페이지네이션/3년 시간/NUMERIC/sync) 정량화 | 수동 + 결과 정리 |
+| 1 | **운영 실측 측정** (사용자 수동) | runbook 따라 dry-run → smoke 10 → mid 100 → full active 3000 → NUMERIC SQL → results.md 채움 → ADR § 26.5 갱신 | 수동 4~8h + 후처리 1h |
 | 2 | daily_flow (ka10086) 백필 CLI | OHLCV 와 구조 다름 — `scripts/backfill_daily_flow.py` 신규 (indc_mode 파라미터 추가) | CLI 1 + tests |
 | 3 | refactor R2 (1R Defer 일괄 정리) | L-2 (NotImplementedError 핸들러) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 (`# type: ignore` → `cast()`) / E-2 (reset_* docstring) / gap detection | refactor 5건 일괄 |
 | 4 | ka10094 (년봉, P2) | C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화 — 현재 NotImplementedError) | Migration 1 + ~200줄 |
 | 5 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
 | 6 | Phase D 진입 — ka10080 분봉 | 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
+| ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration 013 + ALTER COLUMN |
 
 ---
 
@@ -159,7 +162,8 @@ P3 (선택):
 - R1 — 3 도메인 일관 개선 `c3e0952`
 - C-3α — ka10082/83 주/월봉 인프라 (Migration 009-012 + ORM 4 + Repository + chart.py 확장 + Period enum) `8fcabe4`
 - C-3β — ka10082/83 주/월봉 자동화 (IngestPeriodicOhlcvUseCase + Router 4 path + Scheduler 금 19:30 / 매월 1일 03:00) `2d4e2ae`
-- **C-backfill** — OHLCV 통합 백필 CLI (`scripts/backfill_ohlcv.py` daily/weekly/monthly + dry-run + resume + `_skip_base_date_validation` 옵션) `<this commit>`
+- **C-backfill** — OHLCV 통합 백필 CLI (`scripts/backfill_ohlcv.py` daily/weekly/monthly + dry-run + resume + `_skip_base_date_validation` 옵션) `055e81e`
+- **C-운영실측 준비** — runbook + 결과 템플릿 + ADR § 26 (코드 0 변경, 문서 3 신규 + 3 갱신) `<this commit>`
 
 ---
 

@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] docs(kiwoom): 운영 실측 사전 준비 — runbook + 결과 템플릿 + ADR § 26 (코드 변경 0)
+
+**Phase C-운영실측 사전 준비** — 다음 chunk (사용자 수동 운영 실측) 에 필요한 문서 일괄 정비. C-backfill CLI 로 운영 미해결 4건 (페이지네이션/3년 시간/NUMERIC magnitude/sync) 을 정량화하기 위한 단계별 가이드. 코드 변경 0, 문서 3 신규 + 3 갱신.
+
+### Added
+
+- **`src/backend_kiwoom/docs/operations/backfill-measurement-runbook.md`** (신규) — 환경변수 / 4단계 명령어 시퀀스 (dry-run → smoke 10 → mid 100 → full 3000) / NUMERIC 분포 SQL / 트러블슈팅 / 안전 장치
+- **`src/backend_kiwoom/docs/operations/backfill-measurement-results.md`** (신규) — 사용자가 측정 후 채울 양식. 운영 미해결 4건 정량화 표 + 새 위험 수집 + 다음 chunk 우선순위 갱신 자리
+- ADR-0001 § 26 — 운영 실측 가이드 + 결과 자리 (사용자 측정 후 § 26.5 표 채움)
+
+### Changed
+
+- STATUS.md § 4 / § 5 — 운영 실측 후 정량화될 항목 표시 (변경 없음, 출처만 명시)
+- HANDOFF.md / CHANGELOG.md / STATUS.md 갱신
+
+### Verification
+
+- 코드 변경 0 — pytest / mypy / ruff 모두 직전 commit (`055e81e`) 그대로 (972 tests / 96% coverage / 74 files 0 mypy errors)
+
+---
+
 ## [2026-05-09] feat(kiwoom): Phase C-backfill — OHLCV 통합 백필 CLI (daily/weekly/monthly period dispatch + dry-run + resume) — 1R CONDITIONAL → PASS, 972 tests / 96% coverage
 
 **Phase C-backfill** — `scripts/backfill_ohlcv.py` 신규 CLI. Phase C 의 daily/weekly/monthly OHLCV 통합 처리. 운영 라우터의 1년 cap 우회를 위해 UseCase 시그니쳐에 `_skip_base_date_validation` 키워드 옵션 추가 (디폴트 False — R1 invariant 유지). 운영 미해결 4건 (페이지네이션/3년 시간/NUMERIC magnitude/sync 시간) 정량화 측정 도구. **Phase C 90% → 95%**.

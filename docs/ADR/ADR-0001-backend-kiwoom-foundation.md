@@ -1636,3 +1636,62 @@ ka10082 (주봉) + ka10083 (월봉) 의 **자동화 레이어** — UseCase + Ro
 3. **gap detection 정확도 향상** — 일자별 missing detection
 4. **refactor R2** — 1R Defer 4건 (L-2 + E-1 + E-2 + M-3)
 5. **ka10094 (년봉, P2)** / Phase D 진입
+
+---
+
+## 26. 운영 실측 가이드 + 결과 (2026-05-09, ⏳ 측정 대기)
+
+### 26.1 결정
+
+C-backfill 의 후속으로 **운영 실측 사전 준비물 일괄 정비** — runbook + 결과 템플릿 + 본 § 26.
+실 측정은 사용자 환경 (운영 키움 자격증명 + 운영 DB) 에서 수행. 본 chunk 는 코드 변경 0,
+문서만으로 사용자가 따라갈 수 있는 단계별 가이드 제공.
+
+### 26.2 산출물
+
+| # | 파일 | 역할 |
+|---|------|------|
+| 1 | `src/backend_kiwoom/docs/operations/backfill-measurement-runbook.md` | 환경변수 / 4단계 명령어 (dry-run → smoke → mid → full) / 트러블슈팅 / 안전 장치 |
+| 2 | `src/backend_kiwoom/docs/operations/backfill-measurement-results.md` | 사용자가 측정 후 채우는 양식. 운영 미해결 4건 정량화 표 |
+| 3 | 본 § 26 | 실측 후 핵심 결정 / 후속 chunk 우선순위 갱신 자리 (raw 측정은 #2 에 유지) |
+
+### 26.3 측정 대상 (운영 미해결 4건 매핑)
+
+| # | 항목 | 측정 방법 | 결과 자리 |
+|---|------|-----------|-----------|
+| 1 | 페이지네이션 빈도 (3년 daily 1종목당 페이지 수) | dry-run 추정 vs DEBUG 로그 `next_key` 카운트 | results.md § 3 |
+| 2 | 3년 백필 elapsed (active 3000 KRX+NXT) | `format_summary` elapsed | results.md § 4 |
+| 3 | NUMERIC(8,4) magnitude 분포 | 백필 후 SQL (max/min/p01/p99 + count(\|x\| > 100)) | results.md § 5 |
+| 4 | active 3000 일간 sync 실측 | 백필 다음 영업일 운영 cron 1회 elapsed | results.md § 6 |
+
+### 26.4 안전 장치 (runbook § 11 요약)
+
+- **운영 시간대 회피** — KRX 거래 시간 (09:00~15:30 KST) 백필 금지 (운영 cron + KRX rate limit 경합)
+- **rollback 전략** — NUMERIC overflow 등 데이터 오염 시 본 백필 기간만 `DELETE` 가능 (운영 1년 cap 영역과 분리)
+- **TokenManager 자동 재발급** — 24h 토큰 lifecycle 가 백필 (4~8시간) 안에 만료 가능. 자동 재발급 작동하지만 로그 모니터링 필요
+- **DB 부하** — 단일 worker × 6000 호출 → connection pool (`database_pool_size=5`) 가 흡수
+- **resume 한계** — `max(trading_date) >= end_date` 만 본다. 부분 일자 누락 (gap) 은 별도 chunk
+
+### 26.5 실측 결과 (사용자 측정 후 채움)
+
+> **상태**: ⏳ 측정 전 — 본 § 은 사용자가 results.md 채운 후 핵심 발견만 요약해 채운다.
+
+| 측정 항목 | 가설 (dry-run) | 실측 | 결정 / 후속 |
+|----------|---------------|------|------------|
+| 1 페이지네이션 빈도 | 종목당 2 페이지 | (측정 후) | (확인 / 분기 가설 재검토) |
+| 2 3년 elapsed (KRX+NXT, active 3000) | 약 4시간 (lower-bound) | (측정 후) | (±50% margin 안인지) |
+| 3 NUMERIC(8,4) overflow | 한도 내 (가설) | (측정 후) | (overflow 발생 시 마이그레이션 chunk) |
+| 4 일간 cron elapsed | 약 30~60분 (추정) | (측정 후) | (운영 cron 시간 예산 안인지) |
+
+### 26.6 결과 활용
+
+1. results.md 채움 완료 후 본 § 26.5 표 갱신 (raw 측정은 results.md 유지)
+2. STATUS.md § 4 의 정량화된 미해결 항목 제거 (#4, #5, #6 후보)
+3. 새 위험 발견 시 STATUS.md § 4 에 추가 + 후속 chunk § 5 에 우선순위 반영
+4. ADR § 26.5 의 "결정" 컬럼이 곧 다음 chunk 의 entry point
+
+### 26.7 다음 chunk 후보 (실측 결과에 따라 변경)
+
+- 측정 #3 NUMERIC overflow 발생 → **NUMERIC 컬럼 마이그레이션 chunk** (Migration 013) 가 1순위
+- 측정 #4 일간 cron 시간 예산 초과 → **concurrency 조정 / page-level chunking chunk**
+- 측정 1~4 모두 가설 적중 → **gap detection** 또는 **daily_flow 백필** 로 진행
