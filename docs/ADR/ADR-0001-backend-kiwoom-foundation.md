@@ -1510,3 +1510,60 @@ ka10082 (주봉) + ka10083 (월봉) 의 **인프라 레이어** 일괄 도입. k
 2. **C-backfill** — `scripts/backfill_ohlcv.py --period {daily|weekly|monthly}` CLI
 3. **KOSCOM cross-check 수동** — 가설 B 최종 확정
 4. **ka10094 (년봉, P2)** — C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화)
+
+
+## 24. Phase C-3β — 주/월봉 OHLCV 자동화 (ka10082/83 자동화, 2026-05-09)
+
+### 24.1 결정
+
+ka10082 (주봉) + ka10083 (월봉) 의 **자동화 레이어** — UseCase + Router + Scheduler. C-3α 인프라 위에 R1 정착 패턴 5종 전면 적용. ka10081 (IngestDailyOhlcvUseCase) 패턴 ~95% 복제 + period dispatch.
+
+### 24.2 핵심 설계 결정
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | UseCase 통합 vs 분리 (ka10082/83) | **통합** (`IngestPeriodicOhlcvUseCase`) — period 인자로 dispatch. ka10081 의 IngestDailyOhlcvUseCase 와 분리 (hot path 차이). UseCase 1 클래스에 `execute(*, period, ...)` + `refresh_one(stock_code, *, period, ...)` 두 진입점 |
+| 2 | Period dispatch 전략 (H-3) | YEARLY → `NotImplementedError` (P2 chunk 진입 시 활성화). DAILY 분기는 Period enum 자체에서 차단 (3값) — `_validate_period` 가 YEARLY 만 검증 (1R M-1 결정). `_ingest_one` 내부에서 `if period is Period.WEEKLY: fetch_weekly() / elif Period.MONTHLY: fetch_monthly()` 분기 |
+| 3 | Router 분리 (별도 파일) | `routers/ohlcv_periodic.py` 신규 — ohlcv.py (daily) 와 분리. 4 path (POST sync × weekly/monthly + POST refresh × weekly/monthly) + 공용 핸들러 `_do_sync` / `_do_refresh` (period 만 caller 에서 결정). 응답 DTO 동일 (`OhlcvPeriodicSyncResultOut`) |
+| 4 | Scheduler 2 클래스 (Weekly + Monthly) | `WeeklyOhlcvScheduler` / `MonthlyOhlcvScheduler` 신규 — OhlcvDailyScheduler 패턴 ~95% 복제. 각각 별도 AsyncIOScheduler 보유 (lifecycle 독립) |
+| 5 | **cron 시간 (H-7)** | weekly = **금 KST 19:30** (daily_flow `mon-fri 19:00` 와 충돌 방지 — 30분 후) / monthly = **매월 1일 KST 03:00** (다른 cron 없는 새벽). 30분 간격 cron 패턴 일관 (17:30→18:00→18:30→19:00→19:30) |
+| 6 | DI factory 통합 (`IngestPeriodicOhlcvUseCaseFactory`) | C-1β factory 패턴 일관 — `_deps.py` 에 get/set/reset_ingest_periodic_ohlcv_factory + 본 chunk 의 `_ingest_periodic_ohlcv_factory` lifespan 등록. weekly/monthly Scheduler 가 같은 factory 공유 (period 는 fire 콜백에서 결정) |
+| 7 | R1 정착 패턴 5종 전면 적용 | (1) `errors: tuple[OhlcvSyncOutcome, ...]` 내부 list build → return 시 tuple 변환 (2) `StockMasterNotFoundError(stock_code)` raise + 라우터 subclass first 순서 (3) `fetched_at` non-Optional — 본 chunk 는 조회 endpoint 미추가라 N/A (4) `only_market_codes max_length=2 + pattern={1,2}` (5) NXT path `except Exception` 격리 (R1 L-5) |
+
+### 24.3 1차 리뷰 결과 (sonnet, HIGH 1 + MEDIUM 2 + LOW 2 적용 → CONDITIONAL → PASS)
+
+| # | 등급 | 이슈 | Fix |
+|---|------|------|-----|
+| H-1 | HIGH | `_do_sync` 에 `KiwoomError` 계열 예외 핸들러 누락 (factory 진입 시점 누설 위험) | `_do_sync` 에 `KiwoomBusinessError` (400 + msg echo 차단) / `KiwoomCredentialRejectedError` (400) / `KiwoomRateLimitedError` (503) / `(KiwoomUpstreamError, KiwoomResponseValidationError)` (502) / `KiwoomError` fallback (502) 추가 — `_do_refresh` 와 대칭 |
+| M-1 | MEDIUM | `_validate_period` 의 `period.value == "daily"` dead code (Period enum DAILY 미존재) | dead 분기 제거. docstring 갱신 — "Period.DAILY 가 추가되는 시점에 ValueError 분기 추가" 명시 |
+| M-2 | MEDIUM | service docstring "ka10081 과 같은 OhlcvSyncOutcome 재사용" 표현이 실제 구조 (복제) 와 불일치 | docstring 갱신 — "동일 구조 **복제** (공통 추출은 별도 refactor chunk 로 연기)" |
+| L-1 | LOW | `MonthlyOhlcvScheduler.start()` docstring 누락 (5 sibling scheduler 와 비대칭) | docstring 추가 — `WeeklyOhlcvScheduler.start()` 와 동일 패턴 |
+| L-3 | LOW | `_do_refresh` 의 `KiwoomBusinessError` 로그에 `msg=exc.message` 누락 (ka10081 패턴과 불일치) | `msg=%s, exc.message` 추가 — 운영 디버그 정보 |
+
+→ 모두 수정 후 PASS. CRITICAL/HIGH 0건. 자동 분류 = 계약 변경 → 2b 적대적 자동 생략.
+
+### 24.4 결과
+
+- **테스트**: 897 → **939 cases** (+42: service 17 / router 10 / scheduler+job 11 / deps 4)
+- **mypy --strict**: 72 source files / 0 errors
+- **ruff check + format**: All passed
+- **신규 파일 (9)**: service 1 / router 1 / batch 2 / 테스트 4 + plan doc 갱신
+- **수정 파일 (6)**: scheduler / main / _deps / settings / 2 lifespan 테스트
+- **외부 API contract**: 4 신규 path (POST 만 — 기존 daily 유지)
+
+### 24.5 Defer (다음 chunk)
+
+- **C-backfill** — `scripts/backfill_ohlcv.py --period {daily|weekly|monthly}` CLI. 운영 검증 4건 (페이지네이션 빈도/3년 시간/NUMERIC magnitude/sync 시간) 일괄 해소
+- **운영 first-call 검증** — `dt` 의미 (주/달 시작 vs 종료) / 응답 list 키 명 / 일봉 vs 키움 주월봉 cross-check (Phase H)
+- **L-2 / E-1 / E-2** (1R 별도 refactor 권고):
+  - L-2: `_do_sync` / `_do_refresh` 에 `NotImplementedError → 501` 핸들러 (방어적 — 현재 caller 가 period 고정)
+  - E-1: ka10081 `sync_ohlcv_daily` 도 `_do_sync` 와 동일 H-1 문제 (KiwoomError 핸들러 미등록)
+  - E-2: `_deps.py` `reset_*` 함수 docstring "테스트 전용" 이지만 lifespan teardown 도 사용 — 주석 정정
+
+### 24.6 다음 chunk 후보
+
+1. **C-backfill** — CLI + 3년 백필 실측 (운영 미해결 4건 일괄 해소)
+2. **KOSCOM cross-check 수동** — 가설 B 최종 확정
+3. **ka10094 (년봉, P2)** — Migration 1 + UseCase YEARLY 분기 활성화 (NotImplementedError → 정상 분기)
+4. **L-2 + E-1 refactor chunk** — `_do_sync` 류 핸들러 일괄 정리
+5. **Phase D 진입** — ka10080 분봉 (대용량 파티션 결정 선행)

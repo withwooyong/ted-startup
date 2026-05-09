@@ -255,12 +255,12 @@
 
 ### 7.2 C-3β 진행
 
-- [ ] C-3α PASS 확인 후 진입
-- [ ] `/ted-run` C-3β 실행
-- [ ] commit 메시지: `feat(kiwoom): Phase C-3β — 주/월봉 OHLCV 자동화 (UseCase + Router 4 path + Scheduler 금 19:00 / 월 03:00)`
-- [ ] STATUS.md § 2 ka10082/83 완료 이동
-- [ ] HANDOFF.md C-3 묶음 종료 갱신
-- [ ] 사용자 검토 후 push
+- [x] C-3α PASS 확인 후 진입
+- [x] `/ted-run` C-3β 실행 (CONDITIONAL → PASS, 1R 5건 적용)
+- [x] commit 메시지: `feat(kiwoom): Phase C-3β — 주/월봉 OHLCV 자동화 (UseCase + Router 4 path + Scheduler 금 19:30 / 월 03:00)`
+- [x] STATUS.md § 2 ka10082/83 완료 이동 (8 → 10 endpoint)
+- [x] HANDOFF.md C-3 묶음 종료 갱신
+- [x] 사용자 검토 후 push
 
 ---
 

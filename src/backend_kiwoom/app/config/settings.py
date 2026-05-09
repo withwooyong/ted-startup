@@ -119,6 +119,20 @@ class Settings(BaseSettings):
             "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
         ),
     )
+    scheduler_weekly_ohlcv_sync_alias: str = Field(
+        default="",
+        description=(
+            "주봉 OHLCV (ka10082) sync cron job 이 사용할 키움 자격증명 alias (C-3β 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_monthly_ohlcv_sync_alias: str = Field(
+        default="",
+        description=(
+            "월봉 OHLCV (ka10083) sync cron job 이 사용할 키움 자격증명 alias (C-3β 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

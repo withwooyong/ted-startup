@@ -7,6 +7,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] feat(kiwoom): Phase C-3β — ka10082/83 주/월봉 OHLCV 자동화 (UseCase + Router 4 path + Scheduler 2 job) — 1R CONDITIONAL → PASS, 939 tests / 97% coverage
+
+**Phase C-3β** — C-3α 인프라 위에 자동화 마무리. ka10082 (주봉) + ka10083 (월봉) endpoint 2건 완료 (production-ready). ka10081 IngestDailyOhlcvUseCase 패턴 ~95% 복제 + period dispatch + R1 정착 패턴 5종 전면 적용. **25 endpoint 진행: 8 → 10 (40%)**.
+
+### Added
+
+- **`IngestPeriodicOhlcvUseCase`** in `app/application/service/ohlcv_periodic_service.py` (신규) — period dispatch (WEEKLY/MONTHLY). `execute(*, period, base_date, only_market_codes)` + `refresh_one(stock_code, *, period, base_date)`. `_validate_period` 가 YEARLY → NotImplementedError (P2 chunk). per-stock per-exchange try/except + KRX→NXT 순서 + R1 L-5 NXT Exception 격리. 17 cases (test_ohlcv_periodic_service)
+- **`routers/ohlcv_periodic.py`** (신규, 4 path) — `POST /api/kiwoom/ohlcv/{weekly,monthly}/sync` + `POST /api/kiwoom/stocks/{code}/ohlcv/{weekly,monthly}/refresh`. 공용 핸들러 `_do_sync` / `_do_refresh` (period 만 caller 결정). DTO `OhlcvPeriodicSyncResultOut` (R1 errors tuple). 10 cases (test_ohlcv_router_periodic)
+- **`WeeklyOhlcvScheduler` + `MonthlyOhlcvScheduler`** in `app/scheduler.py` — OhlcvDailyScheduler 패턴 ~95% 복제. cron: weekly = **금 KST 19:30** (H-7 — daily_flow 19:00 후 30분 / 30분 간격 일관) / monthly = **매월 1일 KST 03:00**. 11 cases (test_weekly_monthly_ohlcv_scheduler)
+- **`fire_weekly_ohlcv_sync` + `fire_monthly_ohlcv_sync`** in `app/batch/{weekly,monthly}_ohlcv_job.py` — fire 콜백 (실패율 알람 / 예외 swallow). ohlcv_daily_job 패턴 일관
+- **`IngestPeriodicOhlcvUseCaseFactory`** in `app/adapter/web/_deps.py` — get/set/reset (4 cases / test_ohlcv_periodic_deps)
+- **`scheduler_weekly_ohlcv_sync_alias` + `scheduler_monthly_ohlcv_sync_alias`** in `app/config/settings.py` — alias fail-fast 검증 추가
+
+### Changed
+
+- `app/main.py` — lifespan factory `_ingest_periodic_ohlcv_factory` 등록 + WeeklyOhlcvScheduler + MonthlyOhlcvScheduler 시작/종료 (LIFO order — 신규가 먼저 reset). alias fail-fast 목록에 weekly/monthly 추가. `ohlcv_periodic_router` include
+- `tests/test_scheduler.py` + `tests/test_stock_master_scheduler.py` — 신규 alias env 추가 (lifespan smoke test 호환)
+- `app/adapter/web/_deps.py` — IngestPeriodicOhlcvUseCase import + 5 reset 함수 갱신 (LIFO)
+
+### Fixed (1차 리뷰 적용)
+
+- **HIGH H-1**: `_do_sync` 에 KiwoomError 계열 5 except 블록 추가 (KiwoomBusinessError 400 + msg echo 차단 / KiwoomCredentialRejectedError 400 / KiwoomRateLimitedError 503 / KiwoomUpstreamError·KiwoomResponseValidationError 502 / KiwoomError fallback 502). `_do_refresh` 와 대칭
+- **MEDIUM M-1**: `_validate_period` 의 `period.value == "daily"` dead code 제거 (Period enum DAILY 미존재). docstring 갱신 — "Period.DAILY 가 추가되는 시점에 ValueError 분기 추가"
+- **MEDIUM M-2**: service docstring "재사용" → "동일 구조 복제 (공통 추출은 별도 refactor chunk 로 연기)" 명확화
+- **LOW L-1**: `MonthlyOhlcvScheduler.start()` docstring 추가 (5 sibling scheduler 와 대칭성 회복)
+- **LOW L-3**: `_do_refresh` 의 KiwoomBusinessError 로그에 `msg=exc.message` 포함 (운영 디버그 정보)
+
+### Verification
+
+- mypy --strict: 72 source files / 0 errors
+- ruff check + format: All passed
+- pytest: **897 → 939 cases** (+42) / coverage **97% 유지**
+- 자동 분류 = 계약 변경 → 2b 적대적 / 3-4 보안 / 4 E2E 자동 생략 (백엔드 전용)
+
+### H-7 cron 충돌 검증
+
+| 시각 | cron | 비고 |
+|------|------|------|
+| 17:30 mon-fri | stock_master_sync | 기존 |
+| 18:00 mon-fri | stock_fundamental_sync | 기존 |
+| 18:30 mon-fri | ohlcv_daily_sync | 기존 |
+| 19:00 mon-fri | daily_flow_sync | 기존 |
+| **19:30 fri** | **weekly_ohlcv_sync (신규)** | daily_flow 19:00 후 30분 (mon-fri 19:00 와 무충돌) |
+| **매월 1일 03:00** | **monthly_ohlcv_sync (신규)** | 다른 cron 없는 새벽 |
+| 일 03:00 | sector_sync_weekly | 기존 (sun 03:00 — monthly 와 다른 day) |
+
+### Defer (다음 chunk)
+
+- **C-backfill** — `scripts/backfill_ohlcv.py --period {daily|weekly|monthly}` CLI + 3년 백필 실측 (운영 미해결 4건 일괄 해소)
+- **운영 first-call 검증** — `dt` 의미 / 응답 list 키 명 / 일봉 vs 키움 주월봉 cross-check (Phase H)
+- **L-2 / E-1 / E-2 + M-3** — refactor R2 chunk (NotImplementedError 핸들러 / ka10081 sync KiwoomError 핸들러 / `# type: ignore` → `cast()` / reset_* docstring)
+- **ka10094 (년봉, P2)** — Migration 1 + UseCase YEARLY 분기 활성화
+
+---
+
 ## [2026-05-09] feat(kiwoom): Phase C-3α — ka10082/83 주/월봉 OHLCV 인프라 (Migration 009-012 + Period enum + Periodic Repository) — 1R PASS, 897 tests / 97% coverage
 
 **Phase C-3α** — ka10082 (주봉) + ka10083 (월봉) **인프라 레이어** 일괄 도입. ka10081 (일봉) 패턴 ~95% 복제 + R1 정착 패턴 (`fetched_at` non-Optional / Mixin 재사용 / Repository dispatch) 사전 적용. 자동화 (UseCase + Router + Scheduler) 는 C-3β.

@@ -24,6 +24,7 @@ from fastapi import Depends, Header, HTTPException, status
 
 from app.application.service.daily_flow_service import IngestDailyFlowUseCase
 from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
+from app.application.service.ohlcv_periodic_service import IngestPeriodicOhlcvUseCase
 from app.application.service.sector_service import SyncSectorMasterUseCase
 from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
@@ -53,32 +54,33 @@ sync_stock factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌�
 mock_env 는 lifespan 에서 settings.kiwoom_default_env 기반으로 결정.
 """
 
-SyncStockFundamentalUseCaseFactory = Callable[
-    [str], AbstractAsyncContextManager[SyncStockFundamentalUseCase]
-]
+SyncStockFundamentalUseCaseFactory = Callable[[str], AbstractAsyncContextManager[SyncStockFundamentalUseCase]]
 """alias → AsyncContextManager[SyncStockFundamentalUseCase] factory (B-γ-2 추가).
 
 sync_stock factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient 빌드 + close 보장.
 KRX-only 라 mock_env 무관 (ka10001 응답에 nxtEnable 없음).
 """
 
-IngestDailyOhlcvUseCaseFactory = Callable[
-    [str], AbstractAsyncContextManager[IngestDailyOhlcvUseCase]
-]
+IngestDailyOhlcvUseCaseFactory = Callable[[str], AbstractAsyncContextManager[IngestDailyOhlcvUseCase]]
 """alias → AsyncContextManager[IngestDailyOhlcvUseCase] factory (C-1β 추가).
 
 sync_stock factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient + KiwoomChartClient 빌드.
 nxt_collection_enabled 는 settings 기반으로 lifespan 에서 묶음 (프로세스당 단일 정책).
 """
 
-IngestDailyFlowUseCaseFactory = Callable[
-    [str], AbstractAsyncContextManager[IngestDailyFlowUseCase]
-]
+IngestDailyFlowUseCaseFactory = Callable[[str], AbstractAsyncContextManager[IngestDailyFlowUseCase]]
 """alias → AsyncContextManager[IngestDailyFlowUseCase] factory (C-2β 추가).
 
 C-1β IngestDailyOhlcvUseCaseFactory 와 동일 패턴 — 매 호출마다 새 KiwoomClient +
 KiwoomMarketCondClient 빌드. nxt_collection_enabled / indc_mode 는 settings 기반으로
 lifespan 에서 묶음 (프로세스당 단일 정책).
+"""
+
+IngestPeriodicOhlcvUseCaseFactory = Callable[[str], AbstractAsyncContextManager[IngestPeriodicOhlcvUseCase]]
+"""alias → AsyncContextManager[IngestPeriodicOhlcvUseCase] factory (C-3β 추가).
+
+C-1β factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient + KiwoomChartClient 빌드.
+period 분기 (WEEKLY/MONTHLY) 는 caller 가 execute(period=...) 인자로 결정.
 """
 
 
@@ -119,6 +121,7 @@ _lookup_stock_factory: LookupStockUseCaseFactory | None = None
 _sync_fundamental_factory: SyncStockFundamentalUseCaseFactory | None = None
 _ingest_ohlcv_factory: IngestDailyOhlcvUseCaseFactory | None = None
 _ingest_daily_flow_factory: IngestDailyFlowUseCaseFactory | None = None
+_ingest_periodic_ohlcv_factory: IngestPeriodicOhlcvUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -249,6 +252,22 @@ def set_ingest_daily_flow_factory(factory: IngestDailyFlowUseCaseFactory) -> Non
     _ingest_daily_flow_factory = factory
 
 
+def get_ingest_periodic_ohlcv_factory() -> IngestPeriodicOhlcvUseCaseFactory:
+    """alias → AsyncContextManager[IngestPeriodicOhlcvUseCase] factory (C-3β). lifespan 에서 set."""
+    if _ingest_periodic_ohlcv_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="periodic ohlcv UseCase factory 미초기화",
+        )
+    return _ingest_periodic_ohlcv_factory
+
+
+def set_ingest_periodic_ohlcv_factory(factory: IngestPeriodicOhlcvUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — KiwoomClient + KiwoomChartClient 빌드 + UseCase 결합 (C-3β)."""
+    global _ingest_periodic_ohlcv_factory
+    _ingest_periodic_ohlcv_factory = factory
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋."""
     global \
@@ -259,7 +278,8 @@ def reset_token_manager() -> None:
         _lookup_stock_factory, \
         _sync_fundamental_factory, \
         _ingest_ohlcv_factory, \
-        _ingest_daily_flow_factory
+        _ingest_daily_flow_factory, \
+        _ingest_periodic_ohlcv_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
@@ -268,6 +288,7 @@ def reset_token_manager() -> None:
     _sync_fundamental_factory = None
     _ingest_ohlcv_factory = None
     _ingest_daily_flow_factory = None
+    _ingest_periodic_ohlcv_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -306,15 +327,23 @@ def reset_ingest_daily_flow_factory() -> None:
     _ingest_daily_flow_factory = None
 
 
+def reset_ingest_periodic_ohlcv_factory() -> None:
+    """테스트 전용 — periodic ohlcv factory 만 리셋 (C-3β)."""
+    global _ingest_periodic_ohlcv_factory
+    _ingest_periodic_ohlcv_factory = None
+
+
 __all__ = [
     "IngestDailyFlowUseCaseFactory",
     "IngestDailyOhlcvUseCaseFactory",
+    "IngestPeriodicOhlcvUseCaseFactory",
     "LookupStockUseCaseFactory",
     "SyncSectorUseCaseFactory",
     "SyncStockFundamentalUseCaseFactory",
     "SyncStockMasterUseCaseFactory",
     "get_ingest_daily_flow_factory",
     "get_ingest_ohlcv_factory",
+    "get_ingest_periodic_ohlcv_factory",
     "get_lookup_stock_factory",
     "get_revoke_use_case",
     "get_settings_dep",
@@ -325,6 +354,7 @@ __all__ = [
     "require_admin_key",
     "reset_ingest_daily_flow_factory",
     "reset_ingest_ohlcv_factory",
+    "reset_ingest_periodic_ohlcv_factory",
     "reset_lookup_stock_factory",
     "reset_sync_fundamental_factory",
     "reset_sync_sector_factory",
@@ -332,6 +362,7 @@ __all__ = [
     "reset_token_manager",
     "set_ingest_daily_flow_factory",
     "set_ingest_ohlcv_factory",
+    "set_ingest_periodic_ohlcv_factory",
     "set_lookup_stock_factory",
     "set_revoke_use_case",
     "set_sync_fundamental_factory",
