@@ -7,6 +7,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] refactor(kiwoom): Phase C R1 — 3 도메인 일관 개선 (errors→tuple / StockMasterNotFoundError / LOW 3건) — 1R PASS, 822 tests / 92.86%
+
+**Phase C R1 (Refactor 1)** — ADR-0001 § 19.5 (C-2β Defer 5건) + B-γ-2 동일 패턴을 3 도메인 (fundamental / OHLCV / daily_flow) 횡단 일관 정리. 외부 API contract 무변, 내부 타입·예외 안전성 강화. 다음 chunk (C-3 / Phase D) 진입 전 베이스 정착.
+
+### Added
+
+- `src/backend_kiwoom/app/application/exceptions.py` (신규): 공유 예외 모듈 — `StockMasterNotFoundError(ValueError)` + `__slots__ = ("stock_code",)` + 안정 메시지 형식 (`stock master not found: <code>`). domain-specific 예외는 service inline 패턴 유지 (token_service 일관)
+- `src/backend_kiwoom/tests/test_application_exceptions.py` (신규, +6 cases): subclass 보증 / stock_code 노출 / except ValueError 호환 / pytest.raises 패턴 / except 순서 역방향 invariant 회귀 (M-2 / H-3 단위 증명)
+
+### Changed — 3 service (fundamental / OHLCV / daily_flow)
+
+- `errors: list[Outcome] = field(default_factory=list)` → `errors: tuple[Outcome, ...] = field(default_factory=tuple)` (frozen dataclass 일관)
+- 내부 build local list → return 시 `tuple(errors)` 변환 (B-γ-1 frozen 강화)
+- `raise ValueError("stock master not found: ...")` → `raise StockMasterNotFoundError(stock_code)` (3 raise)
+- `refresh_one` NXT path: `except KiwoomError` 만 격리 → `except Exception` 추가 (R1 L-5, `execute()` 와 일관 partial-failure 모델). KRX 적재 후 NXT 실패는 응답 200 + failed=1 + errors[NXT] (전체 500 대신). fundamental 은 KRX-only 라 N/A
+
+### Changed — 3 router (fundamentals / ohlcv / daily_flow)
+
+- `errors: list[OutcomeOut]` → `errors: tuple[OutcomeOut, ...]` (DTO + return 변환). Pydantic v2 가 tuple 도 JSON array 로 직렬화 → wire format 무변
+- `only_market_codes max_length=4 → 2` (R1 L-1) — pattern={1,2} 와 일치, dead validator 제거
+- `*RowOut.fetched_at: datetime | None = None → datetime` (R1 L-2) — ORM NOT NULL + server_default 라 항상 값. test_fundamental_router fixture 1 갱신 (`fetched_at=datetime(...)` 명시)
+- `if "stock master not found" in msg:` 메시지 검색 → `except StockMasterNotFoundError` 분기 (R1 M-2). subclass first 순서로 ValueError 분기 위에 배치
+- `fundamentals.py:325` exchange max_length=4 주석 추가 (only_market_codes 와 다른 파라미터, R1 L-3)
+- `refresh_fundamental` 의 `except ValueError` 분기 의도적 생략 명시 주석 (base_date 파라미터 없음, R1 L-4)
+
+### Changed — 6 테스트 갱신
+
+- `test_*_service.py` (3): `pytest.raises(ValueError, match="stock master not found")` → `pytest.raises(StockMasterNotFoundError)`
+- `test_*_router.py` (3): `AsyncMock(side_effect=ValueError(...))` → `AsyncMock(side_effect=StockMasterNotFoundError(...))`. 404 status 단언 그대로
+- 7개소 `Result(... errors=[])` → `errors=()` (R1 1R M-1, mypy strict + tuple 필드 일치)
+
+### Added — ADR-0001 § 22 (R1 결과)
+
+- 핵심 설계 결정 7건 (공유 예외 모듈 / errors tuple / DTO tuple / except StockMasterNotFoundError / NXT Exception 격리 / max_length / fetched_at non-Optional)
+- 1차 리뷰 결과 (M-1 + L-1~L-4 전건 적용 후 PASS)
+- ADR § 19.5 / § 17.4 Defer 해소 매핑 (5/5 ✅)
+- 결과: 816 → **822 cases / 92.86% coverage** (+6) / mypy --strict 66 files 0 errors / ruff PASS
+
+### Changed — 진척 추적 + plan doc
+
+- `src/backend_kiwoom/STATUS.md` 갱신 — Phase C 70% → 75% / chunk 19 누적 / § 4 알려진 이슈 1건 해소
+- `src/backend_kiwoom/docs/plans/phase-c-refactor-r1-error-handling.md` (신규) — R1 작업계획서 (영향 범위 / 사전 self-check H-1~H-7 / DoD)
+
+### 검증 결과 (Quality-First)
+
+- **0. TDD**: red 확인 (exceptions 모듈 부재 → ModuleNotFoundError)
+- **1. 구현**: 신규 2 + 수정 11
+- **2a. 1차 리뷰** (sonnet): MEDIUM 1 + LOW 4 권고 → 전건 적용 → PASS
+- **2b. 적대적 리뷰**: 자동 분류 (계약 변경, refactor fallback) 로 생략. plan § 4 사전 self-check H-1~H-7 7 위험 모두 코드 반영
+- **3. Verification 5관문**: mypy 0 / ruff PASS / pytest 822 cases / 92.86% coverage. 3-4 보안 자동 생략, 3-5 런타임은 testcontainers integration test 가 대체
+- **4. E2E**: UI 변경 없음 자동 생략
+
+---
+
 ## [2026-05-09] refactor(kiwoom): Phase C-2γ — Migration 008 (D-E 중복 컬럼 3개 DROP, 13→10) — 1R PASS, 816 tests / 93.11%
 
 **Phase C-2γ — D-E 중복 컬럼 정리** (운영 dry-run § 20.2 #1 결정 즉시 반영). `stock_daily_flow` 의 `individual_net_purchase` / `institutional_net_purchase` / `foreign_net_purchase` 3 컬럼을 영구 DROP — D 카테고리 (`individual_net` / `institutional_net` / `foreign_volume`) 와 100% 동일값 (1,200/1,200 row 검증). 스토리지 ~23% 절감 (운영 가동 전).

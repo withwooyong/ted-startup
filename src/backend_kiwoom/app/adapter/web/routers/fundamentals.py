@@ -43,6 +43,7 @@ from app.adapter.web._deps import (
     get_sync_fundamental_factory,
     require_admin_key,
 )
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.token_service import (
     AliasCapacityExceededError,
     CredentialInactiveError,
@@ -112,7 +113,8 @@ class StockFundamentalOut(BaseModel):
     expected_match_price: int | None = None
     expected_match_volume: int | None = None
     fundamental_hash: str | None = None
-    fetched_at: datetime | None = None
+    # ORM NOT NULL + server_default=now() — 항상 값 존재 (R1 L-2)
+    fetched_at: datetime
 
 
 class FundamentalSyncOutcomeOut(BaseModel):
@@ -133,7 +135,7 @@ class FundamentalSyncResultOut(BaseModel):
     total: int
     success: int
     failed: int
-    errors: list[FundamentalSyncOutcomeOut] = Field(default_factory=list)
+    errors: tuple[FundamentalSyncOutcomeOut, ...] = Field(default_factory=tuple)
 
 
 class FundamentalSyncRequestIn(BaseModel):
@@ -146,7 +148,7 @@ class FundamentalSyncRequestIn(BaseModel):
         description="영속화 일자. None 이면 KST today (응답에 timestamp 부재, § 11.2)",
     )
     only_market_codes: list[
-        Annotated[str, Field(min_length=1, max_length=4, pattern=r"^[0-9]{1,2}$")]
+        Annotated[str, Field(min_length=1, max_length=2, pattern=r"^[0-9]{1,2}$")]
     ] | None = Field(
         default=None,
         description="특정 시장만 sync (예: ['0', '10']). None 이면 전체 5 시장",
@@ -209,7 +211,7 @@ async def sync_fundamentals(
         total=result.total,
         success=result.success,
         failed=result.failed,
-        errors=[FundamentalSyncOutcomeOut.model_validate(e) for e in result.errors],
+        errors=tuple(FundamentalSyncOutcomeOut.model_validate(e) for e in result.errors),
     )
 
 
@@ -241,7 +243,7 @@ async def refresh_fundamental(
     - alias 미등록 → 404
     - alias 비활성 → 400
     - alias 한도 초과 → 503
-    - Stock 마스터 미존재 (ValueError) → 404
+    - Stock 마스터 미존재 (StockMasterNotFoundError) → 404
     - KiwoomBusinessError → 400 + detail{return_code, error} (message echo 차단)
     - KiwoomCredentialRejectedError → 400
     - KiwoomRateLimitedError → 503
@@ -259,13 +261,17 @@ async def refresh_fundamental(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="alias 한도 초과 — 운영 문의",
         ) from None
-    except ValueError as exc:
-        # Stock 마스터 미존재 (refresh_one 의 ensure_exists 미사용 정책, ADR § 14.6)
+    except StockMasterNotFoundError as exc:
+        # R1 M-2 — 전용 예외. ensure_exists 미사용 정책 (ADR § 14.6).
         # 메시지에 stock_code 만 포함 — 외부 입력 echo 위험 없음 (Path pattern 사전 검증됨)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from None
+    # 의도적 생략: ohlcv/daily_flow refresh 와 달리 본 핸들러는 base_date 파라미터를
+    # 받지 않음 (refresh_one 내부에서 today 고정). base_date ValueError 가 발생하지
+    # 않으므로 generic `except ValueError` 분기 불필요. 향후 base_date 파라미터 추가
+    # 시 ohlcv.py / daily_flow.py 패턴과 일관 적용. (R1 L-4)
     except KiwoomBusinessError as exc:
         # B-β 패턴 일관 — return_msg echo 차단, 비식별 메타만
         logger.warning(
@@ -320,6 +326,8 @@ async def get_latest_fundamental(
         str,
         Query(
             min_length=1,
+            # exchange 코드 — KRX/NXT/SOR (3자). max_length=4 는 안전 마진. only_market_codes
+            # (시장 코드, R1 max_length=2) 와는 다른 파라미터이므로 변경 대상 아님.
             max_length=4,
             pattern=r"^(KRX|NXT|SOR)$",
             description="거래소 (B-γ-1 KRX-only). NXT/SOR 은 Phase C 후 채워짐",

@@ -45,6 +45,7 @@ from app.adapter.out.persistence.models import Stock, StockFundamental
 from app.adapter.out.persistence.repositories.stock_fundamental import (
     StockFundamentalRepository,
 )
+from app.application.exceptions import StockMasterNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class FundamentalSyncResult:
     total: int
     success: int
     failed: int
-    errors: list[FundamentalSyncOutcome] = field(default_factory=list)
+    errors: tuple[FundamentalSyncOutcome, ...] = field(default_factory=tuple)
 
 
 class SyncStockFundamentalUseCase:
@@ -170,14 +171,14 @@ class SyncStockFundamentalUseCase:
             total=len(active_stocks),
             success=success,
             failed=failed,
-            errors=errors,
+            errors=tuple(errors),
         )
 
     async def refresh_one(self, stock_code: str) -> StockFundamental:
         """단건 새로고침 — admin POST /stocks/{code}/fundamental/refresh.
 
         Stock 마스터에 stock_code 가 active 로 등록돼 있어야 함 (ensure_exists 미사용).
-        없으면 ValueError → 라우터가 404 매핑.
+        없으면 StockMasterNotFoundError → 라우터가 404 매핑.
 
         KiwoomError 서브클래스는 그대로 raise — 라우터가 매핑 (B-β execute 패턴 일관).
         """
@@ -187,7 +188,7 @@ class SyncStockFundamentalUseCase:
             stock = (await session.execute(stmt)).scalar_one_or_none()
 
         if stock is None:
-            raise ValueError(f"stock master not found: {stock_code}")
+            raise StockMasterNotFoundError(stock_code)
 
         return await self._sync_one_stock(stock, asof_date=date.today())
 

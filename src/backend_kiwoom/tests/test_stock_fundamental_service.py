@@ -48,6 +48,7 @@ from app.adapter.out.kiwoom.stkinfo import (
 from app.adapter.out.persistence.repositories.stock_fundamental import (
     StockFundamentalRepository,
 )
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.stock_fundamental_service import (
     FundamentalSyncOutcome,
     FundamentalSyncResult,
@@ -496,7 +497,7 @@ async def test_refresh_one_raises_when_stock_master_missing(
     stkinfo = _stub_stkinfo_client({"005930": _make_response("005930", "삼성전자")})
     uc = SyncStockFundamentalUseCase(session_provider=session_provider, stkinfo_client=stkinfo)
 
-    with pytest.raises(ValueError, match="stock master not found"):
+    with pytest.raises(StockMasterNotFoundError):
         await uc.refresh_one("005930")
 
 

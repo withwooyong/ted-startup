@@ -44,6 +44,7 @@ from app.adapter.web._deps import (
     require_admin_key,
 )
 from app.application.constants import ExchangeType
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.token_service import (
     AliasCapacityExceededError,
     CredentialInactiveError,
@@ -84,7 +85,7 @@ class DailyFlowSyncResultOut(BaseModel):
     success_krx: int
     success_nxt: int
     failed: int
-    errors: list[DailyFlowSyncOutcomeOut] = Field(default_factory=list)
+    errors: tuple[DailyFlowSyncOutcomeOut, ...] = Field(default_factory=tuple)
 
 
 class DailyFlowSyncRequestIn(BaseModel):
@@ -97,7 +98,7 @@ class DailyFlowSyncRequestIn(BaseModel):
         description="기준일자. None 이면 KST today. today - 365 ~ today 외는 400",
     )
     only_market_codes: list[
-        Annotated[str, Field(min_length=1, max_length=4, pattern=r"^[0-9]{1,2}$")]
+        Annotated[str, Field(min_length=1, max_length=2, pattern=r"^[0-9]{1,2}$")]
     ] | None = Field(
         default=None,
         description="특정 시장만 sync (예: ['0', '10']). None 이면 전체 5 시장",
@@ -125,7 +126,8 @@ class DailyFlowRowOut(BaseModel):
     foreign_rate: Decimal | None = None
     foreign_holdings: int | None = None
     foreign_weight: Decimal | None = None
-    fetched_at: datetime | None = None
+    # ORM NOT NULL + server_default=now() — 항상 값 존재 (R1 L-2)
+    fetched_at: datetime
 
 
 # =============================================================================
@@ -190,7 +192,7 @@ async def sync_daily_flow(
         success_krx=result.success_krx,
         success_nxt=result.success_nxt,
         failed=result.failed,
-        errors=[DailyFlowSyncOutcomeOut.model_validate(e) for e in result.errors],
+        errors=tuple(DailyFlowSyncOutcomeOut.model_validate(e) for e in result.errors),
     )
 
 
@@ -224,8 +226,8 @@ async def refresh_daily_flow(
 
     예외 매핑 (C-1β 패턴 일관):
     - alias 미등록 → 404 / 비활성 → 400 / 한도 초과 → 503
-    - Stock 마스터 미존재 (ValueError "stock master not found") → 404
-    - base_date 범위 외 (ValueError "base_date") → 400
+    - Stock 마스터 미존재 (StockMasterNotFoundError) → 404
+    - base_date 범위 외 (ValueError) → 400
     - KiwoomBusinessError → 400 (message echo 차단)
     - KiwoomCredentialRejectedError → 400
     - KiwoomRateLimitedError → 503
@@ -244,17 +246,17 @@ async def refresh_daily_flow(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="alias 한도 초과 — 운영 문의",
         ) from None
+    except StockMasterNotFoundError as exc:
+        # R1 M-2 — 전용 예외 (subclass first 순서, ValueError 분기보다 먼저)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from None
     except ValueError as exc:
-        # 두 가지 ValueError — "stock master not found" → 404, "base_date" → 400
-        msg = str(exc)
-        if "stock master not found" in msg:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=msg,
-            ) from None
+        # base_date 범위 외 (UseCase._validate_base_date) — 메시지 안전
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=msg,
+            detail=str(exc),
         ) from None
     except KiwoomBusinessError as exc:
         # C-1β 패턴 일관 — return_msg echo 차단
@@ -294,7 +296,7 @@ async def refresh_daily_flow(
         success_krx=result.success_krx,
         success_nxt=result.success_nxt,
         failed=result.failed,
-        errors=[DailyFlowSyncOutcomeOut.model_validate(e) for e in result.errors],
+        errors=tuple(DailyFlowSyncOutcomeOut.model_validate(e) for e in result.errors),
     )
 
 

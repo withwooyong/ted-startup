@@ -1385,3 +1385,66 @@ C-1β 패턴 mechanical 차용. C-2α (인프라) 위에 자동화 레이어만 
 2. **scripts/backfill_*.py CLI + 3년 백필 실측** (Phase C-2 마무리)
 3. **C-3 (ka10082/83 주봉/월봉, P1)** (chart endpoint 재사용)
 4. **KOSCOM cross-check 수동** (가설 B 최종 확정)
+
+---
+
+## 22. Phase C R1 — 3 도메인 일관 개선 (Refactor 1, 2026-05-09)
+
+### 22.1 결정
+
+§ 19.5 (C-2β Defer) 의 5건 + B-γ-2 동일 패턴을 **3 도메인 (fundamental / OHLCV / daily_flow) 횡단** 일관 정리. 외부 API contract 무변, 내부 타입·예외 안전성 강화. 다음 chunk (C-3 / Phase D) 진입 전 베이스 정착.
+
+### 22.2 핵심 설계 결정
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | 공유 예외 모듈 | 신규 `app/application/exceptions.py` — `StockMasterNotFoundError(ValueError)` + `__slots__ = ("stock_code",)` + 안정 메시지 형식. domain-specific 예외는 service inline 패턴 유지 (token_service 일관) |
+| 2 | `errors` mutable container 노출 제거 | 3 service Result frozen dataclass 의 field type 을 `list → tuple`. 내부 build local list → return 시 `tuple(errors)` 변환 (B-γ-1 frozen 일관 강화) |
+| 3 | router DTO `errors: tuple[..., ...]` | Pydantic v2 가 tuple 도 JSON array 로 직렬화 → wire format 무변. OpenAPI schema 도 array. `tuple(generator)` 패턴으로 변환 |
+| 4 | `ValueError` 메시지 검색 → `except StockMasterNotFoundError` | 3 router 모두 메시지 substring 검색 제거. subclass first 순서로 ValueError 분기 위에 배치 (M-2 / H-3) |
+| 5 | `refresh_one` NXT path Exception 격리 (L-5) | OHLCV / daily_flow 의 `refresh_one` 에 `except Exception` 추가 — `execute()` 와 일관 partial-failure 모델. KRX 이미 적재 후 NXT 의 unexpected exception 도 응답 200 + failed=1 로 격리. fundamental 은 KRX-only 라 N/A |
+| 6 | `only_market_codes max_length 4 → 2` (L-1) | pattern=`r"^[0-9]{1,2}$"` 와 일치. dead validator 제거, 운영 호출 영향 0 |
+| 7 | `*RowOut.fetched_at` non-Optional (L-2) | ORM NOT NULL + server_default=now() 라 항상 값 존재. `datetime | None` → `datetime`. test_fundamental_router fixture 1 갱신 (`fetched_at=datetime(...)` 명시) |
+
+### 22.3 1차 리뷰 결과 (sonnet, M-1 + L-1~L-4 전건 적용)
+
+| # | 등급 | 이슈 | Fix |
+|---|------|------|-----|
+| M-1 | MEDIUM | 테스트 stub 의 `errors=[]` (list) 가 `tuple` 필드와 mypy 충돌 | 6개소 `errors=()` 일괄 변경 |
+| L-1 | LOW | `StockMasterNotFoundError.stock_code` mutation 가능 | `__slots__ = ("stock_code",)` + docstring |
+| L-2 | LOW | except 순서 회귀 테스트 부재 | `test_value_error_first_except_swallows_subclass` 추가 — 역방향 invariant 단위 증명 |
+| L-3 | LOW | `fundamentals.py L325 max_length=4` 변경 누락 의심 | 주석 추가 — exchange 코드는 `only_market_codes` 와 다른 파라미터 명시 |
+| L-4 | LOW | `refresh_fundamental` 의 `except ValueError` 분기 부재 | 의도적 생략 명시 주석 (base_date 파라미터 없음) |
+
+→ 모두 수정 후 PASS. CRITICAL/HIGH 0건. 자동 분류 = 계약 변경 → 2b 적대적 자동 생략.
+
+### 22.4 결과
+
+- **테스트**: 816 → **822 cases** (+6: 5 exception 신규 + 1 except 순서 회귀) / coverage **92.86%** (93%→92.86% 미세 감소 — exceptions.py 33% coverage 와 일치, 3 service refactor 후 line 증가가 분모 영향)
+- **mypy --strict**: 66 source files / 0 errors
+- **ruff check**: All passed (UP017 datetime.UTC 1건 자동 fix)
+- **변경 파일**: 13 (신규 2: exceptions.py + test / 수정 11: 3 service + 3 router + 5 test + 1 fixture). +200 / -90 라인 추정
+- **외부 API contract**: 무변 (응답 wire format / OpenAPI / status code 동일)
+
+### 22.5 ADR § 19.5 / § 17.4 Defer 해소 매핑
+
+| 출처 | 항목 | 상태 |
+|------|------|------|
+| § 19.5 | M-1 errors mutable list → tuple | ✅ 해소 (3 service + 3 router DTO) |
+| § 19.5 | M-2 ValueError 메시지 검색 → 전용 예외 | ✅ 해소 (StockMasterNotFoundError 도입) |
+| § 19.5 | L-1 only_market_codes max_length=4 dead | ✅ 해소 (max_length=2) |
+| § 19.5 | L-2 DailyFlowRowOut.fetched_at None 타입 | ✅ 해소 (3 RowOut 모두 non-Optional) |
+| § 19.5 | L-5 refresh_one NXT 비-Kiwoom Exception | ✅ 해소 (`except Exception` + 의도 주석) |
+
+### 22.6 Defer (다음 chunk)
+
+- (B-γ-2 잔여 LOW) — 현재 § 17.4 와 § 19.5 외 별도 누적 없음
+- C-1α 상속 (NUMERIC magnitude / list cap / MappingProxyType / chart.py private import) — 운영 dry-run 후 / 후속 chunk
+- 가설 B KOSCOM cross-check 수동 1~2건
+
+### 22.7 다음 chunk 후보
+
+1. **C-3 (ka10082/83 주봉/월봉, P1)** — R1 정리된 패턴 그대로 복제 (errors tuple / StockMasterNotFoundError / non-Optional fetched_at)
+2. **scripts/backfill_*.py CLI + 3년 백필 실측** — Phase C-2 마무리
+3. **KOSCOM cross-check 수동** — 가설 B 최종 확정
+4. **Phase D 진입** — ka10080 분봉 (대용량 파티션 결정 선행)

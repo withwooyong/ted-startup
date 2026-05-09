@@ -38,6 +38,7 @@ from app.adapter.out.persistence.repositories.stock_fundamental import (
 )
 from app.adapter.web._deps import get_sync_fundamental_factory
 from app.adapter.web.routers.fundamentals import router as fundamentals_router
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.stock_fundamental_service import (
     FundamentalSyncOutcome,
     FundamentalSyncResult,
@@ -176,7 +177,7 @@ async def test_sync_passes_target_date_and_market_codes(admin_key: str) -> None:
             total=0,
             success=0,
             failed=0,
-            errors=[],
+            errors=(),
         )
 
     uc = AsyncMock(spec=SyncStockFundamentalUseCase)
@@ -214,8 +215,12 @@ async def test_refresh_fundamental_returns_data_for_admin(
 ) -> None:
     stock_id = await _create_stock(session, "005930", "삼성전자")
 
+    from datetime import UTC, datetime
+
     from app.adapter.out.persistence.models import StockFundamental
 
+    # R1 L-2 — fetched_at non-Optional (ORM NOT NULL + server_default). 테스트 stub
+    # 도 명시 값 채워야 함 (이전엔 Pydantic Optional 로 None 통과했음).
     fake = StockFundamental(
         id=999,
         stock_id=stock_id,
@@ -223,6 +228,7 @@ async def test_refresh_fundamental_returns_data_for_admin(
         exchange="KRX",
         per_ratio=None,
         fundamental_hash="x" * 32,
+        fetched_at=datetime(2026, 5, 8, 12, 0, tzinfo=UTC),
     )
 
     uc = AsyncMock(spec=SyncStockFundamentalUseCase)
@@ -324,7 +330,7 @@ async def test_refresh_fundamental_maps_validation_to_502(admin_key: str) -> Non
 async def test_refresh_fundamental_value_error_for_missing_stock_master(admin_key: str) -> None:
     """Stock 마스터 미존재 → 404."""
     uc = AsyncMock(spec=SyncStockFundamentalUseCase)
-    uc.refresh_one = AsyncMock(side_effect=ValueError("stock master not found: 005930"))
+    uc.refresh_one = AsyncMock(side_effect=StockMasterNotFoundError("005930"))
     app = _make_app(_stub_factory(uc))
 
     async with _async_client(app) as client:

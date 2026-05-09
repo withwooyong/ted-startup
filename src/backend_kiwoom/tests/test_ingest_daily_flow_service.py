@@ -50,6 +50,7 @@ from app.adapter.out.persistence.repositories.stock_daily_flow import (
     StockDailyFlowRepository,
 )
 from app.application.constants import DailyMarketDisplayMode, ExchangeType
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.daily_flow_service import (
     DailyFlowSyncOutcome,
     DailyFlowSyncResult,
@@ -422,7 +423,7 @@ async def test_refresh_one_raises_when_stock_master_missing(
         session_provider=session_provider, mrkcond_client=client, nxt_collection_enabled=False
     )
 
-    with pytest.raises(ValueError, match="stock master not found"):
+    with pytest.raises(StockMasterNotFoundError):
         await uc.refresh_one("005930", base_date=date(2025, 9, 8))
 
 

@@ -44,6 +44,7 @@ from app.adapter.out.kiwoom.chart import (
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_price import StockPriceRepository
 from app.application.constants import ExchangeType, StockListMarketType
+from app.application.exceptions import StockMasterNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class OhlcvSyncResult:
     success_krx: int
     success_nxt: int
     failed: int
-    errors: list[OhlcvSyncOutcome] = field(default_factory=list)
+    errors: tuple[OhlcvSyncOutcome, ...] = field(default_factory=tuple)
 
 
 class IngestDailyOhlcvUseCase:
@@ -209,18 +210,22 @@ class IngestDailyOhlcvUseCase:
             success_krx=success_krx,
             success_nxt=success_nxt,
             failed=failed,
-            errors=errors,
+            errors=tuple(errors),
         )
 
     async def refresh_one(self, stock_code: str, *, base_date: date) -> OhlcvSyncResult:
         """단건 새로고침 — admin POST /stocks/{code}/ohlcv/daily/refresh.
 
         Stock 마스터에 active 로 등록돼 있어야 함 (ensure_exists 미사용).
-        없으면 ValueError → 라우터가 404 매핑.
+        없으면 StockMasterNotFoundError → 라우터가 404 매핑.
 
         KRX 호출 실패 → KiwoomError 그대로 raise (라우터가 4xx/5xx 매핑).
         NXT 호출 실패 → KRX 가 이미 적재된 상태이므로 errors 로 격리 (2a-M1 / 2b-L3).
             응답 200 + success_krx=1 + failed=1 — admin 이 "KRX 성공, NXT 실패" 인지.
+            R1 (L-5): KiwoomError 외 비-Kiwoom 예외 (DB / network 등) 도 격리 — execute()
+            의 NXT 경로와 일관 (partial-failure 모델). KRX 가 이미 성공했으므로 NXT 의
+            unexpected exception 으로 전체 500 반환 시 admin 의 "KRX 적재 사실" 가시성
+            손실. 격리하여 응답 200 + failed=1 + errors[NXT] 로 명시.
         """
         self._validate_base_date(base_date)
 
@@ -231,7 +236,7 @@ class IngestDailyOhlcvUseCase:
             stock = (await session.execute(stmt)).scalar_one_or_none()
 
         if stock is None:
-            raise ValueError(f"stock master not found: {stock_code}")
+            raise StockMasterNotFoundError(stock_code)
 
         # KRX 는 KiwoomError 그대로 propagate (라우터 매핑)
         await self._ingest_one(stock, base_date=base_date, exchange=ExchangeType.KRX)
@@ -257,6 +262,18 @@ class IngestDailyOhlcvUseCase:
                     stock.stock_code,
                     err_class,
                 )
+            except Exception as exc:  # noqa: BLE001 — R1 L-5: execute() 와 일관 격리
+                failed = 1
+                err_class = type(exc).__name__
+                errors.append(
+                    OhlcvSyncOutcome(
+                        stock_code=stock.stock_code, exchange="NXT", error_class=err_class
+                    )
+                )
+                logger.exception(
+                    "ka10081 NXT refresh 예상치 못한 예외 stock_code=%s — KRX 는 이미 적재됨",
+                    stock.stock_code,
+                )
 
         return OhlcvSyncResult(
             base_date=base_date,
@@ -264,7 +281,7 @@ class IngestDailyOhlcvUseCase:
             success_krx=1,
             success_nxt=success_nxt,
             failed=failed,
-            errors=errors,
+            errors=tuple(errors),
         )
 
     async def _ingest_one(

@@ -46,6 +46,7 @@ from app.adapter.out.kiwoom.chart import (
 )
 from app.adapter.out.persistence.repositories.stock_price import StockPriceRepository
 from app.application.constants import ExchangeType
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.ohlcv_daily_service import (
     IngestDailyOhlcvUseCase,
     OhlcvSyncOutcome,
@@ -405,7 +406,7 @@ async def test_refresh_one_raises_when_stock_master_missing(
         session_provider=session_provider, chart_client=client, nxt_collection_enabled=False
     )
 
-    with pytest.raises(ValueError, match="stock master not found"):
+    with pytest.raises(StockMasterNotFoundError):
         await uc.refresh_one("005930", base_date=date(2025, 9, 8))
 
 

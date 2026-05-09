@@ -34,6 +34,7 @@ from app.adapter.out.persistence.repositories.stock_price import StockPriceRepos
 from app.adapter.web._deps import get_ingest_ohlcv_factory
 from app.adapter.web.routers.ohlcv import router as ohlcv_router
 from app.application.constants import ExchangeType
+from app.application.exceptions import StockMasterNotFoundError
 from app.application.service.ohlcv_daily_service import (
     IngestDailyOhlcvUseCase,
     OhlcvSyncResult,
@@ -140,7 +141,7 @@ async def test_sync_returns_result_for_admin(admin_key: str) -> None:
             success_krx=2,
             success_nxt=1,
             failed=0,
-            errors=[],
+            errors=(),
         )
     )
     app = _make_app(_stub_factory(uc))
@@ -168,7 +169,7 @@ async def test_sync_passes_optional_body(admin_key: str) -> None:
         captured["only_market_codes"] = only_market_codes
         return OhlcvSyncResult(
             base_date=base_date or date.today(),
-            total=0, success_krx=0, success_nxt=0, failed=0, errors=[],
+            total=0, success_krx=0, success_nxt=0, failed=0, errors=(),
         )
 
     uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
@@ -222,7 +223,7 @@ async def test_refresh_returns_result_for_admin(admin_key: str) -> None:
     uc.refresh_one = AsyncMock(
         return_value=OhlcvSyncResult(
             base_date=date(2025, 9, 8),
-            total=1, success_krx=1, success_nxt=0, failed=0, errors=[],
+            total=1, success_krx=1, success_nxt=0, failed=0, errors=(),
         )
     )
     app = _make_app(_stub_factory(uc))
@@ -317,7 +318,7 @@ async def test_refresh_maps_validation_to_502(admin_key: str) -> None:
 async def test_refresh_value_error_for_missing_stock_or_invalid_date(admin_key: str) -> None:
     """Stock 마스터 미존재 또는 base_date 범위 외 → 404 / 400."""
     uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
-    uc.refresh_one = AsyncMock(side_effect=ValueError("stock master not found: 005930"))
+    uc.refresh_one = AsyncMock(side_effect=StockMasterNotFoundError("005930"))
     app = _make_app(_stub_factory(uc))
 
     async with _client(app) as cl:
