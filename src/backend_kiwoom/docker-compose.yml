@@ -1,0 +1,25 @@
+services:
+  kiwoom-db:
+    image: postgres:16-alpine
+    container_name: kiwoom-db
+    ports:
+      # 호스트 5433 → 컨테이너 5432 (루트의 signal-db 5432 와 충돌 회피)
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: kiwoom_db
+      POSTGRES_USER: kiwoom
+      POSTGRES_PASSWORD: kiwoom
+      # 한글 컬럼 코멘트 + 한국 timezone 안전성
+      LANG: C.UTF-8
+      TZ: Asia/Seoul
+    volumes:
+      - kiwoom-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiwoom -d kiwoom_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  kiwoom-data:
+    name: kiwoom-data

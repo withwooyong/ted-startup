@@ -1,9 +1,13 @@
 # 운영 실측 Runbook — OHLCV 3년 백필
 
 > **목적**: `scripts/backfill_ohlcv.py` (C-backfill) 로 운영 미해결 4건을 정량화한다.
-> **대상 환경**: 사용자 로컬에서 운영 키움 자격증명 + 운영 DB 에 접근하는 환경 (prod-like).
+> **대상 환경**: 사용자 로컬 (Docker Desktop) — `src/backend_kiwoom/docker-compose.yml` 의 postgres:16-alpine + 운영 키움 자격증명.
 > **소요 시간**: dry-run + 단계 1~3 실측 (포함 후처리) — 약 2~4시간 (인터랙티브) / + 3년 백필 4~8시간 (백그라운드).
-> **관련 문서**: `scripts/backfill_ohlcv.py` (CLI) / ADR-0001 § 25 (C-backfill 설계) / ADR-0001 § 26 (실측 결과 자리) / STATUS.md § 4 (운영 미해결 4건).
+> **관련 문서**:
+> - `scripts/backfill_ohlcv.py` (CLI)
+> - `src/backend_kiwoom/docker-compose.yml` (DB 컨테이너 정의)
+> - `src/backend_kiwoom/migrations/versions/001~012_*.py` (스키마 진실 출처 — backend_kiwoom 전용 ERD 다이어그램은 별도 없음. PoC 단계 ERD 는 `pipeline/artifacts/04-db-schema/erd.mermaid` 참고지만 실제 스키마와 다름)
+> - ADR-0001 § 25 (C-backfill 설계) / ADR-0001 § 26 (실측 결과 자리) / STATUS.md § 4 (운영 미해결 4건)
 
 ---
 
@@ -20,19 +24,38 @@
 
 ## 1. 사전 조건
 
-### 1.1 환경변수 (`.env.prod` 또는 export)
+### 1.1 DB 컨테이너 기동
+
+```bash
+cd src/backend_kiwoom
+
+# kiwoom-db 컨테이너 기동 (postgres:16-alpine, 호스트 5433 매핑)
+docker compose up -d kiwoom-db
+
+# healthy 확인
+docker compose ps
+# kiwoom-db   "docker-entrypoint.s…"   Up 5s (healthy)   0.0.0.0:5433->5432/tcp
+
+# 호스트에서 접속 확인 (psql 클라이언트 또는 docker exec)
+docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c "SELECT version();"
+```
+
+### 1.2 환경변수 (`.env.prod` 또는 export)
 
 | 변수 | 값 | 비고 |
 |------|-----|------|
-| `DATABASE_URL` | `postgresql+asyncpg://user:pass@host:5432/kiwoom_db` | 운영 DB. asyncpg 드라이버 |
-| `KIWOOM_CREDENTIAL_MASTER_KEY` | Fernet 32B base64 | 운영과 동일 키 (alias 복호화) |
-| `KIWOOM_BASE_URL_PROD` | `https://api.kiwoom.com` | 디폴트값 그대로 |
+| `DATABASE_URL` | `postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db` | docker-compose.yml 기준 (호스트 5433 매핑). asyncpg 드라이버 |
+| `KIWOOM_CREDENTIAL_MASTER_KEY` | Fernet 32B base64 (예: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) | alias 복호화용 — 운영과 동일 키 필수 |
+| `KIWOOM_BASE_URL_PROD` | `https://api.kiwoom.com` | 디폴트값 그대로 (Settings 디폴트 사용) |
 | `KIWOOM_DEFAULT_ENV` | `prod` | mock 도메인은 NXT 미지원 — 실측은 prod 필수 |
 | `NXT_COLLECTION_ENABLED` | `true` | 6000 호출 시나리오 측정 시 (False 면 KRX 만 3000) |
 | `KIWOOM_MIN_REQUEST_INTERVAL_SECONDS` | `0.25` | 디폴트 (5 RPS 안전 마진). 변경 시 #1 추정에 영향 |
 | `KIWOOM_CONCURRENT_REQUESTS` | `4` | 디폴트. 백필 단일 worker 라 영향 적음 |
+| `BACKFILL_MAX_DAYS` | `1095` | 디폴트 (3년) — Settings.backfill_max_days |
 
-### 1.2 DB 사전 적용
+> `.env.prod` 위치: `/Users/heowooyong/cursor/learning/ted-startup/.env.prod` (루트). pydantic-settings 가 cwd 기준으로 로드하므로 backend_kiwoom 에서 실행 시 `cd src/backend_kiwoom; cp ../../.env.prod .env.prod` 또는 symlink 권장. 또는 `export $(cat ../../.env.prod | xargs)` 로 환경변수 export.
+
+### 1.3 마이그레이션 적용
 
 ```bash
 # 마이그레이션 head 확인 (012 까지 적용)
@@ -40,20 +63,23 @@ uv run alembic current
 
 # 미적용 시
 uv run alembic upgrade head
+# Running upgrade  -> 001_init_kiwoom_schema (+11 more) -> 012_stock_price_monthly_nxt
 
-# active stock 수 확인 (백필 대상 산정)
-psql "$DATABASE_URL_PSQL" -c "SELECT market_code, COUNT(*) FROM kiwoom.stock WHERE is_active = true GROUP BY market_code ORDER BY 1;"
+# active stock 수 확인 (백필 대상 산정 — Phase B 의 ka10099 sync 후 채워짐)
+docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c \
+    "SELECT market_code, COUNT(*) FROM kiwoom.stock WHERE is_active = true GROUP BY market_code ORDER BY 1;"
 ```
 
-> `DATABASE_URL_PSQL` = `postgresql://user:pass@host:5432/kiwoom_db` (psql 은 asyncpg 드라이버 prefix 제외).
+> 빈 DB 라면 `kiwoom.stock` 행수 0 → backfill 도 0 종목. **Phase B 의 ka10099 (종목 마스터 sync) 가 선행되어야 함**. 운영 환경에서 종목 마스터를 가져오거나, 테스트로 mock 데이터 INSERT.
 
-### 1.3 alias 등록
+### 1.4 alias 등록
 
-운영 DB 의 `kiwoom.kiwoom_credential` 테이블에 alias 가 등록되어 있어야 한다 (마스터키로 암호화된 appkey/secret). alias 명은 환경별로 다르므로 사용자 환경 기준으로 결정.
+운영 DB 의 `kiwoom.kiwoom_credential` 테이블에 alias 가 등록되어 있어야 한다 (마스터키로 암호화된 appkey/secret). 등록은 admin 라우터 (`POST /api/kiwoom/admin/credentials`) 또는 직접 INSERT 로 가능 — 자세한 절차는 ADR-0001 § 3 (보안 정책) + Phase A2-α 결정 참고.
 
 ```bash
 # alias 확인
-psql "$DATABASE_URL_PSQL" -c "SELECT alias, app_env, created_at FROM kiwoom.kiwoom_credential ORDER BY created_at DESC;"
+docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c \
+    "SELECT alias, env, is_active, created_at FROM kiwoom.kiwoom_credential ORDER BY created_at DESC;"
 ```
 
 본 runbook 의 예시는 `--alias prod` 가정.
@@ -161,7 +187,7 @@ echo $! > logs/backfill.pid
 watch -n 600 'tail -50 logs/backfill-full-daily-*.log | grep -E "(processed|failed|elapsed)"'
 
 # DB 적재 진척 (분당)
-watch -n 60 'psql "$DATABASE_URL_PSQL" -c "SELECT COUNT(DISTINCT stock_id) FROM kiwoom.stock_price_krx;"'
+watch -n 60 'docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c "SELECT COUNT(DISTINCT stock_id) FROM kiwoom.stock_price_krx;"'
 
 # 프로세스 살아있는지
 ps -p $(cat logs/backfill.pid) > /dev/null && echo "alive" || echo "dead"
