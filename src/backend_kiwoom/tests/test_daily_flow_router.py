@@ -375,9 +375,6 @@ async def test_get_daily_flow_three_scenarios_in_single_lifetime(session: AsyncS
             foreign_rate=Decimal("20.50"),
             foreign_holdings=3000000,
             foreign_weight=Decimal("50.40"),
-            foreign_net_purchase=-100,
-            institutional_net_purchase=693,
-            individual_net_purchase=-714,
         )
         repo = StockDailyFlowRepository(session)
         await repo.upsert_many([n])
@@ -393,6 +390,10 @@ async def test_get_daily_flow_three_scenarios_in_single_lifetime(session: AsyncS
         assert body[0]["exchange"] == "KRX"
         assert body[0]["individual_net"] == -714
         assert body[0]["institutional_net"] == 693
+        # C-2γ — D-E 중복 3 필드는 응답 DTO 에서 DROP
+        assert "individual_net_purchase" not in body[0]
+        assert "institutional_net_purchase" not in body[0]
+        assert "foreign_net_purchase" not in body[0]
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] refactor(kiwoom): Phase C-2γ — Migration 008 (D-E 중복 컬럼 3개 DROP, 13→10) — 1R PASS, 816 tests / 93.11%
+
+**Phase C-2γ — D-E 중복 컬럼 정리** (운영 dry-run § 20.2 #1 결정 즉시 반영). `stock_daily_flow` 의 `individual_net_purchase` / `institutional_net_purchase` / `foreign_net_purchase` 3 컬럼을 영구 DROP — D 카테고리 (`individual_net` / `institutional_net` / `foreign_volume`) 와 100% 동일값 (1,200/1,200 row 검증). 스토리지 ~23% 절감 (운영 가동 전).
+
+### Added — Migration 008
+
+- `migrations/versions/008_drop_daily_flow_dup_columns.py` (신규):
+  - UPGRADE: `DROP COLUMN IF EXISTS` × 3
+  - DOWNGRADE: 데이터 가드 (007 동일 패턴, COUNT > 0 → RAISE EXCEPTION) + `ADD COLUMN BIGINT` × 3 (NULL 복원)
+- `tests/test_migration_008.py` (신규, +4 cases):
+  - DROP 컬럼 부재 단언 / D 카테고리 6 유지 단언 / DOWNGRADE 가드 + alembic_version 격리 검증 / 라운드트립 컬럼 카운트 + BIGINT 타입 단언
+
+### Changed — 5 코드 파일 (영속 레이어 → 응답 DTO 단일 진실 출처)
+
+- `app/adapter/out/persistence/models/stock_daily_flow.py`: `Mapped[int | None]` 3 필드 정의 제거 (10 도메인)
+- `app/adapter/out/persistence/repositories/stock_daily_flow.py`:
+  - upsert `_payload` 3 매핑 + `update_set` 3 매핑 제거 (B-γ-1 2R B-H3 패턴 유지)
+  - `created_at intentionally excluded (preserve insert timestamp)` 주석 추가 (M-4)
+- `app/adapter/out/kiwoom/_records.py`:
+  - `NormalizedDailyFlow` dataclass 3 필드 제거
+  - `DailyMarketRow.to_normalized` 3 매핑 제거 + raw 필드 (`for_netprps` 등) 유지 정책 주석
+- `app/adapter/web/routers/daily_flow.py`: `DailyFlowRowOut` 3 필드 제거 (응답 DTO breaking — 운영 미가동, downstream 0)
+
+### Changed — 4 테스트 갱신
+
+- `tests/test_migration_007.py`: BIGINT 9→6 (008 적용 후 head 검증) + DROP 3 부재 단언 추가
+- `tests/test_stock_daily_flow_repository.py`: 2 fixture 의 3 kwarg + 1 assertion 제거
+- `tests/test_daily_flow_router.py`: 1 fixture 의 3 kwarg 제거 + 응답 body 부재 단언 3 추가
+- `tests/test_kiwoom_mrkcond_client.py`: 3 assertion → `dataclasses.fields()` 부재 단언 (slots 환경 오타 방어, L-1)
+
+### Added — ADR-0001 § 21 (C-2γ 결과)
+
+- 핵심 설계 결정 (마이그레이션 방향, DOWNGRADE 가드, raw 필드 처리, dataclass 갱신, 응답 DTO breaking, upsert update_set, test_migration_007 정정)
+- 1차 리뷰 결과 (M-1 ~ M-4 + L-1 ~ L-2 모두 적용 후 PASS)
+- 결과: 812 → **816 cases / 93.11% coverage** (+4) / mypy --strict 65 files 0 errors / ruff PASS
+
+### Changed — 진척 추적 + plan doc
+
+- `src/backend_kiwoom/STATUS.md` 갱신 (CLAUDE.md 자동 갱신 규칙 첫 적용 사례) — Phase C 진척 60% → 70% / endpoint 8/25 그대로 / chunk 18 누적
+- `src/backend_kiwoom/docs/plans/endpoint-10-ka10086.md` § 12 갱신 — § 12.3 `test_migration_007` 정정 / § 12.5 H-4 정정 / § 12.6 DoD / § 12.8 운영 모니터 추가 (M-3)
+
+### 검증 결과 (Quality-First)
+
+- **0. TDD**: red 확인 후 진행 (Migration 008 부재 → DROP 컬럼 잔존 단언 실패)
+- **1. 구현**: 5 코드 파일 변경 + Migration 008 신규
+- **2a. 1차 리뷰** (sonnet): MEDIUM 4 + LOW 2 권고 → 전건 적용 → PASS
+- **2b. 적대적 리뷰**: 자동 분류 (계약 변경) 로 생략. plan § 12.5 사전 self-check H-1~H-6 6 위험 모두 코드 반영
+- **3. Verification 5관문**: 3-1 mypy / 3-2 ruff / 3-3 pytest+coverage 모두 통과. 3-4 보안 스캔 자동 생략. 3-5 런타임은 testcontainers + alembic head 통합 테스트로 대체
+- **4. E2E**: UI 변경 없음 자동 생략
+
+---
+
 ## [2026-05-09] docs(kiwoom): 운영 dry-run § ka10086 가설 B 확정 + D-E 중복 발견 + NXT mirror 검증 (ADR-0001 § 19/20)
 
 **ka10086 운영 dry-run 1회차 완료** — 1,200 row 샘플 (3 종목 × KRX/NXT × 2026-05-08) 캡처 후 5종 분석. 코드 변경 없음, 산출물은 `scripts/dry_run_ka10086_capture.py` + ADR § 19/20 기록 + `.gitignore` 의 `captures/` 추가.

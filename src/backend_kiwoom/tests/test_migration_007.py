@@ -2,15 +2,15 @@
 
 설계: endpoint-10-ka10086.md § 5.1.
 
-검증:
-- 테이블 생성 + 13 도메인 컬럼 (신용 2 + 투자자별 4 + 외인 7) + 메타 5
+검증 (conftest 가 head 까지 적용 — C-2γ Migration 008 반영 후 상태):
+- 테이블 생성 + 10 도메인 컬럼 (신용 2 + 투자자별 4 + 외인 4, 008 D-E 중복 3 DROP 후) + 메타 5
 - UNIQUE(stock_id, trading_date, exchange)
 - FK stock_id → kiwoom.stock(id) ON DELETE CASCADE
 - 인덱스 3개 (trading_date / stock_id / exchange)
 - 컬럼 타입 (BIGINT / NUMERIC(8,4) / VARCHAR(4) / CHAR(1) / TIMESTAMPTZ)
 - server_default — fetched_at/created_at/updated_at = now()
 - exchange CHECK 또는 enum 검증 (KRX/NXT)
-- downgrade 멱등성
+- downgrade 멱등성 (head → 006 → head 라운드트립)
 """
 
 from __future__ import annotations
@@ -117,7 +117,9 @@ async def test_columns_types(engine: AsyncEngine) -> None:
     assert rows["indc_mode"][0] == "character"
     assert rows["indc_mode"][1] == 1
 
-    # BIGINT 9개 (투자자별 4 + 외인 BIGINT 5 — foreign_rate / foreign_weight 는 NUMERIC)
+    # BIGINT 6개 (투자자별 4 + 외인 BIGINT 2 — foreign_rate / foreign_weight 는 NUMERIC)
+    # C-2γ Migration 008: D-E 중복 3 컬럼 (individual_net_purchase / institutional_net_purchase /
+    # foreign_net_purchase) DROP. conftest 가 head 까지 적용하므로 008 적용 후 상태 검증.
     bigint_cols = [
         "individual_net",
         "institutional_net",
@@ -125,12 +127,13 @@ async def test_columns_types(engine: AsyncEngine) -> None:
         "program_net",
         "foreign_volume",
         "foreign_holdings",
-        "foreign_net_purchase",
-        "institutional_net_purchase",
-        "individual_net_purchase",
     ]
     for col in bigint_cols:
         assert rows[col][0] == "bigint", f"{col} BIGINT 부재"
+
+    # C-2γ — DROP 대상 3 컬럼은 head 적용 후 부재해야 함
+    for dropped in ("individual_net_purchase", "institutional_net_purchase", "foreign_net_purchase"):
+        assert dropped not in rows, f"{dropped} 가 008 적용 후에도 남아 있음"
 
     # NUMERIC(8,4) 4개 (신용 2 + 외인비/외인비중 = 4)
     numeric_cols = ["credit_rate", "credit_balance_rate", "foreign_rate", "foreign_weight"]

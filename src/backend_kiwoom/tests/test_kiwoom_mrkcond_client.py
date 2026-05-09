@@ -304,10 +304,17 @@ def test_to_normalized_full_field_mapping() -> None:
     assert normalized.foreign_holdings == 1234567
     assert normalized.foreign_weight == Decimal("50.10")
 
-    # 순매수 (R15: 항상 수량)
-    assert normalized.foreign_net_purchase == -200
-    assert normalized.institutional_net_purchase == 300
-    assert normalized.individual_net_purchase == -100
+    # C-2γ — D-E 중복 3 필드 제거: foreign_net_purchase / institutional_net_purchase /
+    # individual_net_purchase 는 NormalizedDailyFlow 에서 더 이상 존재하지 않음.
+    # (운영 dry-run § 20.2 #1 — D 카테고리 (foreign_volume / institutional_net /
+    # individual_net) 와 100% 동일값으로 확인)
+    # dataclasses.fields() 사용 — 클래스 정의 수준에서 필드 부재를 단언 (오타 방어).
+    from dataclasses import fields
+
+    field_names = {f.name for f in fields(NormalizedDailyFlow)}
+    assert "foreign_net_purchase" not in field_names
+    assert "institutional_net_purchase" not in field_names
+    assert "individual_net_purchase" not in field_names
 
 
 def test_to_normalized_empty_date_yields_date_min() -> None:

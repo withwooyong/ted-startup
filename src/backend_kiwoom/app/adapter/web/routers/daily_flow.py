@@ -105,7 +105,7 @@ class DailyFlowSyncRequestIn(BaseModel):
 
 
 class DailyFlowRowOut(BaseModel):
-    """stock_daily_flow row 응답 — 시계열 GET 결과 (13 영속 필드)."""
+    """stock_daily_flow row 응답 — 시계열 GET 결과 (10 영속 필드, C-2γ 후)."""
 
     model_config = ConfigDict(frozen=True, from_attributes=True)
 
@@ -120,14 +120,11 @@ class DailyFlowRowOut(BaseModel):
     institutional_net: int | None = None
     foreign_brokerage_net: int | None = None
     program_net: int | None = None
-    # E. 외인 + 순매수
+    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP, D 카테고리와 중복)
     foreign_volume: int | None = None
     foreign_rate: Decimal | None = None
     foreign_holdings: int | None = None
     foreign_weight: Decimal | None = None
-    foreign_net_purchase: int | None = None
-    institutional_net_purchase: int | None = None
-    individual_net_purchase: int | None = None
     fetched_at: datetime | None = None
 
 

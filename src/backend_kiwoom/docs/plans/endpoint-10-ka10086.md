@@ -909,7 +909,7 @@ ka10086 응답에서 **D 카테고리 ↔ E 카테고리 컬럼 3쌍이 100% 동
 | # | 파일 | 변경 |
 |---|------|------|
 | 1 | `tests/test_migration_008.py` (신규) | (a) 007 적용 후 13 컬럼 확인 (b) 008 적용 후 10 컬럼 + 3 컬럼 부재 확인 (c) downgrade 가드 — 데이터 있을 시 RAISE (d) downgrade — 데이터 0건 시 컬럼 복원 |
-| 2 | `tests/test_migration_007.py` | **유지** — 007 history 불변 보장. 13 컬럼 셋 그대로 |
+| 2 | `tests/test_migration_007.py` | **컬럼 검증 부분 정정** — `conftest.py` 가 `upgrade head` 까지 적용하므로 008 적용 후 상태에서 검증함. `test_columns_types` 의 BIGINT 9개 → 6개 (3 DROP). 다른 검증 (테이블/UNIQUE/FK/인덱스/server_default/cascade/멱등) 은 그대로 |
 | 3 | `tests/test_stock_daily_flow_repository.py` | `foreign_net_purchase`/`institutional_net_purchase`/`individual_net_purchase` kwarg + assertion 제거 (2 곳) |
 | 4 | `tests/test_daily_flow_router.py` | 응답 fixture 의 3 필드 제거 (1 곳) + JSON snapshot assertion 갱신 |
 | 5 | `tests/test_kiwoom_mrkcond_client.py` | `NormalizedDailyFlow` assertion 의 3 필드 제거 (1 곳). `_strip_double_sign_int` 23 cases 유지 (가설 B 회귀) |
@@ -953,7 +953,7 @@ ALTER TABLE kiwoom.stock_daily_flow
 | H-1 | C-2β 응답 DTO 가 외부 downstream 에 노출됐다면 breaking | 운영 미가동 — `master` 외 deploy 0. HANDOFF 확인 |
 | H-2 | downgrade 시 NULL 컬럼 복원 → 과거 백업 restore 불일치 | 데이터 가드로 빈 테이블만 허용. 운영 데이터 있을 시 RAISE |
 | H-3 | normalize 함수에서 `_strip_double_sign_int` 호출이 더 이상 필요한가 | `_strip_double_sign_int` 자체는 `ind`/`orgn`/`for_qty` (D 카테고리, raw `--714` 형태) 정규화에 여전히 필요. 단 `for_netprps`/`orgn_netprps`/`ind_netprps` 호출 라인은 제거 (D 와 동일값이라 D 만 처리하면 됨) |
-| H-4 | Migration 007 test 가 13 컬럼 hard-coded | 007 test 는 그대로 유지. 008 test 가 10 컬럼 검증. 두 test 가 마이그레이션 history 의 각 단계를 독립 검증 |
+| H-4 | Migration 007 test 가 13 컬럼 hard-coded | conftest 가 `upgrade head` 까지 적용 → 007 test 의 `test_columns_types` 는 008 적용 후 상태 검증으로 갱신 (BIGINT 9→6). 008 test 가 별도로 컬럼 DROP/DOWNGRADE 시나리오 검증. 마이그레이션 history 자체의 step-by-step 검증은 `test_migration_007_downgrade_then_upgrade_idempotent` (head → 006 downgrade → head upgrade) 가 담당 |
 | H-5 | upsert payload 가 3 필드 제거 후 idempotent 인가 | UNIQUE (stock_id, trading_date, exchange) 그대로. payload 필드 줄어들면 ON CONFLICT 에서 더 적은 컬럼 갱신 — 의미 동일 |
 | H-6 | NXT row mirror 정책 (§ 20.2 #2) 영향 | 코드 변경 없음. NXT 는 외인 컬럼 KRX 중복 그대로 — 정책 결정대로 유지 |
 
@@ -968,7 +968,7 @@ ALTER TABLE kiwoom.stock_daily_flow
 
 **테스트** (목표: 812 → ~810 cases / coverage 유지 ≥ 93%):
 - [ ] `tests/test_migration_008.py` 신규 — 4 cases (UPGRADE 컬럼 셋 / DOWNGRADE 가드 / DOWNGRADE 컬럼 복원 / 멱등)
-- [ ] `tests/test_migration_007.py` 그대로 유지 — 13 컬럼
+- [ ] `tests/test_migration_007.py` `test_columns_types` 정정 — BIGINT 9→6 (008 적용 후 head 검증)
 - [ ] `tests/test_stock_daily_flow_repository.py` 갱신 (2 fixture)
 - [ ] `tests/test_daily_flow_router.py` 갱신 (1 fixture + assertion)
 - [ ] `tests/test_kiwoom_mrkcond_client.py` 갱신 (1 assertion 블록)
@@ -988,6 +988,10 @@ ALTER TABLE kiwoom.stock_daily_flow
 2. **scripts/backfill_daily_flow.py CLI** + 3년 백필 시간 실측 — Phase C-2 마무리
 3. **C-3 (ka10082/83 주봉/월봉)** — chart endpoint 재사용
 4. **KOSCOM cross-check 수동** — 가설 B 최종 확정 (스크립트 외)
+
+### 12.8 운영 모니터 (코드 외)
+
+- **`for_netprps` ↔ `individual_net` 동일값 주기적 확인** — vendor 가 E 카테고리 raw 필드의 의미를 변경할 경우 (예: 단위 전환) silent 반영을 막기 위해 분기/반기 1회 dry-run 재실행 권고. `to_normalized` 가 D 카테고리만 영속화하므로 raw 필드 변경은 영속 데이터에 영향 없으나, 향후 같은 도메인 chunk (C-3 / Phase G 투자자별) 진입 전 검증 권고.
 
 ---
 

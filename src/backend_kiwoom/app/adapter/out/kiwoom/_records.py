@@ -114,6 +114,10 @@ class DailyMarketRow(BaseModel):
 
         OHLCV 8 무시 (ka10081 정답). 빈 date → date.min (Repository skip 안전망).
         이중 부호 응답은 `_strip_double_sign_int` 가 가설 B 적용 (`--714` → -714).
+
+        C-2γ — `for_netprps` / `orgn_netprps` / `ind_netprps` raw 필드는 D 카테고리
+        (`for_qty` / `orgn` / `ind`) 와 100% 동일값 (dry-run § 20.2 #1) 이라 영속화
+        하지 않음. raw 필드 자체는 vendor 응답에 존재하므로 DailyMarketRow 에는 유지.
         """
         return NormalizedDailyFlow(
             stock_id=stock_id,
@@ -130,10 +134,6 @@ class DailyMarketRow(BaseModel):
             foreign_rate=_to_decimal(self.for_rt),
             foreign_holdings=_to_int(self.for_poss),
             foreign_weight=_to_decimal(self.for_wght),
-            # Excel R15 — 외인/기관/개인 순매수는 indc_mode 무시 항상 수량
-            foreign_net_purchase=_strip_double_sign_int(self.for_netprps),
-            institutional_net_purchase=_strip_double_sign_int(self.orgn_netprps),
-            individual_net_purchase=_strip_double_sign_int(self.ind_netprps),
         )
 
 
@@ -168,14 +168,11 @@ class NormalizedDailyFlow:
     institutional_net: int | None
     foreign_brokerage_net: int | None
     program_net: int | None
-    # E. 외인 + 순매수
+    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP, D 카테고리와 중복)
     foreign_volume: int | None
     foreign_rate: Decimal | None
     foreign_holdings: int | None
     foreign_weight: Decimal | None
-    foreign_net_purchase: int | None
-    institutional_net_purchase: int | None
-    individual_net_purchase: int | None
 
 
 __all__ = [

@@ -1324,3 +1324,64 @@ C-1β 패턴 mechanical 차용. C-2α (인프라) 위에 자동화 레이어만 
 3. **scripts/backfill_daily_flow.py CLI** — 3년 백필 + 시간 실측
 4. **KOSCOM cross-check 수동** — 가설 B 최종 확정 (스크립트 외 검증)
 5. **C-3 (ka10082/83 주봉/월봉, P1)** — KiwoomChartClient 메서드 추가
+
+---
+
+## 21. ka10086 D-E 중복 컬럼 DROP (Phase C-2γ, 2026-05-09)
+
+### 21.1 결정
+
+`stock_daily_flow` 테이블의 D-E 중복 컬럼 3개를 **Migration 008** 로 영구 DROP:
+- `individual_net_purchase` (≡ `individual_net`)
+- `institutional_net_purchase` (≡ `institutional_net`)
+- `foreign_net_purchase` (≡ `foreign_volume`)
+
+**13 → 10 도메인 컬럼**. 근거: § 20.2 #1 운영 dry-run 1,200/1,200 row 100% 동일값 확인.
+
+### 21.2 핵심 설계 결정
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | 마이그레이션 방향 | **DROP COLUMN IF EXISTS × 3** (UPGRADE), 가드 + ADD COLUMN BIGINT × 3 (DOWNGRADE) |
+| 2 | DOWNGRADE 가드 | 007 동일 패턴 — 데이터 1건이라도 있으면 RAISE EXCEPTION. NULL 복원이라 운영 의미 보존 불가 → 빈 테이블에서만 허용 |
+| 3 | `DailyMarketRow` raw 필드 처리 | vendor 응답 schema 그대로 유지 (`for_netprps` / `orgn_netprps` / `ind_netprps`) — Pydantic `extra="ignore"` + 기본값. `to_normalized` 단계에서만 무시 |
+| 4 | `NormalizedDailyFlow` | dataclass(frozen=True, slots=True) 의 3 필드 영구 제거. ORM/Repository/Router DTO 일괄 갱신 (단일 진실 출처) |
+| 5 | 응답 DTO breaking | **수용** — `DailyFlowRowOut` 에서 3 필드 제거. 운영 미가동 (downstream 0 — 본 chunk 직전까지 master push 만, deploy 0) |
+| 6 | upsert `update_set` 갱신 | B-γ-1 2R B-H3 패턴 유지 — 명시 update_set 6줄 제거. `created_at` 의도적 제외 주석 추가 (M-4 1차 리뷰 반영) |
+| 7 | test_migration_007 의 13 컬럼 hard-coded | conftest 가 head 까지 적용 → 008 적용 후 상태 검증. BIGINT 9→6 + DROP 3 부재 단언 추가. history 멱등성은 `test_migration_007_downgrade_then_upgrade_idempotent` 가 보장 |
+
+### 21.3 적대적 이중 리뷰 결과
+
+**자동 분류**: 계약 변경 (contract) — 2b 적대적 리뷰 자동 생략. 1차 리뷰 (sonnet, python-reviewer) 만 실행.
+
+| # | 등급 | 이슈 | Fix |
+|---|------|------|-----|
+| M-1 | MEDIUM | downgrade 가드 테스트 `finally` 정리 불완전 (RAISE 후 alembic_version 검증 부재) | `version_num == "008_..."` 명시 단언 추가 |
+| M-2 | MEDIUM | 라운드트립 테스트가 컬럼 카운트/타입 미검증 | `len(cols) == 21/18` + `BIGINT` 타입 단언 추가 |
+| M-3 | MEDIUM | vendor 응답 schema 변경 silent 처리 위험 | plan § 12.8 운영 모니터 한 줄 추가 (분기/반기 dry-run 재실행 권고) |
+| M-4 | MEDIUM | `update_set` 의 `created_at` 제외 의도 미명시 | "최초 insert 시각 보존" 한 줄 주석 추가 |
+| L-1 | LOW | `hasattr` 단언이 `slots=True` 에서 오타 방어 약함 | `dataclasses.fields()` 사용으로 강화 |
+| L-2 | LOW | `test_migration_007.py` docstring 의 "13 도메인" 잔존 | "10 도메인 (008 DROP 후)" 정정 |
+
+→ 모두 수정 후 재테스트 PASS. CRITICAL/HIGH 0건.
+
+### 21.4 결과
+
+- **테스트**: 812 → **816 cases** (+4 신규 Migration 008) / coverage **93.11%**
+- **mypy --strict**: 65 source files / 0 errors
+- **ruff check**: All passed
+- **스토리지 절감**: 운영 가동 후 ~23% (3 BIGINT 컬럼 / 13 도메인) — 백필 전 정리로 미래 비용 0
+- **응답 DTO**: `DailyFlowRowOut` 13 필드 → 10 필드 (breaking, 운영 영향 0)
+
+### 21.5 Defer (다음 chunk)
+
+- 가설 B KOSCOM cross-check 수동 1~2건
+- C-1β/C-2β MEDIUM 일관 개선 (`errors → tuple` / `StockMasterNotFoundError` 전용 예외)
+- scripts/backfill_daily_flow.py CLI + 3년 백필 시간 실측
+
+### 21.6 다음 chunk 후보
+
+1. **C-1β/C-2β MEDIUM 일관 개선** (refactor, scope 명확)
+2. **scripts/backfill_*.py CLI + 3년 백필 실측** (Phase C-2 마무리)
+3. **C-3 (ka10082/83 주봉/월봉, P1)** (chart endpoint 재사용)
+4. **KOSCOM cross-check 수동** (가설 B 최종 확정)

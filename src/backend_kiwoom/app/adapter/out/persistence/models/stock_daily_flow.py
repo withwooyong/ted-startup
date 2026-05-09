@@ -1,12 +1,16 @@
-"""StockDailyFlow ORM — ka10086 일별 수급 (C-2α).
+"""StockDailyFlow ORM — ka10086 일별 수급 (C-2α + C-2γ).
 
-설계: endpoint-10-ka10086.md § 5.2.
+설계: endpoint-10-ka10086.md § 5.2 + § 12 (C-2γ Migration 008).
 
 UNIQUE: (stock_id, trading_date, exchange) — 같은 종목/일자/거래소 1행 (KRX/NXT 분리).
 FK: stock_id → kiwoom.stock(id) ON DELETE CASCADE.
 
-13 도메인 컬럼 (신용 2 + 투자자별 4 + 외인 7) + 메타 (exchange / indc_mode + 5 타임스탬프).
+10 도메인 컬럼 (신용 2 + 투자자별 4 + 외인 4) + 메타 (exchange / indc_mode + 3 타임스탬프).
 OHLCV 8 필드는 ka10081 stock_price_krx/nxt 가 정답 — 본 ORM 에 미적재.
+
+C-2γ (Migration 008): D-E 중복 3 컬럼 (individual_net_purchase / institutional_net_purchase /
+foreign_net_purchase) DROP. dry-run § 20.2 #1 — D 카테고리 (individual_net / institutional_net /
+foreign_volume) 와 100% 동일값 확인.
 """
 
 from __future__ import annotations
@@ -68,14 +72,11 @@ class StockDailyFlow(Base):
     foreign_brokerage_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     program_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
-    # E. 외인 + 순매수
+    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP, D 카테고리와 중복이라 의미 없음)
     foreign_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     foreign_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     foreign_holdings: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     foreign_weight: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
-    foreign_net_purchase: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    institutional_net_purchase: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    individual_net_purchase: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

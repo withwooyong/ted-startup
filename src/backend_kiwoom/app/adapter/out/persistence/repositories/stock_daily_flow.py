@@ -74,9 +74,6 @@ class StockDailyFlowRepository:
                 "foreign_rate": r.foreign_rate,
                 "foreign_holdings": r.foreign_holdings,
                 "foreign_weight": r.foreign_weight,
-                "foreign_net_purchase": r.foreign_net_purchase,
-                "institutional_net_purchase": r.institutional_net_purchase,
-                "individual_net_purchase": r.individual_net_purchase,
             }
             for r in valid_rows
         ]
@@ -85,6 +82,7 @@ class StockDailyFlowRepository:
 
         # B-γ-1 2R B-H3 — 명시 update_set. ON CONFLICT 키 (stock_id, trading_date, exchange) 제외.
         # 미래 NormalizedDailyFlow 필드 추가 시 본 list 도 수동 갱신 강제 (schema-drift 차단).
+        # `created_at` 의도적 제외 — 최초 insert 시각 보존 (UPSERT 시에도 갱신하지 않음).
         update_set: dict[str, Any] = {
             "indc_mode": insert_stmt.excluded.indc_mode,
             "credit_rate": insert_stmt.excluded.credit_rate,
@@ -97,9 +95,6 @@ class StockDailyFlowRepository:
             "foreign_rate": insert_stmt.excluded.foreign_rate,
             "foreign_holdings": insert_stmt.excluded.foreign_holdings,
             "foreign_weight": insert_stmt.excluded.foreign_weight,
-            "foreign_net_purchase": insert_stmt.excluded.foreign_net_purchase,
-            "institutional_net_purchase": insert_stmt.excluded.institutional_net_purchase,
-            "individual_net_purchase": insert_stmt.excluded.individual_net_purchase,
             "fetched_at": func.now(),
             "updated_at": func.now(),
         }

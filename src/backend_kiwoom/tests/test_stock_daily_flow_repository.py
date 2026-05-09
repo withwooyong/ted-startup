@@ -84,9 +84,6 @@ def _flow(
         foreign_rate=Decimal("12.34"),
         foreign_holdings=1234567,
         foreign_weight=Decimal("50.10"),
-        foreign_net_purchase=-200,
-        institutional_net_purchase=300,
-        individual_net_purchase=-100,
     )
 
 
@@ -305,9 +302,6 @@ async def test_upsert_many_explicit_update_set_drift_guard(session: AsyncSession
         foreign_rate=Decimal("3.33"),
         foreign_holdings=999,
         foreign_weight=Decimal("4.44"),
-        foreign_net_purchase=999,
-        institutional_net_purchase=999,
-        individual_net_purchase=999,
     )
     await repo.upsert_many([new_row])
     await session.commit()
@@ -321,4 +315,3 @@ async def test_upsert_many_explicit_update_set_drift_guard(session: AsyncSession
     assert r.credit_rate == Decimal("1.1100")
     assert r.foreign_holdings == 999
     assert r.foreign_weight == Decimal("4.4400")
-    assert r.individual_net_purchase == 999
