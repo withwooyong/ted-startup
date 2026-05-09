@@ -108,6 +108,8 @@ class IngestPeriodicOhlcvUseCase:
         period: Period,
         base_date: date | None = None,
         only_market_codes: Sequence[str] | None = None,
+        only_stock_codes: Sequence[str] | None = None,
+        _skip_base_date_validation: bool = False,
     ) -> OhlcvSyncResult:
         """active stock 순회 → ka10082/83 호출 → KRX (+ 옵션 NXT) 적재.
 
@@ -115,15 +117,18 @@ class IngestPeriodicOhlcvUseCase:
             period: WEEKLY 또는 MONTHLY. YEARLY → NotImplementedError. DAILY → ValueError.
             base_date: 기준일자. None 이면 KST today.
             only_market_codes: 특정 시장만 sync. None 이면 전체.
+            _skip_base_date_validation: True 면 base_date 의 1년 cap 우회 (CLI backfill 전용).
+                미래 가드는 유지. 운영 라우터는 디폴트 False (C-backfill H-1).
 
         Raises:
-            ValueError: base_date 가 미래 또는 today - 365일 초과 과거 / unknown market_code /
-                period=DAILY (별도 UseCase 사용)
-            NotImplementedError: period=YEARLY (P2 chunk 미구현)
+            ValueError: base_date 가 미래 또는 (skip=False 시) today - 365일 초과 과거 /
+                unknown market_code
+            NotImplementedError: period=YEARLY (P2 chunk 미구현) — `_skip_base_date_validation`
+                와 무관 (period 검증은 항상 수행)
         """
         self._validate_period(period)
         asof = base_date or date.today()
-        self._validate_base_date(asof)
+        self._validate_base_date(asof, skip_past_cap=_skip_base_date_validation)
         if only_market_codes is not None:
             self._validate_market_codes(only_market_codes)
 
@@ -132,6 +137,8 @@ class IngestPeriodicOhlcvUseCase:
             stmt = select(Stock).where(Stock.is_active.is_(True))
             if only_market_codes:
                 stmt = stmt.where(Stock.market_code.in_(only_market_codes))
+            if only_stock_codes:
+                stmt = stmt.where(Stock.stock_code.in_(only_stock_codes))
             stmt = stmt.order_by(Stock.market_code, Stock.stock_code)
             active_stocks = list((await session.execute(stmt)).scalars())
 
@@ -222,7 +229,14 @@ class IngestPeriodicOhlcvUseCase:
             errors=tuple(errors),
         )
 
-    async def refresh_one(self, stock_code: str, *, period: Period, base_date: date) -> OhlcvSyncResult:
+    async def refresh_one(
+        self,
+        stock_code: str,
+        *,
+        period: Period,
+        base_date: date,
+        _skip_base_date_validation: bool = False,
+    ) -> OhlcvSyncResult:
         """단건 새로고침 — admin POST /stocks/{code}/ohlcv/{period}/refresh.
 
         Raises:
@@ -232,9 +246,10 @@ class IngestPeriodicOhlcvUseCase:
             KiwoomError: KRX 호출 실패 (라우터 매핑)
 
         NXT 실패는 격리 (R1 L-5 — execute() 와 일관 partial-failure 모델).
+        `_skip_base_date_validation`: CLI backfill 전용 (C-backfill H-1).
         """
         self._validate_period(period)
-        self._validate_base_date(base_date)
+        self._validate_base_date(base_date, skip_past_cap=_skip_base_date_validation)
 
         async with self._session_provider() as session:
             stmt = select(Stock).where(Stock.stock_code == stock_code, Stock.is_active.is_(True))
@@ -345,11 +360,17 @@ class IngestPeriodicOhlcvUseCase:
         if period is Period.YEARLY:
             raise NotImplementedError("period=YEARLY (ka10094) 는 P2 chunk — Migration 미작성")
 
-    def _validate_base_date(self, base_date: date) -> None:
-        """today - 365일 ~ today 외 → ValueError (C-1β 와 동일 정책)."""
+    def _validate_base_date(self, base_date: date, *, skip_past_cap: bool = False) -> None:
+        """today - 365일 ~ today 외 → ValueError (C-1β 와 동일 정책).
+
+        `skip_past_cap=True` 면 1년 cap 만 우회 (CLI backfill 전용 — C-backfill H-1).
+        미래 가드는 항상 유지.
+        """
         today = date.today()
         if base_date > today:
             raise ValueError(f"base_date 가 미래: {base_date} > {today}")
+        if skip_past_cap:
+            return
         oldest_allowed = today - timedelta(days=BASE_DATE_MAX_PAST_DAYS)
         if base_date < oldest_allowed:
             raise ValueError(f"base_date 가 today - {BASE_DATE_MAX_PAST_DAYS}일 ~ today 범위 외: {base_date}")

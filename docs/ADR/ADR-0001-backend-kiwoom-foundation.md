@@ -1567,3 +1567,72 @@ ka10082 (주봉) + ka10083 (월봉) 의 **자동화 레이어** — UseCase + Ro
 3. **ka10094 (년봉, P2)** — Migration 1 + UseCase YEARLY 분기 활성화 (NotImplementedError → 정상 분기)
 4. **L-2 + E-1 refactor chunk** — `_do_sync` 류 핸들러 일괄 정리
 5. **Phase D 진입** — ka10080 분봉 (대용량 파티션 결정 선행)
+
+
+## 25. Phase C-backfill — OHLCV 통합 백필 CLI (2026-05-09)
+
+### 25.1 결정
+
+`scripts/backfill_ohlcv.py` 신규 CLI — Phase C 의 daily/weekly/monthly OHLCV 모두 통합 처리.
+운영 라우터의 `_validate_base_date` 1년 cap 우회를 위해 UseCase 시그니쳐에 `_skip_base_date_validation`
+키워드 옵션 추가 (디폴트 False, CLI 만 True — R1 invariant 유지). 운영 미해결 4건 (페이지네이션
+빈도 / 3년 시간 / NUMERIC magnitude / sync 실측) 정량화 측정 도구.
+
+### 25.2 핵심 설계 결정
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | UseCase 통합 vs 별도 BackfillUseCase | **기존 UseCase 재사용** — `IngestDailyOhlcvUseCase` / `IngestPeriodicOhlcvUseCase` 그대로 호출. period dispatch 는 CLI 레이어에서 (`use_case_class_for_period`). 별도 BackfillUseCase 신설 시 80% 중복 코드 (사용자 결정 옵션 A) |
+| 2 | base_date 1년 cap 우회 (H-1) | **`_skip_base_date_validation` 키워드 옵션** (`execute` + `refresh_one` 둘 다). 디폴트 False — 운영 라우터 영향 0. CLI 만 True. 미래 가드는 `skip_past_cap=True` 일 때도 유지 (오타 방어). R1 invariant 일관 |
+| 3 | only_stock_codes UseCase 인자 추가 | **추가** (디폴트 None) — `only_market_codes` 와 같은 패턴. CLI 의 `--only-stock-codes` + `--resume` 모두 같은 인자로 위임. 운영 라우터는 디폴트 None — 영향 0 |
+| 4 | resume 알고리즘 (H-2) | **stock-level skip** — `compute_resume_remaining_codes` 가 KRX 영속화 테이블의 max(trading_date) 종목별 조회 → max < end_date 인 종목만 진행. 부분 적재 (일부 일자) 종목은 skip 처리 (gap detection 은 별도 chunk) |
+| 5 | dry-run 시간 추정 (H-3) | **lower-bound** = `rate_limit × 호출 수`. ±50% margin 명시. 네트워크 RTT / DB upsert / 5xx 재시도 무시 |
+| 6 | exit code 4 분기 (H-5) | 0 = success / 1 = partial (failed > 0) / 2 = args (argparse SystemExit + ValueError) / 3 = system (DB 연결 / lifespan 예외) |
+| 7 | 라이프사이클 (H-6) | `_build_use_case` async context manager — try/finally 로 `KiwoomClient.close + engine.dispose` 보장. lifespan 우회 (CLI 단일 alias) |
+
+### 25.3 1차 리뷰 결과 (sonnet, HIGH 1 + MEDIUM 1 적용 → CONDITIONAL → PASS)
+
+| # | 등급 | 이슈 | Fix |
+|---|------|------|-----|
+| H-1 | HIGH | `--resume` flag 가 dead — `should_skip_resume` 함수 구현됐으나 `async_main` 에서 호출 안 함. 사용자 기대와 동작 불일치 | `compute_resume_remaining_codes` 헬퍼 추가 — KRX 테이블의 max(trading_date) per stock 조회 → 미적재 종목만 `only_stock_codes` 로 UseCase 에 전달 |
+| M-1 | MEDIUM | `--only-stock-codes` 가 `_count_active_stocks` 에는 사용되나 UseCase.execute 미전달 | UseCase 2개에 `only_stock_codes` 인자 추가 + CLI 의 `effective_stock_codes` 로 resume + only-stock-codes 통합 처리 |
+| L-1 | LOW | `resolve_date_range ValueError → return 2` 경로 단위 테스트 부재 | argparse SystemExit 이 동일 경로 — 단위 검증 (test_main_returns_2_when_invalid_args) |
+| L-2 | LOW | `format_duration(0)` 경계값 | 운영 경로 미접근 — 기록만 |
+| L-3 | LOW | `only_market_codes or None` 패턴 — 빈 list 도 None 취급 | 주석 추가 — UseCase 의 `if only_*_codes:` 분기와 일관 |
+
+→ HIGH H-1 + MEDIUM M-1 즉시 적용. CRITICAL 0건. 자동 분류 = 일반 기능 → 2b 적대적 / 3-4 보안 / 3-5 런타임 / 4 E2E 자동 생략.
+
+### 25.4 결과
+
+- **테스트**: 939 → **972 cases** (+33: skip_base_date_validation 8 / backfill_ohlcv_cli 25)
+- **mypy --strict**: 74 source files / 0 errors
+- **ruff check + format**: All passed
+- **coverage**: 96% (97% → 96% — CLI 신규 ~430줄로 분모 증가, 신규 코드 80%+ 커버)
+- **신규 파일 (3)**: scripts/backfill_ohlcv.py / tests 2 + plan doc 신규
+- **수정 파일 (3)**: ohlcv_daily_service / ohlcv_periodic_service (시그니쳐 확장) / dry_run_ka10086_capture (E-3 기존 코드 fix — Migration 008 DROP 컬럼 출력 제거)
+- **외부 API contract**: 무변 (UseCase 키워드 옵션 추가만, 디폴트 동일 동작)
+
+### 25.5 운영 실측 (본 chunk 범위 외)
+
+본 chunk 는 CLI 그 자체 + 단위 테스트. 실제 운영 실측은 사용자 환경 (실제 키움 자격증명 + 운영 DB)
+에서 추후 수동 실행. 실측 가이드는 plan doc § 8 + CLI docstring (사용 예).
+
+실측 후 정리 위치:
+- `docs/operations/backfill-실측-{YYYY-MM-DD}.md` 신규 (운영 검증 자료)
+- ADR § 26 (또는 후속) — 페이지네이션/시간/NUMERIC 통계 정리
+- STATUS § 4 알려진 이슈 4건 → 해소 표기
+
+### 25.6 Defer (다음 chunk)
+
+- **gap detection (resume 정확도 향상)** — 일자별 missing detection. 현재는 max(trading_date) >= end_date 만 skip
+- **daily_flow (ka10086) 백필** — 별도 후속 chunk (구조 다름)
+- **NUMERIC magnitude 컬럼 확장** — 실측 후 한도 초과 시 별도 Migration chunk
+- **L-2 / E-1 / E-2 + M-3** — 기존 refactor R2 chunk
+
+### 25.7 다음 chunk 후보
+
+1. **운영 실측** (사용자 수동) — 100 종목 → 전체 active 3000 → 결과 정리
+2. **daily_flow 백필** — `scripts/backfill_daily_flow.py`
+3. **gap detection 정확도 향상** — 일자별 missing detection
+4. **refactor R2** — 1R Defer 4건 (L-2 + E-1 + E-2 + M-3)
+5. **ka10094 (년봉, P2)** / Phase D 진입

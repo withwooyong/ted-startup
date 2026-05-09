@@ -108,21 +108,28 @@ class IngestDailyOhlcvUseCase:
         *,
         base_date: date | None = None,
         only_market_codes: Sequence[str] | None = None,
+        only_stock_codes: Sequence[str] | None = None,
+        _skip_base_date_validation: bool = False,
     ) -> OhlcvSyncResult:
         """active stock 순회 → ka10081 호출 → KRX (+ 옵션 NXT) 적재.
 
         Parameters:
             base_date: 기준일자. None 이면 KST today.
             only_market_codes: 특정 시장만 sync. None 이면 전체.
+            only_stock_codes: 특정 종목만 sync (CLI 디버그 / resume). None 이면 전체.
+                둘 다 지정 시 AND 조건.
+            _skip_base_date_validation: True 면 base_date 의 1년 cap 우회 (CLI backfill 전용).
+                미래 가드는 유지 (오타 방어). 운영 라우터는 디폴트 False — R1 invariant 유지
+                (C-backfill H-1).
 
         Raises:
-            ValueError: base_date 가 미래 또는 today - 365일 초과 과거.
+            ValueError: base_date 가 미래 또는 (skip=False 시) today - 365일 초과 과거.
 
         Returns:
             OhlcvSyncResult — total / success_krx / success_nxt / failed + errors.
         """
         asof = base_date or date.today()
-        self._validate_base_date(asof)
+        self._validate_base_date(asof, skip_past_cap=_skip_base_date_validation)
         if only_market_codes is not None:
             self._validate_market_codes(only_market_codes)
 
@@ -131,6 +138,8 @@ class IngestDailyOhlcvUseCase:
             stmt = select(Stock).where(Stock.is_active.is_(True))
             if only_market_codes:
                 stmt = stmt.where(Stock.market_code.in_(only_market_codes))
+            if only_stock_codes:
+                stmt = stmt.where(Stock.stock_code.in_(only_stock_codes))
             stmt = stmt.order_by(Stock.market_code, Stock.stock_code)
             active_stocks = list((await session.execute(stmt)).scalars())
 
@@ -213,7 +222,13 @@ class IngestDailyOhlcvUseCase:
             errors=tuple(errors),
         )
 
-    async def refresh_one(self, stock_code: str, *, base_date: date) -> OhlcvSyncResult:
+    async def refresh_one(
+        self,
+        stock_code: str,
+        *,
+        base_date: date,
+        _skip_base_date_validation: bool = False,
+    ) -> OhlcvSyncResult:
         """단건 새로고침 — admin POST /stocks/{code}/ohlcv/daily/refresh.
 
         Stock 마스터에 active 로 등록돼 있어야 함 (ensure_exists 미사용).
@@ -226,8 +241,10 @@ class IngestDailyOhlcvUseCase:
             의 NXT 경로와 일관 (partial-failure 모델). KRX 가 이미 성공했으므로 NXT 의
             unexpected exception 으로 전체 500 반환 시 admin 의 "KRX 적재 사실" 가시성
             손실. 격리하여 응답 200 + failed=1 + errors[NXT] 로 명시.
+
+            `_skip_base_date_validation`: CLI backfill 전용 (C-backfill H-1).
         """
-        self._validate_base_date(base_date)
+        self._validate_base_date(base_date, skip_past_cap=_skip_base_date_validation)
 
         async with self._session_provider() as session:
             stmt = select(Stock).where(
@@ -307,11 +324,17 @@ class IngestDailyOhlcvUseCase:
             repo = StockPriceRepository(session)
             return await repo.upsert_many(normalized, exchange=exchange)
 
-    def _validate_base_date(self, base_date: date) -> None:
-        """today - 365일 ~ today 외 → ValueError (사용자 승인)."""
+    def _validate_base_date(self, base_date: date, *, skip_past_cap: bool = False) -> None:
+        """today - 365일 ~ today 외 → ValueError (사용자 승인).
+
+        `skip_past_cap=True` 면 1년 cap 만 우회 (CLI backfill 전용 — C-backfill H-1). 미래
+        가드는 항상 유지 (오타 방어).
+        """
         today = date.today()
         if base_date > today:
             raise ValueError(f"base_date 가 미래: {base_date} > {today}")
+        if skip_past_cap:
+            return
         oldest_allowed = today - timedelta(days=BASE_DATE_MAX_PAST_DAYS)
         if base_date < oldest_allowed:
             raise ValueError(

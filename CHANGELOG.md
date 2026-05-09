@@ -7,6 +7,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] feat(kiwoom): Phase C-backfill — OHLCV 통합 백필 CLI (daily/weekly/monthly period dispatch + dry-run + resume) — 1R CONDITIONAL → PASS, 972 tests / 96% coverage
+
+**Phase C-backfill** — `scripts/backfill_ohlcv.py` 신규 CLI. Phase C 의 daily/weekly/monthly OHLCV 통합 처리. 운영 라우터의 1년 cap 우회를 위해 UseCase 시그니쳐에 `_skip_base_date_validation` 키워드 옵션 추가 (디폴트 False — R1 invariant 유지). 운영 미해결 4건 (페이지네이션/3년 시간/NUMERIC magnitude/sync 시간) 정량화 측정 도구. **Phase C 90% → 95%**.
+
+### Added
+
+- **`scripts/backfill_ohlcv.py`** (신규, ~480줄) — OHLCV 통합 백필 CLI:
+  - argparse — `--period {daily|weekly|monthly}` (필수) + `--alias` (필수) + `--years N` (기본 3) + `--start-date` / `--end-date` / `--only-market-codes` / `--only-stock-codes` / `--dry-run` / `--resume` / `--max-stocks` / `--log-level`
+  - period dispatch — daily → IngestDailyOhlcvUseCase / weekly,monthly → IngestPeriodicOhlcvUseCase
+  - dry-run mode — 종목 수 + 추정 페이지 + 추정 시간 (lower-bound, ±50% margin) 출력. DB 미적재
+  - resume mode — `compute_resume_remaining_codes` 가 KRX 테이블의 max(trading_date) per stock 조회 → 미적재 종목만 진행 (gap detection 별도 chunk)
+  - exit code 4 분기 — 0 success / 1 partial (failed > 0) / 2 args / 3 system
+  - `_build_use_case` async context manager — try/finally 로 KiwoomClient.close + engine.dispose 보장
+- **`tests/test_backfill_ohlcv_cli.py`** (신규, 25 cases) — argparse / period dispatch / dry-run / resume / exit code / DB 통합
+- **`tests/test_skip_base_date_validation.py`** (신규, 8 cases) — UseCase 시그니쳐 확장 — default behavior + skip behavior 양쪽 검증
+- `docs/plans/phase-c-backfill-ohlcv.md` (신규) — chunk plan doc
+
+### Changed
+
+- **`app/application/service/ohlcv_daily_service.py`** — `execute` / `refresh_one` 에 `_skip_base_date_validation` 키워드 옵션 추가 (디폴트 False) + `only_stock_codes` 인자 추가. `_validate_base_date` 에 `skip_past_cap` 옵션 추가 (미래 가드는 항상 유지)
+- **`app/application/service/ohlcv_periodic_service.py`** — 동일 옵션 추가. period 검증은 `skip_past_cap` 와 무관 (YEARLY 항상 NotImplementedError)
+- `scripts/dry_run_ka10086_capture.py` (E-3 기존 코드 fix) — Migration 008 (C-2γ) 에서 DROP 된 `foreign/institutional/individual_net_purchase` 컬럼 출력 제거. 작은 fix 라 본 chunk 에 합침
+
+### Fixed (1차 리뷰 적용)
+
+- **HIGH H-1**: `--resume` flag dead 문제 — `compute_resume_remaining_codes` 헬퍼 추가 + `async_main` 에서 호출. KRX 테이블의 max(trading_date) per stock 조회 → 미적재 종목만 `only_stock_codes` 로 UseCase 에 전달
+- **MEDIUM M-1**: `--only-stock-codes` UseCase 미전달 — UseCase 2개에 `only_stock_codes` 인자 추가 + CLI 의 `effective_stock_codes` 로 resume + only-stock-codes 통합 처리
+
+### Verification
+
+- mypy --strict: 74 source files / 0 errors
+- ruff check + format: All passed
+- pytest: **939 → 972 cases** (+33) / coverage **97% → 96%** (CLI 신규 ~480줄로 분모 증가, 신규 코드 80%+ 커버)
+- 자동 분류 = 일반 기능 (general) → 2b 적대적 / 3-4 보안 / 3-5 런타임 / 4 E2E 자동 생략
+
+### R1 invariant 유지 검증
+
+| 항목 | 결과 |
+|------|------|
+| `_skip_base_date_validation` 디폴트 False — 양 UseCase 모두 | PASS |
+| 운영 라우터 호출 경로 변경 없음 (파라미터 추가만) | PASS |
+| 미래 가드 항상 유지 (`skip_past_cap=True` 여도 미래 ValueError) | PASS — 단위 검증 |
+| CLI 에서만 `_skip_base_date_validation=True` 전달 | PASS |
+| `only_stock_codes` 디폴트 None — UseCase 의 `if only_*_codes:` 분기와 일관 | PASS |
+
+### Defer (다음 chunk)
+
+- **운영 실측 (사용자 수동)** — 100 종목 → active 3000 실측. 운영 미해결 4건 정량화. 결과 → ADR § 26 (또는 후속) + STATUS § 4 해소
+- **gap detection** — 일자별 missing detection (resume 정확도 향상)
+- **daily_flow (ka10086) 백필** — `scripts/backfill_daily_flow.py` (OHLCV 와 구조 다름)
+- **L-2 / E-1 / E-2 / M-3 refactor R2** — 일괄 정리
+
+---
+
 ## [2026-05-09] feat(kiwoom): Phase C-3β — ka10082/83 주/월봉 OHLCV 자동화 (UseCase + Router 4 path + Scheduler 2 job) — 1R CONDITIONAL → PASS, 939 tests / 97% coverage
 
 **Phase C-3β** — C-3α 인프라 위에 자동화 마무리. ka10082 (주봉) + ka10083 (월봉) endpoint 2건 완료 (production-ready). ka10081 IngestDailyOhlcvUseCase 패턴 ~95% 복제 + period dispatch + R1 정착 패턴 5종 전면 적용. **25 endpoint 진행: 8 → 10 (40%)**.

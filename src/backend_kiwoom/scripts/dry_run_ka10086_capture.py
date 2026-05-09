@@ -190,9 +190,9 @@ async def _capture_one(
             "foreign_rate": str(n.foreign_rate) if n.foreign_rate is not None else None,
             "foreign_holdings": n.foreign_holdings,
             "foreign_weight": str(n.foreign_weight) if n.foreign_weight is not None else None,
-            "foreign_net_purchase": n.foreign_net_purchase,
-            "institutional_net_purchase": n.institutional_net_purchase,
-            "individual_net_purchase": n.individual_net_purchase,
+            # C-2γ Migration 008 — D-E 중복 3 컬럼 (foreign/institutional/individual_net_purchase)
+            # 은 NormalizedDailyFlow 에서 제거. D 카테고리 (foreign_volume / institutional_net /
+            # individual_net) 가 동일값 (dry-run § 20.2 #1 cross-check 결과) 이므로 본 출력에서도 생략.
         }
         for n in normalized
     ]
