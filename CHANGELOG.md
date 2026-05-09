@@ -7,6 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] fix(kiwoom): 운영 검증 도구 보강 + 실 호출에서 발견된 2 차단 버그 fix
+
+ka10099 첫 실 호출 (`sync_stock_master.py --alias prod`) 에서 발견된 운영 차단 버그 2건 즉시 수정. 동시에 admin 도구 사용성 보강 (.env 자동 로드 + 명명 호환). **5 시장 / 4373 active stock / 630 NXT 적재 성공** (1.7s).
+
+### Fixed (운영 차단 버그)
+
+- **`app/adapter/out/kiwoom/_client.py`** (line 216, 299) — `next-key: ''` (빈 문자열) 을 형식 오류로 reject 하던 정규식 검증을 빈값 허용으로 수정. **전체 키움 API 차단** 이슈 (모든 자동 cron + 모든 endpoint 영향). 실 응답: `cont-yn=N + next-key=""` (페이지네이션 종료 신호) — mock 테스트는 빈값 사용 안 했어서 발견 못 함
+- **`app/adapter/out/persistence/repositories/stock.py`** — `upsert_many` 가 asyncpg bind parameter 한도 (32767) 초과. KOSPI 2440 × 14 컬럼 = 34160 → `InterfaceError`. 1000/batch chunk 분할 (`_UPSERT_BATCH=1000`) 로 한 batch 14000 < 한도
+
+### Added
+
+- **`docs/operations/credential-master-key-guide.md`** (신규, ~250줄) — 마스터키 운영 가이드 (왜 필요한가 / 무엇이 아닌가 / 생성·보관·회전·분실)
+- 단위 테스트 +5 cases — `test_kiwoom_client.py` 빈 next-key 2 / `test_stock_repository.py` 2500 row chunking 1 / `test_register_credential_cli.py` API_KEY fallback + precedence 2
+
+### Changed
+
+- **`scripts/register_credential.py`** — `python-dotenv` autoload (backend_kiwoom/.env.prod → 루트 ../../.env.prod 순서). `KIWOOM_API_KEY/SECRET` (키움 공식 명명) fallback 추가. docstring 갱신
+- **`scripts/sync_stock_master.py`** — dotenv autoload 동일 적용
+- STATUS / HANDOFF 갱신
+
+### Verification
+
+- pytest: 985 → **988 cases (+3)** / All passed (회귀 0)
+- mypy --strict: 76 files / 0 errors
+- ruff check: All passed
+- 실 운영: ka10099 5 시장 / 4373 stock / 1.7s elapsed / all_succeeded=True
+
+### 운영 미해결 #1 검증 (부분)
+
+- **ka10099 페이지네이션 빈도**: **단일 호출** (cont-yn=N, 페이지 없음). 4782 종목 1회 응답. ADR § 26.5 갱신 대상
+
+---
+
 ## [2026-05-09] refactor(kiwoom): DATABASE_URL → KIWOOM_DATABASE_URL rename (다른 프로젝트 격리)
 
 루트의 다른 프로젝트 (signal 등) DATABASE_URL 과 격리. backend_kiwoom 만의 namespace 명시.

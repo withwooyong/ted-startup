@@ -67,8 +67,12 @@ class StockRepository:
         stmt = select(Stock).where(Stock.stock_code == stock_code).execution_options(populate_existing=True)
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
+    # asyncpg bind parameter 16-bit 한도 (32767) 회피 — 14 컬럼 기준 2340 row 가 이론 한도.
+    # 안전 마진 + 향후 컬럼 추가 대비 1000 per batch (실측 KOSPI 2440 / KOSDAQ ~1500 종목).
+    _UPSERT_BATCH = 1000
+
     async def upsert_many(self, rows: list[dict[str, Any]]) -> int:
-        """PG ON CONFLICT (stock_code) upsert.
+        """PG ON CONFLICT (stock_code) upsert. 큰 배치는 자동 chunk 분할.
 
         rows 각 dict 는 NormalizedStock 의 14개 도메인 필드 + market_code (필수).
         응답에 등장한 stock_code 는 is_active=TRUE 강제 — 재등장 복원 (sector 일관).
@@ -77,31 +81,35 @@ class StockRepository:
         """
         if not rows:
             return 0
-        stmt = pg_insert(Stock).values(rows)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["stock_code"],
-            set_={
-                "stock_name": stmt.excluded.stock_name,
-                "list_count": stmt.excluded.list_count,
-                "audit_info": stmt.excluded.audit_info,
-                "listed_date": stmt.excluded.listed_date,
-                "last_price": stmt.excluded.last_price,
-                "state": stmt.excluded.state,
-                "market_code": stmt.excluded.market_code,
-                "market_name": stmt.excluded.market_name,
-                "up_name": stmt.excluded.up_name,
-                "up_size_name": stmt.excluded.up_size_name,
-                "company_class_name": stmt.excluded.company_class_name,
-                "order_warning": stmt.excluded.order_warning,
-                "nxt_enable": stmt.excluded.nxt_enable,
-                "is_active": True,
-                "fetched_at": func.now(),
-                "updated_at": func.now(),
-            },
-        )
-        result = await self._session.execute(stmt)
+        total = 0
+        for start in range(0, len(rows), self._UPSERT_BATCH):
+            batch = rows[start : start + self._UPSERT_BATCH]
+            stmt = pg_insert(Stock).values(batch)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["stock_code"],
+                set_={
+                    "stock_name": stmt.excluded.stock_name,
+                    "list_count": stmt.excluded.list_count,
+                    "audit_info": stmt.excluded.audit_info,
+                    "listed_date": stmt.excluded.listed_date,
+                    "last_price": stmt.excluded.last_price,
+                    "state": stmt.excluded.state,
+                    "market_code": stmt.excluded.market_code,
+                    "market_name": stmt.excluded.market_name,
+                    "up_name": stmt.excluded.up_name,
+                    "up_size_name": stmt.excluded.up_size_name,
+                    "company_class_name": stmt.excluded.company_class_name,
+                    "order_warning": stmt.excluded.order_warning,
+                    "nxt_enable": stmt.excluded.nxt_enable,
+                    "is_active": True,
+                    "fetched_at": func.now(),
+                    "updated_at": func.now(),
+                },
+            )
+            result = await self._session.execute(stmt)
+            total += rowcount_of(result)
         await self._session.flush()
-        return rowcount_of(result)
+        return total
 
     async def upsert_one(self, row: NormalizedStock) -> Stock:
         """단건 upsert (B-β) — RETURNING 으로 갱신된 row 반환.

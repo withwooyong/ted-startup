@@ -125,6 +125,23 @@ async def test_upsert_many_reactivates_inactive_row(session: AsyncSession) -> No
 
 
 @pytest.mark.asyncio
+async def test_upsert_many_chunks_large_batch_under_asyncpg_limit(session: AsyncSession) -> None:
+    """asyncpg bind parameter 한도 (32767) 초과 시 자동 chunk 분할.
+
+    실측 2026-05-09: KOSPI 2440 종목 × 14 컬럼 = 34160 > 32767 한도. 분할 안 하면
+    InterfaceError. 1000 per batch chunk 분할로 한 batch 14000 < 32767.
+    """
+    repo = StockRepository(session)
+    rows = [
+        _row(f"{i:06d}", f"종목{i}", "0")
+        for i in range(2500)  # KOSPI 실측 2440 보다 많이
+    ]
+
+    count = await repo.upsert_many(rows)
+    assert count == 2500
+
+
+@pytest.mark.asyncio
 async def test_upsert_many_overwrites_market_code_on_cross_market_conflict(
     session: AsyncSession,
 ) -> None:

@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-09 (DATABASE_URL → KIWOOM_DATABASE_URL rename — 다른 프로젝트 격리)
+> **마지막 갱신**: 2026-05-10 (운영 검증 — ka10099 sync 첫 실 호출 + 2 차단 버그 fix + admin 도구 보강)
 
 ---
 
@@ -16,7 +16,9 @@
 | 다음 chunk | **운영 실측 측정** (사용자 수동, runbook 따라 register → sync → backfill) **또는** daily_flow 백필 / refactor R2 / ka10094 (P2) |
 | 25 Endpoint 진행 | **10 / 25 완료** (40%). P0 5/5 완료. P1 6/8 완료. CLI 도구 3건 (backfill_ohlcv + register_credential + sync_stock_master) |
 | 테스트 | **983 cases** (+11: register_credential 7 / sync_stock_master 4) |
-| 누적 chunk | 25 commits (Phase A: 8 / Phase B: 4 / Phase C: 12 / R1: 1 / 보안 PR 2) |
+| 누적 chunk | 26 commits (Phase A: 8 / Phase B: 4 / Phase C: 13 / R1: 1 / 보안 PR 2) |
+| 테스트 | **988 cases** (+3: next-key 2 + chunking 1 + API_KEY fallback 2) |
+| 운영 검증 | ka10099 ✅ 4373 stock 적재 / 페이지네이션: 단일 호출 (#1 부분 검증) |
 
 ---
 
@@ -166,7 +168,8 @@ P3 (선택):
 - **C-운영실측 준비** — runbook + 결과 템플릿 + ADR § 26 (코드 0 변경) `62079f1`
 - **C-도커실환경** — backend_kiwoom 전용 docker-compose + runbook 실 환경 값 채움 (검증 완료) `243d4c7`
 - **C-admin-CLI** — register_credential.py + sync_stock_master.py + 11 테스트 (ka10099 진입 도구) `12e09c2`
-- **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `<this commit>`
+- **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `e9ab050`
+- **C-운영검증-1** — ka10099 첫 실 호출 + 2 차단 버그 fix (next-key 빈값 + upsert_many chunk 분할) + admin 도구 보강 (dotenv autoload + KIWOOM_API_KEY fallback + 마스터키 가이드 신규) `<this commit>`
 
 ---
 

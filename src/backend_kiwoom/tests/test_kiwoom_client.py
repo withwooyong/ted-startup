@@ -170,6 +170,51 @@ async def test_call_returns_none_for_missing_pagination_headers() -> None:
     assert resp.next_key is None
 
 
+@pytest.mark.asyncio
+async def test_call_accepts_empty_string_next_key_in_response() -> None:
+    """키움 운영 응답이 페이지네이션 종료 시 next-key='' 빈 문자열 반환.
+
+    실측 2026-05-09: ka10099 응답 헤더에서 cont-yn=N + next-key='' 관찰.
+    빈 문자열은 정상 — 형식 오류로 raise 하면 안 됨.
+    """
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"return_code": 0},
+            headers={"cont-yn": "N", "next-key": ""},
+        )
+
+    async with _make_client(handler) as client:
+        resp = await client.call(
+            api_id="ka10099",
+            endpoint="/api/dostk/stkinfo",
+            body={"mrkt_tp": "0"},
+        )
+
+    assert resp.cont_yn == "N"
+    assert resp.next_key == ""
+
+
+@pytest.mark.asyncio
+async def test_call_accepts_empty_string_next_key_in_request() -> None:
+    """caller 가 next_key='' 로 호출해도 형식 오류 raise 안 함 (페이지네이션 미시작)."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"return_code": 0})
+
+    async with _make_client(handler) as client:
+        resp = await client.call(
+            api_id="ka10099",
+            endpoint="/api/dostk/stkinfo",
+            body={"mrkt_tp": "0"},
+            cont_yn="N",
+            next_key="",
+        )
+
+    assert resp.cont_yn is None or resp.cont_yn in ("Y", "N")
+
+
 # -----------------------------------------------------------------------------
 # 2. token_provider — 매 호출마다 호출됨
 # -----------------------------------------------------------------------------

@@ -211,9 +211,10 @@ class KiwoomClient:
     ) -> KiwoomResponse:
         # H1 적대적 리뷰: caller 에서 받은 페이지네이션 헤더 값 사전 검증 (헤더 인젝션 차단)
         # `raise` 가 except 밖이라 __context__ 자동 설정 안 됨 (PEP 3134)
+        # 빈 문자열은 정상 (페이지네이션 미시작 또는 종료 — 키움 운영 응답 실측 2026-05-09)
         if cont_yn is not None and cont_yn.upper() not in ("Y", "N"):
             raise KiwoomUpstreamError(f"{api_id} cont-yn 형식 오류")
-        if next_key is not None and not _VALID_NEXT_KEY_PATTERN.fullmatch(next_key):
+        if next_key not in (None, "") and not _VALID_NEXT_KEY_PATTERN.fullmatch(next_key or ""):
             raise KiwoomUpstreamError(f"{api_id} next-key 형식 오류")
 
         # Semaphore + 인터벌 — 키움 RPS 안전 마진
@@ -292,11 +293,12 @@ class KiwoomClient:
             )
 
         # H1: 응답 헤더의 cont-yn / next-key 값도 검증 (다음 호출 시 헤더로 들어감)
+        # 빈 문자열은 정상 — 키움이 페이지네이션 종료 시 next-key="" 반환 (실측 2026-05-09)
         cont_yn_resp = resp.headers.get("cont-yn")
         next_key_resp = resp.headers.get("next-key")
         if cont_yn_resp is not None and cont_yn_resp.upper() not in ("Y", "N"):
             raise KiwoomUpstreamError(f"{api_id} 응답 cont-yn 형식 오류")
-        if next_key_resp is not None and not _VALID_NEXT_KEY_PATTERN.fullmatch(next_key_resp):
+        if next_key_resp not in (None, "") and not _VALID_NEXT_KEY_PATTERN.fullmatch(next_key_resp or ""):
             raise KiwoomUpstreamError(f"{api_id} 응답 next-key 형식 오류")
 
         return KiwoomResponse(

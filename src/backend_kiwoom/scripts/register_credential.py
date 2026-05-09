@@ -4,13 +4,13 @@
 `kiwoom.kiwoom_credential` 에 alias 등록 — Fernet 암호화 후 BYTEA 컬럼 upsert.
 
 사용 예:
-    # 환경변수 로드 (운영)
-    export KIWOOM_APPKEY='...'
-    export KIWOOM_SECRETKEY='...'
+    # 환경변수 — 둘 중 한 명명 쌍 (KIWOOM_APPKEY/SECRETKEY 또는 KIWOOM_API_KEY/SECRET)
+    export KIWOOM_API_KEY='...'             # 또는 KIWOOM_APPKEY
+    export KIWOOM_API_SECRET='...'          # 또는 KIWOOM_SECRETKEY
     export KIWOOM_CREDENTIAL_MASTER_KEY='Fernet32B...'
     export KIWOOM_DATABASE_URL='postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db'
 
-    # 등록
+    # .env.prod 가 backend_kiwoom/ 또는 루트에 있으면 자동 로드 (export 불필요)
     uv run python scripts/register_credential.py --alias prod --env prod
 
     # 갱신 (같은 alias 재호출 = upsert)
@@ -32,10 +32,18 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # scripts/ → backend_kiwoom/ 루트 import 보장
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# .env.prod 자동 로드 — backend_kiwoom/.env.prod (symlink 또는 cp) → 루트 ../../.env.prod 순서.
+# pydantic-settings 의 settings 외 변수 (KIWOOM_APPKEY/SECRETKEY) 도 os.environ 에 주입.
+for candidate in (ROOT / ".env.prod", ROOT.parent.parent / ".env.prod", ROOT / ".env"):
+    if candidate.exists():
+        load_dotenv(candidate, override=False)
 
 from app.adapter.out.persistence.repositories.kiwoom_credential import (  # noqa: E402
     KiwoomCredentialRepository,
@@ -67,9 +75,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def read_credentials_from_env() -> tuple[str, str] | None:
-    """환경변수에서 (appkey, secretkey) 읽기. 둘 다 비어있지 않아야."""
-    appkey = os.environ.get("KIWOOM_APPKEY", "").strip()
-    secretkey = os.environ.get("KIWOOM_SECRETKEY", "").strip()
+    """환경변수에서 (appkey, secretkey) 읽기. 둘 다 비어있지 않아야.
+
+    명명 호환:
+    - KIWOOM_APPKEY / KIWOOM_SECRETKEY (backend_kiwoom 내부 도메인 명명)
+    - KIWOOM_API_KEY / KIWOOM_API_SECRET (키움 공식 발급 명명 — fallback)
+
+    위 순서로 lookup. 환경 통일이 안 되어도 동작.
+    """
+    appkey = (os.environ.get("KIWOOM_APPKEY") or os.environ.get("KIWOOM_API_KEY") or "").strip()
+    secretkey = (os.environ.get("KIWOOM_SECRETKEY") or os.environ.get("KIWOOM_API_SECRET") or "").strip()
     if not appkey or not secretkey:
         return None
     return appkey, secretkey

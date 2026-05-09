@@ -29,10 +29,17 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # scripts/ → backend_kiwoom/ 루트 import 보장
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# .env.prod 자동 로드 — backend_kiwoom/.env.prod → 루트 ../../.env.prod 순서.
+for candidate in (ROOT / ".env.prod", ROOT.parent.parent / ".env.prod", ROOT / ".env"):
+    if candidate.exists():
+        load_dotenv(candidate, override=False)
 
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 

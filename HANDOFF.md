@@ -1,102 +1,107 @@
 # Session Handoff
 
-> Last updated: 2026-05-09 (KST) — DATABASE_URL → KIWOOM_DATABASE_URL rename
+> Last updated: 2026-05-10 (KST) — ka10099 운영 검증 + 2 차단 버그 fix
 > Branch: `master`
-> Latest commit (커밋 대기): `refactor(kiwoom): DATABASE_URL → KIWOOM_DATABASE_URL rename`
-> 직전 푸시: `243d4c7` — backend_kiwoom 전용 docker-compose + runbook 실 환경 값
+> Latest commit (커밋 대기): `fix(kiwoom): 운영 검증 도구 보강 + 실 호출에서 발견된 2 차단 버그 fix`
+> 직전 푸시: `e9ab050` — DATABASE_URL → KIWOOM_DATABASE_URL rename
 
 ## Current Status
 
-**namespace 격리** — 루트의 signal 프로젝트 등 다른 모듈의 `DATABASE_URL` 과 충돌 회피. `kiwoom_database_url` 필드 + `KIWOOM_DATABASE_URL` env 로 일관 변경. 5 코드 파일 + 3 문서 rename. **테스트 983 cases 회귀 0**, mypy 76 files 0 errors. 실 환경 검증 (alembic current + dry-run) 정상.
+**ka10099 첫 실 호출 성공** — `register_credential.py` (alias=prod 등록) → `sync_stock_master.py` 실행 흐름 완성. **5 시장 / 4373 active stock / 630 NXT / 1.7초 elapsed**. 동시에 **2 운영 차단 버그 발견·수정**. 테스트 985 → 988. 운영 미해결 #1 (페이지네이션 빈도) 부분 검증: ka10099 는 단일 호출 (cont-yn=N).
 
-또한 사용자 오해 정정: **`KIWOOM_CREDENTIAL_MASTER_KEY` ≠ `KIWOOM_ACCOUNT_NO`** — 마스터키는 Fernet 대칭 암호화 키 (DB 자격증명 BYTEA 컬럼 암복호화용), 계좌번호와 무관. runbook § 1.2 에 강조 메시지 추가.
+## Completed This Session (커밋 대기)
 
-## Completed This Session (커밋 대기 — 2개)
-
-### Commit 1: admin CLI (`12e09c2`, 이미 커밋됨)
-- `register_credential.py` + `sync_stock_master.py` + 11 단위 테스트
-
-### Commit 2: KIWOOM_DATABASE_URL rename (커밋 대기)
 | # | Task | 산출물 | Notes |
 |---|------|--------|-------|
-| 1 | settings 필드 rename | `app/config/settings.py` | `database_url` → `kiwoom_database_url`. description 에 격리 명시 |
-| 2 | 코드 사용처 rename | `session.py` / `migrations/env.py` | 2 곳 — `settings.kiwoom_database_url` |
-| 3 | 테스트 env 이름 변경 | `tests/conftest.py` / `tests/test_settings.py` | `DATABASE_URL` → `KIWOOM_DATABASE_URL` |
-| 4 | runbook 환경변수 표 | `docs/operations/backfill-measurement-runbook.md` | 마스터키 설명 강화 (계좌번호와 무관 명시) |
-| 5 | scripts docstring | `register_credential.py` / `sync_stock_master.py` | export 예시 변경 |
-| 6 | STATUS / CHANGELOG / HANDOFF 갱신 | 3 문서 | backend_kiwoom CLAUDE.md § 1 |
+| 1 | 마스터키 운영 가이드 | `docs/operations/credential-master-key-guide.md` (신규) | 왜 필요 / 무엇이 아닌가 / 생성·보관·회전·분실 시 절차 |
+| 2 | 2 admin 스크립트 dotenv autoload | `scripts/register_credential.py` / `sync_stock_master.py` | backend_kiwoom/.env.prod → ../../env.prod 순서로 autoload. KIWOOM_API_KEY/SECRET fallback (키움 공식 명명) |
+| 3 | **next-key 빈값 fix** (운영 차단) | `app/adapter/out/kiwoom/_client.py:216, 299` | `next-key=""` 응답을 형식 오류로 reject 하던 정규식 검증 → 빈값 정상 처리. **모든 키움 API + cron 차단 해소** |
+| 4 | **upsert_many chunk 분할 fix** (운영 차단) | `app/adapter/out/persistence/repositories/stock.py` | asyncpg bind parameter 32767 한도 초과 (KOSPI 2440 × 14 = 34160). 1000/batch chunk 분할 |
+| 5 | 단위 테스트 +5 cases | `test_kiwoom_client.py` 2 / `test_stock_repository.py` 1 / `test_register_credential_cli.py` 2 | 빈 next-key / 2500 row chunking / API_KEY fallback / precedence |
+| 6 | STATUS / HANDOFF / CHANGELOG 갱신 | 3 문서 동시 갱신 | backend_kiwoom CLAUDE.md § 1 |
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | 본 세션 산출물 (commit 2) 커밋 + 푸시 | pending | 사용자 승인 후 |
-| 2 | **운영 실측 측정** (사용자 수동) | not started | 1) `.env.prod` (`KIWOOM_DATABASE_URL` 등) → 2) register_credential → 3) sync_stock_master → 4) backfill_ohlcv |
-| 3 | gap detection 정확도 향상 | pending | resume 의 일자별 missing detection |
-| 4 | daily_flow (ka10086) 백필 CLI | not started | 별도 chunk |
-| 5 | refactor R2 (1R Defer 일괄) | not started | L-2 + E-1 + E-2 + M-3 |
-| 6 | ka10094 (년봉, P2) | pending | C-3 패턴 |
+| 1 | 본 세션 산출물 커밋 + 푸시 | pending | 사용자 승인 후 — 한 commit 통합 |
+| 2 | **backfill_ohlcv.py 실측** | not started | 다음 단계. smoke 10 → mid 100 → full 3000 |
+| 3 | gap detection / daily_flow 백필 / refactor R2 / ka10094 | pending | 실측 결과 후 우선순위 결정 |
+| 4 | ADR § 26.5 채움 | pending | results.md 채운 후 |
 
-## Key Decisions Made (env rename)
+## Key Decisions Made (운영 검증)
 
-### 격리 vs alias 추가
+### 발견된 운영 차단 버그 2건
 
-- **필드명 변경 (`database_url` → `kiwoom_database_url`)** 채택 — pydantic-settings 가 case_insensitive 라 `KIWOOM_DATABASE_URL` env 자동 매칭
-- alias 만 추가하는 옵션 있었으나 일관성 (다른 KIWOOM_* 필드들과 통일) 우선
+| # | 버그 | 발견 시점 | mock 테스트가 못 잡은 이유 |
+|---|------|----------|-------------------------|
+| next-key 빈값 reject | `_client.py` 정규식 `^[...]+$` | sync_stock_master.py 첫 실 호출 | mock 응답이 항상 `next-key="page-2"` 같은 non-empty 값 사용 |
+| upsert_many bind 한도 초과 | `stock.py` 의 PG insert | 같은 호출, KOSPI 적재 시점 | 단위 테스트가 2~10 row 만 사용 (실 운영 2440) |
 
-### 사용자 오해 정정 (마스터키 ≠ 계좌번호)
+→ **운영 실측의 가치 입증**. 모든 endpoint 가 `_client.py` 사용 → 자동 cron (daily_flow / weekly / monthly OHLCV 등) 도 모두 차단 상태였을 것
 
-- `KIWOOM_CREDENTIAL_MASTER_KEY` = Fernet 32B base64 (DB BYTEA 암복호화용, 사용자 로컬 신규 생성)
-- `KIWOOM_ACCOUNT_NO` = 계좌 번호 (Phase D 이후 주문/잔고 endpoint 에서 사용 — Phase C 미사용)
-- runbook § 1.2 에 강조 + 본 핸드오프에 기록
+### admin 도구 사용성 보강
+
+- **dotenv autoload** — symlink/cp 없이도 `.env.prod` 가 backend_kiwoom 또는 루트에 있으면 자동 로드
+- **KIWOOM_API_KEY/SECRET fallback** — 사용자 .env.prod 명명 (키움 공식) 호환. 둘 다 있으면 KIWOOM_APPKEY 우선
+- **마스터키 가이드 문서** — 향후 운영자 / 신규 입문자 학습 자료
+
+### 단일 commit 결정
+
+- 운영 차단 버그 fix + admin 도구 보강 + 마스터키 가이드를 **한 commit 으로 통합** (사용자 결정 1번)
+- 맥락 일관: 첫 실 호출 → 버그 발견 → 즉시 fix 라는 흐름이 자연스러움
 
 ## Known Issues
 
-- **사용자 환경 변경 필요** — `.env.prod` 의 `DATABASE_URL` 을 `KIWOOM_DATABASE_URL` 로 이름 변경 필수
-- **Format check 26 파일 차이** — 기존 파일 (test_stock_price_repository 등). 본 chunk 와 무관, 별도 chunk 처리 권장 (`uv run ruff format` 일괄 적용)
+- **다른 endpoint 도 동일 next-key 패턴 사용** — `_client.py` 의 두 위치 모두 fix 됨. 회귀 테스트 988 cases 통과
+- **upsert_many chunk 분할은 stock.py 만 적용** — 다른 Repository (stock_price_krx 등) 도 같은 패턴이면 같은 한도 영향. 운영 실측에서 발견 시 동일 fix 적용
+- **운영 미해결 #1 ka10099 페이지네이션** — 단일 호출 (4782 종목 1회). 다른 endpoint (ka10081 일봉 3년) 는 페이지네이션 발생 가능 — backfill_ohlcv 실측에서 검증
+- **sync_stock_master 의 KOSPI 2440 → DB 2031** — §11.2 정책 (cross-market conflict 시 market_code 덮어씀) 적용. ETF/REIT 등이 KOSPI stock_code 와 겹쳐 재배정. 정상 동작
 
 ## Context for Next Session
 
 ### 사용자의 원래 의도
 
-- 다른 프로젝트와 env 격리 (`DATABASE_URL` 충돌 회피)
-- 마스터키 vs 계좌번호 혼동 해소
+ka10099 종목 마스터 sync 진행 → 운영 데이터 적재 시작. 본 chunk 가 그 첫 실 호출 + 도구 보강.
 
 ### 선택된 접근 + 이유
 
-- **필드명 + env 둘 다 변경** — pydantic-settings 의 case_insensitive 자동 매핑 활용. 코드 1:1 추적 가능
-- **단순 rename** — ted-run 풀 파이프라인 생략 (refactor 분류). 983 tests / mypy / ruff 회귀 검증으로 충분
-- **runbook 의 마스터키 설명 강화** — 사용자 오해 재발 방지 ("계좌번호와 무관" 명시)
+- **dotenv autoload** — 사용자가 symlink 안 만들어도 동작
+- **KIWOOM_API_KEY fallback** — 사용자 환경의 명명을 코드가 따라감 (사용자 강제 변경 회피)
+- **2 차단 버그 즉시 fix** — admin 도구 첫 실행에서 발견됨, 동일 commit 으로 묶어 맥락 일관
 
 ### 사용자 제약 / 선호
 
 - 한글 커밋 메시지
 - 푸시 명시적 요청 시만
 - backend_kiwoom CLAUDE.md § 1 — STATUS / HANDOFF / CHANGELOG 동시 갱신
+- 큰 chunk 도 통합 가능 (옵션 1 commit 통합 선택)
 
 ### 다음 세션 진입 시 결정 필요
 
-본 chunk commit + push 후 사용자 측정:
+본 chunk commit + push 후:
 
-1. `.env.prod` 의 `DATABASE_URL=...` → `KIWOOM_DATABASE_URL=...` 으로 이름 변경
-2. `KIWOOM_CREDENTIAL_MASTER_KEY` 신규 생성: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-3. `KIWOOM_APPKEY` / `KIWOOM_SECRETKEY` 채움
-4. `register_credential.py` → `sync_stock_master.py` → `backfill_ohlcv.py` 순서
+1. **backfill_ohlcv.py 실측 진입** (권장 1순위)
+   - smoke: `--max-stocks 10 --only-market-codes 0 --years 1`
+   - mid: `--max-stocks 100 --only-market-codes 0 --years 3`
+   - full: `--years 3` (active 4373 KRX+NXT)
+2. **다른 Repository 의 chunk 분할 일괄 점검** — stock_price_krx / stock_price_nxt / stock_price_periodic / stock_daily_flow 의 upsert_many. backfill 실측 중 발견 시 별도 chunk
+3. **운영 cron 활성화** — `scheduler_enabled=True` + alias env 채움 → daily/weekly/monthly OHLCV + daily_flow 자동 실행
 
-## Files Modified This Session (커밋 대기 — commit 2)
+## Files Modified This Session (커밋 대기)
 
 ```
-src/backend_kiwoom/app/config/settings.py                        (수정 — 필드 rename)
-src/backend_kiwoom/app/adapter/out/persistence/session.py        (수정 — 1 line)
-src/backend_kiwoom/migrations/env.py                             (수정 — 1 line)
-src/backend_kiwoom/tests/conftest.py                             (수정 — 1 line)
-src/backend_kiwoom/tests/test_settings.py                        (수정 — default 검증 env 변경)
-src/backend_kiwoom/docs/operations/backfill-measurement-runbook.md (수정 — § 1.2 표)
-src/backend_kiwoom/scripts/register_credential.py                (수정 — docstring)
-src/backend_kiwoom/scripts/sync_stock_master.py                  (수정 — docstring)
-src/backend_kiwoom/STATUS.md                                     (수정)
-CHANGELOG.md                                                     (수정 — prepend)
-HANDOFF.md                                                       (본 파일)
+src/backend_kiwoom/docs/operations/credential-master-key-guide.md   (신규, ~250줄)
+src/backend_kiwoom/scripts/register_credential.py                   (수정 — dotenv + fallback)
+src/backend_kiwoom/scripts/sync_stock_master.py                     (수정 — dotenv)
+src/backend_kiwoom/app/adapter/out/kiwoom/_client.py                (수정 — fix 1)
+src/backend_kiwoom/app/adapter/out/persistence/repositories/stock.py (수정 — fix 2)
+src/backend_kiwoom/tests/test_kiwoom_client.py                       (수정 — +2 cases)
+src/backend_kiwoom/tests/test_stock_repository.py                    (수정 — +1 case)
+src/backend_kiwoom/tests/test_register_credential_cli.py             (수정 — +2 cases / 격리 보강)
+src/backend_kiwoom/STATUS.md                                         (수정)
+CHANGELOG.md                                                         (수정 — prepend)
+HANDOFF.md                                                           (본 파일)
 ```
 
-총 11 파일 / 모두 수정 / 단순 rename
+총 11 파일 / 신규 1 + 수정 10 / +500 줄
