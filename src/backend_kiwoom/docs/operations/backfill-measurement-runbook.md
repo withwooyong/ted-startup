@@ -74,15 +74,55 @@ docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c \
 
 ### 1.4 alias 등록
 
-운영 DB 의 `kiwoom.kiwoom_credential` 테이블에 alias 가 등록되어 있어야 한다 (마스터키로 암호화된 appkey/secret). 등록은 admin 라우터 (`POST /api/kiwoom/admin/credentials`) 또는 직접 INSERT 로 가능 — 자세한 절차는 ADR-0001 § 3 (보안 정책) + Phase A2-α 결정 참고.
+`scripts/register_credential.py` admin 도구 사용 (commit `<this commit>` 신규). Cipher 적용 → `kiwoom.kiwoom_credential` upsert.
 
 ```bash
-# alias 확인
+# 1) 환경변수 export (쉘 history 에 안 남게 — set +o history 또는 .env.prod 권장)
+export KIWOOM_APPKEY='<운영 appkey>'
+export KIWOOM_SECRETKEY='<운영 secretkey>'
+export KIWOOM_CREDENTIAL_MASTER_KEY='<Fernet 32B base64>'
+
+# 2) 등록 (또는 갱신 — 같은 alias 재호출 = upsert)
+uv run python scripts/register_credential.py --alias prod --env prod
+
+# 출력 예시
+# 등록 완료: alias=prod env=prod id=1 masked_appkey=ABCD••••••••WXYZ key_version=1
+
+# 3) 등록 확인
 docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c \
     "SELECT alias, env, is_active, created_at FROM kiwoom.kiwoom_credential ORDER BY created_at DESC;"
 ```
 
+> **보안 주의**: KIWOOM_APPKEY / KIWOOM_SECRETKEY 는 평문 — 쉘 history / process list / 로그에 노출 차단 필요.
+> `.env.prod` 에 넣고 `set -a; source .env.prod; set +a` 또는 systemd EnvironmentFile 권장.
+
 본 runbook 의 예시는 `--alias prod` 가정.
+
+### 1.5 종목 마스터 sync (ka10099, **백필 선행 필수**)
+
+`kiwoom.stock` 이 비어있으면 backfill 대상 종목이 0 — **반드시 선행**. `scripts/sync_stock_master.py` admin 도구 (commit `<this commit>` 신규) 사용. 5 시장 (KOSPI/KOSDAQ/KONEX/ETF/ETN) 1회 sync.
+
+```bash
+# 1회 sync (uvicorn 기동 불필요 — 직접 UseCase 호출)
+uv run python scripts/sync_stock_master.py --alias prod
+
+# 출력 예시
+# ===== Stock Master Sync Summary =====
+# elapsed:           18.3s
+# total_fetched:     2987
+# total_upserted:    2987
+# total_deactivated: 0
+# total_nxt_enabled: 1247
+# all_succeeded:     True
+# --- markets ---
+#   market=  0 fetched=  900 upserted=  900 nxt_enabled=  400 deactivated=  0  OK
+#   market= 10 fetched= 1500 upserted= 1500 nxt_enabled=  600 deactivated=  0  OK
+#   ...
+```
+
+종료 코드: 0 = 5 시장 모두 성공 / 1 = 부분 실패 / 2 = alias 미등록·비활성·한도초과 / 3 = 시스템 오류 (DB / 마스터키).
+
+> **운영 시간대 회피**: 키움 OpenAPI 도 운영 시간대 RPS 제한 — 본 sync 도 거래 시간 (09:00~15:30 KST) 외 권장.
 
 ---
 

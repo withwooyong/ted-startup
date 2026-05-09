@@ -7,6 +7,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] feat(kiwoom): 자격증명 등록 + 종목 마스터 sync admin CLI 신규 (ka10099 sync 진입 도구)
+
+운영 실측의 선행 단계 (kiwoom.stock 채우기) 자동화. uvicorn 기동 + curl 흐름 대신 단일 명령어로 진입 가능. 운영 라우터 `POST /api/kiwoom/stocks/sync` 와 동일 효과.
+
+### Added
+
+- **`scripts/register_credential.py`** (신규, ~120줄) — 키움 자격증명 등록/갱신 admin 도구
+  - argparse: `--alias` (필수), `--env {prod|mock}` (필수)
+  - env: `KIWOOM_APPKEY`, `KIWOOM_SECRETKEY`, `KIWOOM_CREDENTIAL_MASTER_KEY` 필수
+  - 동작: Fernet 암호화 → `kiwoom.kiwoom_credential` upsert. 마스킹된 appkey 출력
+  - exit code: 0 success / 2 env 누락 / 3 마스터키 형식 오류 + DB 예외
+- **`scripts/sync_stock_master.py`** (신규, ~150줄) — ka10099 1회 sync admin 도구
+  - argparse: `--alias` (필수)
+  - 동작: TokenManager + KiwoomClient + KiwoomStkInfoClient + SyncStockMasterUseCase (main.py 의 sync_stock factory 패턴 재사용). 5 시장 격리 sync
+  - 출력: `format_summary` (5 시장 outcome + 합계 + elapsed)
+  - exit code: 0 success / 1 partial (한 시장 이상 error) / 2 alias 미등록·비활성·한도 / 3 시스템
+- **`tests/test_register_credential_cli.py`** (신규, 7 cases) — argparse 3 + env 검증 4
+- **`tests/test_sync_stock_master_cli.py`** (신규, 4 cases) — argparse 2 + format_summary 2
+
+### Changed
+
+- `docs/operations/backfill-measurement-runbook.md` — § 1.4 alias 등록 (register_credential.py 명령어 + 보안 주의), § 1.5 종목 마스터 sync (sync_stock_master.py 명령어 + 출력 예시) 갱신
+
+### Verification
+
+- pytest: **972 → 983 cases** (+11) / All passed
+- mypy --strict: **76 files / 0 errors** (74 → 76)
+- ruff check + format: All passed
+- coverage: 본 chunk 측정 생략 (admin 도구 — 사용자 환경 전용)
+
+---
+
 ## [2026-05-09] docs(kiwoom): 운영 실측 사전 준비 — runbook + 결과 템플릿 + ADR § 26 (코드 변경 0)
 
 **Phase C-운영실측 사전 준비** — 다음 chunk (사용자 수동 운영 실측) 에 필요한 문서 일괄 정비. C-backfill CLI 로 운영 미해결 4건 (페이지네이션/3년 시간/NUMERIC magnitude/sync) 을 정량화하기 위한 단계별 가이드. 코드 변경 0, 문서 3 신규 + 3 갱신.

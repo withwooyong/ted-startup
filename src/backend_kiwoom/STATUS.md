@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-09 (운영 실측 사전 준비 — runbook + 결과 템플릿 + ADR § 26 작성)
+> **마지막 갱신**: 2026-05-09 (자격증명 등록 + 종목 마스터 sync admin CLI 신규 — ka10099 진입 도구)
 
 ---
 
@@ -11,12 +11,12 @@
 
 | 항목 | 값 |
 |------|-----|
-| 진행 Phase | **Phase C** (OHLCV + 일별 수급, **C-backfill 완료** + 운영 실측 사전 준비 완료 — Phase C 95%) |
-| 마지막 완료 chunk | **운영 실측 사전 준비** (runbook + 결과 템플릿 + ADR § 26, 코드 0 변경) |
-| 다음 chunk | **운영 실측 측정** (사용자 수동, runbook 따라) **또는** daily_flow 백필 / refactor R2 / ka10094 (P2) |
-| 25 Endpoint 진행 | **10 / 25 완료** (40%). P0 5/5 완료. P1 6/8 완료. CLI 도구 1건 |
-| 테스트 | **972 cases / 96% coverage** (변경 없음 — 본 chunk 코드 0 변경) |
-| 누적 chunk | 23 commits (Phase A: 8 / Phase B: 4 / Phase C: 10 / R1: 1 / 보안 PR 2) |
+| 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI 추가 — Phase C 95%) |
+| 마지막 완료 chunk | **admin CLI** (register_credential.py + sync_stock_master.py — ka10099 1회 sync 진입 도구) |
+| 다음 chunk | **운영 실측 측정** (사용자 수동, runbook 따라 register → sync → backfill) **또는** daily_flow 백필 / refactor R2 / ka10094 (P2) |
+| 25 Endpoint 진행 | **10 / 25 완료** (40%). P0 5/5 완료. P1 6/8 완료. CLI 도구 3건 (backfill_ohlcv + register_credential + sync_stock_master) |
+| 테스트 | **983 cases** (+11: register_credential 7 / sync_stock_master 4) |
+| 누적 chunk | 24 commits (Phase A: 8 / Phase B: 4 / Phase C: 11 / R1: 1 / 보안 PR 2) |
 
 ---
 
@@ -163,7 +163,9 @@ P3 (선택):
 - C-3α — ka10082/83 주/월봉 인프라 (Migration 009-012 + ORM 4 + Repository + chart.py 확장 + Period enum) `8fcabe4`
 - C-3β — ka10082/83 주/월봉 자동화 (IngestPeriodicOhlcvUseCase + Router 4 path + Scheduler 금 19:30 / 매월 1일 03:00) `2d4e2ae`
 - **C-backfill** — OHLCV 통합 백필 CLI (`scripts/backfill_ohlcv.py` daily/weekly/monthly + dry-run + resume + `_skip_base_date_validation` 옵션) `055e81e`
-- **C-운영실측 준비** — runbook + 결과 템플릿 + ADR § 26 (코드 0 변경, 문서 3 신규 + 3 갱신) `<this commit>`
+- **C-운영실측 준비** — runbook + 결과 템플릿 + ADR § 26 (코드 0 변경) `62079f1`
+- **C-도커실환경** — backend_kiwoom 전용 docker-compose + runbook 실 환경 값 채움 (검증 완료) `243d4c7`
+- **C-admin-CLI** — register_credential.py + sync_stock_master.py + 11 테스트 (ka10099 진입 도구) `<this commit>`
 
 ---
 
