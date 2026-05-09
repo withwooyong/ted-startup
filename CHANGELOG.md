@@ -7,6 +7,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] refactor(kiwoom): DATABASE_URL → KIWOOM_DATABASE_URL rename (다른 프로젝트 격리)
+
+루트의 다른 프로젝트 (signal 등) DATABASE_URL 과 격리. backend_kiwoom 만의 namespace 명시.
+
+### Changed
+
+- `app/config/settings.py` — 필드 `database_url` → `kiwoom_database_url` (env: `KIWOOM_DATABASE_URL`)
+- `app/adapter/out/persistence/session.py` — `settings.database_url` → `settings.kiwoom_database_url`
+- `migrations/env.py` — 동일
+- `tests/conftest.py` — testcontainers URL 을 `KIWOOM_DATABASE_URL` env 로 export
+- `tests/test_settings.py` — default 검증 env 이름 변경
+- `docs/operations/backfill-measurement-runbook.md` — 환경변수 표 + 마스터키 설명 강화 (계좌번호와 무관 명시)
+- `scripts/register_credential.py` / `sync_stock_master.py` — docstring 의 export 예시 변경
+
+### Verification
+
+- pytest: 983 cases / All passed (회귀 0)
+- mypy --strict: 76 files / 0 errors
+- ruff check: All passed
+- 실 환경 검증: `KIWOOM_DATABASE_URL` env → alembic current = head / backfill_ohlcv.py dry-run = active 0 분기 정상
+
+---
+
 ## [2026-05-09] feat(kiwoom): 자격증명 등록 + 종목 마스터 sync admin CLI 신규 (ka10099 sync 진입 도구)
 
 운영 실측의 선행 단계 (kiwoom.stock 채우기) 자동화. uvicorn 기동 + curl 흐름 대신 단일 명령어로 진입 가능. 운영 라우터 `POST /api/kiwoom/stocks/sync` 와 동일 효과.

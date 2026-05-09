@@ -13,7 +13,7 @@ from app.config.settings import get_settings
 def get_engine() -> AsyncEngine:
     settings = get_settings()
     return create_async_engine(
-        settings.database_url,
+        settings.kiwoom_database_url,
         echo=settings.database_echo,
         pool_pre_ping=True,
         pool_size=settings.database_pool_size,

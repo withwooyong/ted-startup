@@ -8,7 +8,7 @@
     export KIWOOM_APPKEY='...'
     export KIWOOM_SECRETKEY='...'
     export KIWOOM_CREDENTIAL_MASTER_KEY='Fernet32B...'
-    export DATABASE_URL='postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db'
+    export KIWOOM_DATABASE_URL='postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db'
 
     # 등록
     uv run python scripts/register_credential.py --alias prod --env prod

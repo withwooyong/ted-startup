@@ -5,7 +5,7 @@
 운영 라우터 `POST /api/kiwoom/stocks/sync` 와 동일 효과 — uvicorn 기동 없이 1회 호출용.
 
 사용 예:
-    export DATABASE_URL='postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db'
+    export KIWOOM_DATABASE_URL='postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db'
     export KIWOOM_CREDENTIAL_MASTER_KEY='Fernet32B...'
 
     # alias 가 register_credential.py 로 등록되어 있어야 함

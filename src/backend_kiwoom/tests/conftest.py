@@ -58,7 +58,7 @@ def master_key() -> str:
 @pytest.fixture(scope="session", autouse=True)
 def apply_migrations(database_url: str, master_key: str) -> None:
     """Alembic upgrade head — 테스트 DB URL과 마스터키를 환경변수로 주입."""
-    os.environ["DATABASE_URL"] = database_url
+    os.environ["KIWOOM_DATABASE_URL"] = database_url
     if "KIWOOM_CREDENTIAL_MASTER_KEY" not in os.environ:
         os.environ["KIWOOM_CREDENTIAL_MASTER_KEY"] = master_key
 

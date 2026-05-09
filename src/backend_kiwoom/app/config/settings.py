@@ -28,9 +28,12 @@ class Settings(BaseSettings):
     cors_allow_origins: list[str] = Field(default_factory=list)
 
     # ---- Database ----
-    database_url: str = Field(
+    kiwoom_database_url: str = Field(
         default="postgresql+asyncpg://kiwoom:kiwoom@localhost:5432/kiwoom_db",
-        description="SQLAlchemy async DSN (asyncpg). Alembic 은 psycopg2 로 자동 치환.",
+        description=(
+            "SQLAlchemy async DSN (asyncpg). Alembic 은 psycopg2 로 자동 치환. "
+            "env: KIWOOM_DATABASE_URL — 다른 프로젝트의 DATABASE_URL 과 격리"
+        ),
     )
     database_echo: bool = Field(default=False)
     database_pool_size: int = Field(default=5, ge=1, le=50)

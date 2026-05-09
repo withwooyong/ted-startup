@@ -44,8 +44,8 @@ docker compose exec kiwoom-db psql -U kiwoom -d kiwoom_db -c "SELECT version();"
 
 | 변수 | 값 | 비고 |
 |------|-----|------|
-| `DATABASE_URL` | `postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db` | docker-compose.yml 기준 (호스트 5433 매핑). asyncpg 드라이버 |
-| `KIWOOM_CREDENTIAL_MASTER_KEY` | Fernet 32B base64 (예: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) | alias 복호화용 — 운영과 동일 키 필수 |
+| `KIWOOM_DATABASE_URL` | `postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db` | docker-compose.yml 기준 (호스트 5433 매핑). asyncpg 드라이버. **다른 프로젝트의 DATABASE_URL 과 격리** |
+| `KIWOOM_CREDENTIAL_MASTER_KEY` | **Fernet 대칭 암호화 마스터키** (32B base64) — 신규 생성: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` | DB 의 자격증명 BYTEA 컬럼 암호/복호화. **계좌번호와 무관** — 키움 서버에 보내지 않음. 한 번 생성 후 영구 보관 (잃으면 복호화 불가) |
 | `KIWOOM_BASE_URL_PROD` | `https://api.kiwoom.com` | 디폴트값 그대로 (Settings 디폴트 사용) |
 | `KIWOOM_DEFAULT_ENV` | `prod` | mock 도메인은 NXT 미지원 — 실측은 prod 필수 |
 | `NXT_COLLECTION_ENABLED` | `true` | 6000 호출 시나리오 측정 시 (False 면 KRX 만 3000) |

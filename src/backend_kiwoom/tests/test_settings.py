@@ -102,10 +102,10 @@ def test_settings_min_interval_must_be_non_negative(monkeypatch: pytest.MonkeyPa
 
 def test_settings_database_url_default(monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_kiwoom_env(monkeypatch)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("KIWOOM_DATABASE_URL", raising=False)
     s = Settings(_env_file=None)  # type: ignore[call-arg]
-    assert "asyncpg" in s.database_url
-    assert "kiwoom" in s.database_url.lower()
+    assert "asyncpg" in s.kiwoom_database_url
+    assert "kiwoom" in s.kiwoom_database_url.lower()
 
 
 def test_get_settings_caches_singleton() -> None:

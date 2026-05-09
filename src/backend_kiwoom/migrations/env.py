@@ -24,7 +24,7 @@ def _resolve_sync_url() -> str:
     """set_main_option 우선, 없으면 Settings. asyncpg → psycopg2 치환."""
     url = config.get_main_option("sqlalchemy.url") or ""
     if not url:
-        url = get_settings().database_url
+        url = get_settings().kiwoom_database_url
     return url.replace("+asyncpg", "+psycopg2")
 
 
