@@ -1196,3 +1196,131 @@ LOW 9건은 후속 chunk / 운영 정책 (C-2β UseCase / 운영 dry-run / Phase
 - C-2β 도 `--force-2b` 적대적 리뷰 강제
 
 후속 Phase C chunk 진행 후: 운영 dry-run (α/β/A3/B-α/β/γ + C-1α/β + C-2α/β 통합 검증) → C-3 (ka10082/83 주봉/월봉, P1) → Phase D (시그널 백테스팅).
+
+---
+
+## 19. ka10086 일별 수급 자동화 (Phase C-2β, 2026-05-09)
+
+### 19.1 결정
+
+**커밋**: `e442416` — `feat(kiwoom): Phase C-2β — ka10086 일별 수급 자동화 (UseCase + Router + Scheduler + Lifespan, 이중 리뷰 1R PASS, 812 tests / 93.13%)`.
+
+C-1β 패턴 mechanical 차용. C-2α (인프라) 위에 자동화 레이어만 얹는 구조 — 새 설계 도입 없음.
+
+자동 분류: **계약 변경 (contract)** + `--force-2b` 적대적 리뷰 강제. 1R PASS (CRITICAL/HIGH 0).
+
+### 19.2 핵심 설계 결정
+
+- **C-1β 패턴 mechanical 차용** — UseCase / Router / Scheduler / Lifespan / Settings 시그니처 그대로 daily_flow 로 치환. 일관성으로 리뷰 부담 감소
+- **indc_mode 프로세스당 단일 정책** — lifespan factory 가 `DailyMarketDisplayMode.QUANTITY` 하드코딩 주입 (백테스팅 시그널 단위 일관성, 계획서 § 2.3 권장)
+- **cron = KST mon-fri 19:00** (ohlcv 18:30 + 30분 후) — ohlcv 적재 완료 후 수급 적재 시점에 stock master / OHLCV 모두 최신화 보장
+- **API 경로 = /api/kiwoom/daily-flow** — C-1β `/ohlcv/daily` 와 평행 명명. POST `/sync` (admin bulk) + POST `/stocks/{code}/daily-flow/refresh` (admin single) + GET `/stocks/{code}/daily-flow` (DB only)
+- **GET range cap 400일** (C-1β 2b-M1 일관) — DoS amplification 차단
+- **backfill 스크립트 보류** — C-1β 도 미구현 (DoD 미체크). 운영 정책 확정 후 별도 chunk
+
+### 19.3 적대적 이중 리뷰 결과
+
+- **2a 일반 품질 (Sonnet)**: PASS, MEDIUM 2건 (errors mutable list / ValueError 메시지 검색 — 둘 다 C-1β 동일 패턴, 본 chunk 범위 외)
+- **2b 적대적 보안 (Opus)**: PASS, C-1β 9개 핵심 보안 패턴 일관 검증 (vendor echo 차단 / admin guard / KiwoomError 매핑 / per-(stock,exchange) outcome / only_market_codes 화이트리스트 / GET range cap / cross-stock pollution / factory unset / fail-fast 순서)
+
+### 19.4 결과
+
+- **테스트 812 passed / coverage 93.13%** (C-2α 760 + C-2β 52 신규)
+- mypy --strict ✅ / ruff ✅
+- 변경 파일: 코드 7 신규 (service / router / batch_job / 4 test) + 변경 6 (deps / scheduler / settings / main / 2 test 회귀) + DoD § 10.1/10.2 갱신
+
+### 19.5 Defer (다음 일관 개선 chunk)
+
+| 항목 | 1R 리뷰 ID | 결정 시점 | 메모 |
+|------|-----------|----------|------|
+| errors mutable list → tuple | 2a M-1 | C-1β 일관 개선 chunk | 다음 refactor chunk 에서 동시 개선 |
+| ValueError 메시지 검색 → 전용 예외 | 2a M-2 | C-1β 일관 개선 chunk | `StockMasterNotFoundError(ValueError)` 도입 |
+| only_market_codes max_length=4 dead | 2a L-1 | C-1β 일관 개선 chunk | pattern={1,2} 와 일치하도록 |
+| DailyFlowRowOut.fetched_at None 타입 | 2a L-2 | 다음 chunk | ORM NOT NULL → non-Optional or 주석 |
+| `refresh_one` NXT 비-Kiwoom Exception 전파 | 2a L-5 | C-1β 일관 개선 chunk | except Exception 추가 검토 (의도적 trade-off vs 격리) |
+
+### 19.6 다음 chunk
+
+운영 dry-run 결과 § 20 의 결정 반영 → **Phase C-2γ — Migration 008** (D-E 중복 컬럼 DROP).
+
+---
+
+## 20. 운영 dry-run § 가설 B + NXT mirror + D-E 중복 발견 (2026-05-09)
+
+### 20.1 dry-run 환경
+
+- **방식**: env appkey/secretkey + DB 우회 → KiwoomAuthClient + KiwoomClient.call_paginated 직접 사용
+- **스크립트**: `scripts/dry_run_ka10086_capture.py` — `--analyze-only` 재분석 모드 포함
+- **샘플**: 005930 (삼성전자) / 000660 (SK하이닉스) / 035720 (카카오) × KRX + NXT × 2026-05-08 → 6 캡처 / 1,200 row
+- **분석 함수 5종**: fill_rate / sign_patterns / nxt_mirror / partial_mirror_breakdown / d_vs_e_equality / for_qty_invariant
+
+### 20.2 발견 사항 (3건)
+
+#### 발견 #1 — D 카테고리 ↔ E 카테고리 100% 중복 (3개 컬럼 쌍)
+
+| 컬럼 쌍 (D ↔ E) | 동일률 | row 검사 |
+|------------------|--------|----------|
+| `ind` ↔ `ind_netprps` | **100%** | 1200/1200 |
+| `orgn` ↔ `orgn_netprps` | **100%** | 1200/1200 |
+| `for_qty` ↔ `for_netprps` | **100%** | 1200/1200 |
+| `frgn` ↔ `for_netprps` | 0% | 1200/1200 다름 (외국계 brokerage ≠ 외인 net) |
+
+**해석**: 키움 API 가 명세상 다른 D/E 카테고리에 **같은 데이터를 두 번 응답**. 작업계획서 § 3.2 R15 주의 (외국인순매수 거래량으로만 응답) 의 의미가 사실상 **`for_netprps` ≡ `for_qty`**. 명세 vs 실제 응답 mismatch.
+
+**stock_daily_flow 13개 영속 컬럼 중 3개가 데이터 중복**:
+- `individual_net` ≡ `individual_net_purchase`
+- `institutional_net` ≡ `institutional_net_purchase`
+- `foreign_volume` ≡ `foreign_net_purchase`
+
+#### 발견 #2 — NXT 분리 row 의 의미 (외인 외 6개 컬럼만)
+
+| 컬럼 | KRX↔NXT 동일률 | 결론 |
+|------|---------------|------|
+| `for_qty`, `for_netprps` | **100% mirror** | NXT의 외인 컬럼은 KRX 중복 (정보 없음) |
+| `ind`, `orgn`, `frgn`, `prm`, `orgn_netprps`, `ind_netprps` | **0% mirror** | NXT 가 독립 집계 (분리 row 의미 명확) |
+
+→ NXT row 적재 가치 살아있음 (개인/기관/외국계/프로그램 분리 데이터). 외인 컬럼만 KRX 중복.
+
+#### 발견 #3 — 가설 B (`--XXX` → `-XXX`) 강력 지지
+
+| 패턴 | 발견 | 결론 |
+|------|------|------|
+| `--XXX` (이중 음수 prefix) | 4,454건 (다중 컬럼) | "음수 prefix + 음수 값" 시사 |
+| `++XXX` | **0건** | 가설 B 의 대칭 케이스 부재 → 단순 prefix duplication |
+| 혼합 (`+-`, `-+`) | **0건** | 신규 패턴 없음 |
+| 단일 `+XXX` | 정상 발견 | 양수는 단일 prefix |
+| `for_qty >= |for_netprps|` | 위반 0/1200 | (※ for_qty == for_netprps 라 자명한 통과 — 검증 의미 없음) |
+
+→ `_strip_double_sign_int` 가설 B 운영 채택 OK. 단 **KOSCOM 공시 1~2건 수동 cross-check 권고** (문서화 목적, 가설 최종 확정).
+
+### 20.3 결정 (사용자 승인)
+
+| # | 사안 | 결정 | 코드 변경 시점 |
+|---|------|------|----------------|
+| 1 | D-E 중복 컬럼 3개 | **Migration 008 — 컬럼 DROP** (13→10) | 별도 chunk (C-2γ) |
+| 2 | NXT row 외인 컬럼 100% mirror | **현 상태 유지** (KRX 중복 적재) — 단순 조정 | 코드 변경 없음 |
+| 3 | 가설 B `--XXX` → `-XXX` | **운영 채택 확정** (KOSCOM cross-check 1~2건 권고) | 코드 변경 없음 |
+
+### 20.4 미해결 운영 검증 (Defer)
+
+| 항목 | 결정 시점 | 메모 |
+|------|----------|------|
+| KOSCOM 공시 cross-check (1~2건) | 향후 운영 검증 | 가설 B 최종 확정 — sample 종목·일자 수동 비교 |
+| `indc_tp=1` (금액 모드) 단위 mismatch | 향후 운영 검증 | for_netprps 가 indc_tp 무시 항상 수량인지 명세 vs 실제 검증 |
+| ka10081 vs ka10086 OHLCV cross-check | Phase H 데이터 품질 | source 신뢰도 |
+| 페이지네이션 빈도 / 3년 백필 시간 | C-2 backfill chunk | 실측 — sync cron 시간 조정 (현재 19:00) |
+| active 3000 + NXT 1500 sync 실측 시간 | 운영 1주 모니터 | 30~60분 추정 |
+| NUMERIC(8,4) magnitude 분포 | C-2 backfill chunk 후 | credit_rate / foreign_rate / foreign_weight 단위 변경 abort 위험 |
+
+### 20.5 산출물
+
+- `scripts/dry_run_ka10086_capture.py` — env 기반 단발 캡처 + 5종 분석 + `--analyze-only` 재분석
+- `captures/ka10086-dryrun-20260508.json` — 1,200 row 샘플 raw + normalized + analysis (gitignore 권장 — vendor 응답 raw 외부 노출 차단)
+
+### 20.6 다음 chunk 후보
+
+1. **C-2γ — Migration 008** (D-E 중복 컬럼 DROP, 13→10) — 본 § 20.3 #1 결정 반영
+2. **C-1β/C-2β MEDIUM 일관 개선** — § 19.5 errors mutable / ValueError 메시지 검색 정리
+3. **scripts/backfill_daily_flow.py CLI** — 3년 백필 + 시간 실측
+4. **KOSCOM cross-check 수동** — 가설 B 최종 확정 (스크립트 외 검증)
+5. **C-3 (ka10082/83 주봉/월봉, P1)** — KiwoomChartClient 메서드 추가

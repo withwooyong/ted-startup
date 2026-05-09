@@ -16,3 +16,7 @@ build/
 .env
 .env.*
 !.env.example
+
+# dry-run 캡처 — vendor (Kiwoom) 응답 raw + 파생 분석.
+# raw 응답은 외부 시스템 데이터 → 외부 노출 위험. 분석 결과는 ADR / CHANGELOG 에 요약 기록.
+captures/

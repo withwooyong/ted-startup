@@ -7,6 +7,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-09] docs(kiwoom): 운영 dry-run § ka10086 가설 B 확정 + D-E 중복 발견 + NXT mirror 검증 (ADR-0001 § 19/20)
+
+**ka10086 운영 dry-run 1회차 완료** — 1,200 row 샘플 (3 종목 × KRX/NXT × 2026-05-08) 캡처 후 5종 분석. 코드 변경 없음, 산출물은 `scripts/dry_run_ka10086_capture.py` + ADR § 19/20 기록 + `.gitignore` 의 `captures/` 추가.
+
+### Added — dry-run capture 스크립트
+
+- `src/backend_kiwoom/scripts/dry_run_ka10086_capture.py` (신규, ~530 lines):
+  - env appkey/secretkey 직접 사용 (DB / TokenManager 우회)
+  - `KiwoomClient.call_paginated` 직접 호출 + `--max-rows`/`--max-pages` early termination (KiwoomMaxPagesExceededError 회피)
+  - 5종 분석: fill_rate / sign_patterns / nxt_mirror / partial_mirror_breakdown / d_vs_e_equality / for_qty_invariant
+  - `--analyze-only <json>` 재분석 모드 (API 재호출 없음)
+  - 안전: DB write 0 (read-only) / 토큰 출력 미포함 / 앱키·시크릿키는 env 만
+
+### Added — ADR-0001 § 19 (Phase C-2β 자동화 결정 기록)
+
+- C-1β 패턴 mechanical 차용 / indc_mode QUANTITY 디폴트 / cron 19:00 KST / GET range cap 400일
+- 1R 적대적 이중 리뷰 매핑 + Defer 5건 (C-1β 일관 개선 chunk 대기)
+- 다음 chunk: § 20 결정 반영 → C-2γ Migration 008
+
+### Added — ADR-0001 § 20 (운영 dry-run 결과)
+
+**발견 사항 3건**:
+1. **D 카테고리 ↔ E 카테고리 100% 중복** — `ind ≡ ind_netprps`, `orgn ≡ orgn_netprps`, `for_qty ≡ for_netprps` (1200/1200 row 동일). frgn ≠ for_netprps (외국계 brokerage 별개)
+2. **NXT 분리 row 의미 살아있음** — 외인 컬럼 (for_qty, for_netprps) 100% mirror, 나머지 6개 0% mirror (개인/기관/외국계/프로그램/orgn_netprps/ind_netprps 분리 집계)
+3. **가설 B 강력 지지** — `--XXX` 4,454건 vs `++XXX` 0건 + mixed 0건. 단방향 음수 prefix 중복
+
+**결정 (사용자 승인)**:
+- D-E 중복 3개 컬럼 → Migration 008 DROP (별도 chunk C-2γ)
+- NXT 외인 mirror → 현 상태 유지 (KRX 중복 적재)
+- 가설 B → 운영 채택 확정 (KOSCOM cross-check 1~2건 권고)
+
+**미해결 (Defer)**: KOSCOM 공시 수동 cross-check / indc_tp=1 단위 mismatch / OHLCV cross-check (Phase H) / 페이지네이션 빈도 / 3년 백필 시간 / NUMERIC magnitude 분포
+
+### Changed — .gitignore
+
+- `src/backend_kiwoom/.gitignore` — `captures/` 추가. vendor raw 응답 (Kiwoom 제공 데이터) 외부 노출 차단. 분석 결과는 ADR / CHANGELOG 요약으로만 보관
+
+---
+
 ## [2026-05-09] feat(kiwoom): Phase C-2β — ka10086 일별 수급 자동화 (UseCase + Router + Scheduler + Lifespan, 이중 리뷰 1R PASS, 812 tests / 93.13%)
 
 **Phase C 네 번째 chunk** — ka10086 자동화 레이어 (UseCase + Router + Scheduler + Lifespan). C-2α 인프라 위에 자동화만 얹는 구조. C-1β (ka10081 자동화) 패턴을 daily_flow 도메인으로 mechanical 차용.
