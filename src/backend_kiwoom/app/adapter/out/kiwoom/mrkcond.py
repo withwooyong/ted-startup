@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
@@ -33,7 +34,11 @@ from app.adapter.out.kiwoom._records import (
     DailyMarketResponse,
     DailyMarketRow,
 )
-from app.adapter.out.kiwoom.stkinfo import build_stk_cd, strip_kiwoom_suffix
+from app.adapter.out.kiwoom.stkinfo import (
+    _parse_yyyymmdd,
+    build_stk_cd,
+    strip_kiwoom_suffix,
+)
 from app.application.constants import DailyMarketDisplayMode, ExchangeType
 
 
@@ -55,6 +60,7 @@ class KiwoomMarketCondClient:
         exchange: ExchangeType = ExchangeType.KRX,
         indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyMarketRow]:
         """단일 종목·단일 거래소의 일별 수급 시계열. cont-yn 자동 페이지네이션.
 
@@ -64,6 +70,11 @@ class KiwoomMarketCondClient:
             exchange: KRX (디폴트) / NXT / SOR. build_stk_cd 가 suffix 합성.
             indc_mode: QUANTITY (디폴트, 수량) / AMOUNT (백만원).
             max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 DAILY_MARKET_MAX_PAGES.
+            since_date: 백필 하한일 (CLI backfill 전용). 페이지의 가장 오래된 row date 가
+                since_date 보다 과거 (이하) 면 다음 페이지 요청 stop. ka10081 의
+                since_date guard 와 동일 의미 — qry_dt 만 받고 종료 범위 없는 endpoint
+                특성으로 오래된 종목 백필 시 max_pages 초과 fail 방어. None (디폴트) 이면
+                기존 동작 (운영 cron 호환).
 
         Raises:
             ValueError: stock_code 가 6자리 ASCII 숫자 외 (build_stk_cd 사전 검증).
@@ -130,7 +141,40 @@ class KiwoomMarketCondClient:
 
             all_rows.extend(parsed.daly_stkpc)
 
+            # since_date guard — chart.py fetch_daily 와 동일 의미. ka10086 응답은 신→구
+            # 정렬 가정 (계획서 § 6.1) — 페이지의 마지막 row 가 가장 과거. 가장 과거 row 의
+            # date 가 since_date 보다 과거 (이하) 면 다음 페이지 요청 stop.
+            if since_date is not None and self._page_reached_since(
+                parsed.daly_stkpc, since_date
+            ):
+                break
+
+        # since_date 보다 과거인 row 제거 (마지막 페이지 fragment).
+        if since_date is not None:
+            all_rows = [r for r in all_rows if self._row_on_or_after(r, since_date)]
+
         return all_rows
+
+    @staticmethod
+    def _page_reached_since(rows: Sequence[DailyMarketRow], since_date: date) -> bool:
+        """페이지의 가장 오래된 row date 가 since_date 보다 과거 (이하) 면 True.
+
+        ka10086 응답은 신→구 정렬 가정 (계획서 § 6.1) — 마지막 row 가 가장 과거.
+        빈 date 는 무시. chart.py 의 _page_reached_since 와 동일 패턴.
+        """
+        for row in reversed(rows):
+            parsed = _parse_yyyymmdd(row.date)
+            if parsed is not None:
+                return parsed <= since_date
+        return False
+
+    @staticmethod
+    def _row_on_or_after(row: DailyMarketRow, since_date: date) -> bool:
+        """row date >= since_date 면 True. 빈 date 는 keep — Repository 가 skip."""
+        parsed = _parse_yyyymmdd(row.date)
+        if parsed is None:
+            return True
+        return parsed >= since_date
 
 
 __all__ = ["KiwoomMarketCondClient"]

@@ -29,6 +29,7 @@ stock_id resolution invariant:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
@@ -43,6 +44,7 @@ from app.adapter.out.kiwoom._records import (
     NormalizedDailyFlow,
 )
 from app.adapter.out.kiwoom.mrkcond import KiwoomMarketCondClient
+from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_daily_flow import (
     StockDailyFlowRepository,
@@ -53,6 +55,9 @@ from app.application.constants import (
     StockListMarketType,
 )
 from app.application.exceptions import StockMasterNotFoundError
+
+# ka10086 호환 stock_code 패턴 — daily/weekly OHLCV 와 동일 (build_stk_cd 공유).
+_KA10086_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)
 
 logger = logging.getLogger(__name__)
 
@@ -118,22 +123,31 @@ class IngestDailyFlowUseCase:
         *,
         base_date: date | None = None,
         only_market_codes: Sequence[str] | None = None,
+        only_stock_codes: Sequence[str] | None = None,
+        _skip_base_date_validation: bool = False,
+        since_date: date | None = None,
     ) -> DailyFlowSyncResult:
         """active stock 순회 → ka10086 호출 → KRX (+ 옵션 NXT) 적재.
 
         Parameters:
             base_date: 기준일자. None 이면 KST today.
             only_market_codes: 특정 시장만 sync. None 이면 전체.
+            only_stock_codes: 특정 종목만 sync (CLI 디버그 / resume). None 이면 전체.
+                둘 다 지정 시 AND 조건. C-1β 일관.
+            _skip_base_date_validation: True 면 base_date 의 1년 cap 우회 (CLI backfill 전용).
+                미래 가드는 유지. 운영 라우터는 디폴트 False (C-backfill H-1).
+            since_date: ka10086 페이지네이션 하한일 (CLI backfill 전용). None 이면 운영
+                cron 기존 동작.
 
         Raises:
-            ValueError: base_date 가 미래 또는 today - 365일 초과 과거,
+            ValueError: base_date 가 미래 또는 (skip=False 시) today - 365일 초과 과거,
                 또는 unknown market_code (silent no-op 차단).
 
         Returns:
             DailyFlowSyncResult — total / success_krx / success_nxt / failed + errors.
         """
         asof = base_date or date.today()
-        self._validate_base_date(asof)
+        self._validate_base_date(asof, skip_past_cap=_skip_base_date_validation)
         if only_market_codes is not None:
             self._validate_market_codes(only_market_codes)
 
@@ -141,8 +155,26 @@ class IngestDailyFlowUseCase:
             stmt = select(Stock).where(Stock.is_active.is_(True))
             if only_market_codes:
                 stmt = stmt.where(Stock.market_code.in_(only_market_codes))
+            if only_stock_codes:
+                stmt = stmt.where(Stock.stock_code.in_(only_stock_codes))
             stmt = stmt.order_by(Stock.market_code, Stock.stock_code)
-            active_stocks = list((await session.execute(stmt)).scalars())
+            raw_stocks = list((await session.execute(stmt)).scalars())
+
+        # ka10086 호환 stock_code 만 keep — OHLCV daily/weekly 와 동일 정책 (ETF/ETN/우선주
+        # skip + 가시성 로깅). build_stk_cd ValueError 로 호출 차단되어 errors 누적되던 것을
+        # 사전 필터.
+        active_stocks = [s for s in raw_stocks if _KA10086_COMPATIBLE_RE.fullmatch(s.stock_code)]
+        skipped_count = len(raw_stocks) - len(active_stocks)
+        if skipped_count > 0:
+            sample = [
+                s.stock_code for s in raw_stocks if not _KA10086_COMPATIBLE_RE.fullmatch(s.stock_code)
+            ][:5]
+            logger.info(
+                "ka10086 호환 가드 — active %d 중 %d 종목 skip (ETF/ETN/우선주 추정), sample=%s",
+                len(raw_stocks),
+                skipped_count,
+                sample,
+            )
 
         success_krx = 0
         success_nxt = 0
@@ -151,7 +183,9 @@ class IngestDailyFlowUseCase:
 
         for stock in active_stocks:
             try:
-                await self._ingest_one(stock, base_date=asof, exchange=ExchangeType.KRX)
+                await self._ingest_one(
+                    stock, base_date=asof, exchange=ExchangeType.KRX, since_date=since_date
+                )
                 success_krx += 1
             except KiwoomError as exc:
                 failed += 1
@@ -183,7 +217,9 @@ class IngestDailyFlowUseCase:
             if not (self._nxt_enabled and stock.nxt_enable):
                 continue
             try:
-                await self._ingest_one(stock, base_date=asof, exchange=ExchangeType.NXT)
+                await self._ingest_one(
+                    stock, base_date=asof, exchange=ExchangeType.NXT, since_date=since_date
+                )
                 success_nxt += 1
             except KiwoomError as exc:
                 failed += 1
@@ -220,7 +256,13 @@ class IngestDailyFlowUseCase:
             errors=tuple(errors),
         )
 
-    async def refresh_one(self, stock_code: str, *, base_date: date) -> DailyFlowSyncResult:
+    async def refresh_one(
+        self,
+        stock_code: str,
+        *,
+        base_date: date,
+        _skip_base_date_validation: bool = False,
+    ) -> DailyFlowSyncResult:
         """단건 새로고침 — admin POST /stocks/{code}/daily-flow/refresh.
 
         Stock 마스터에 active 로 등록돼 있어야 함 (ensure_exists 미사용).
@@ -231,8 +273,10 @@ class IngestDailyFlowUseCase:
             응답 200 + success_krx=1 + failed=1 — admin 이 "KRX 성공, NXT 실패" 인지.
             R1 (L-5): KiwoomError 외 비-Kiwoom 예외 (DB / network 등) 도 격리 — execute()
             의 NXT 경로와 일관 (partial-failure 모델).
+
+            `_skip_base_date_validation`: CLI backfill 전용 (C-backfill H-1).
         """
-        self._validate_base_date(base_date)
+        self._validate_base_date(base_date, skip_past_cap=_skip_base_date_validation)
 
         async with self._session_provider() as session:
             stmt = select(Stock).where(
@@ -290,7 +334,12 @@ class IngestDailyFlowUseCase:
         )
 
     async def _ingest_one(
-        self, stock: Stock, *, base_date: date, exchange: ExchangeType
+        self,
+        stock: Stock,
+        *,
+        base_date: date,
+        exchange: ExchangeType,
+        since_date: date | None = None,
     ) -> int:
         """한 종목·한 거래소 sync — 키움 호출 + 정규화 + DB upsert. 영향 row 수 반환."""
         rows: list[DailyMarketRow] = await self._client.fetch_daily_market(
@@ -298,6 +347,7 @@ class IngestDailyFlowUseCase:
             query_date=base_date,
             exchange=exchange,
             indc_mode=self._indc_mode,
+            since_date=since_date,
         )
 
         normalized: list[NormalizedDailyFlow] = [
@@ -309,11 +359,16 @@ class IngestDailyFlowUseCase:
             repo = StockDailyFlowRepository(session)
             return await repo.upsert_many(normalized)
 
-    def _validate_base_date(self, base_date: date) -> None:
-        """today - 365일 ~ today 외 → ValueError (C-1β 일관)."""
+    def _validate_base_date(self, base_date: date, *, skip_past_cap: bool = False) -> None:
+        """미래 가드는 항상 적용. skip_past_cap=True 면 1년 cap 우회 (CLI backfill 전용).
+
+        C-1β 일관 — 운영 라우터는 디폴트 False 로 1년 cap 유지.
+        """
         today = date.today()
         if base_date > today:
             raise ValueError(f"base_date 가 미래: {base_date} > {today}")
+        if skip_past_cap:
+            return
         oldest_allowed = today - timedelta(days=BASE_DATE_MAX_PAST_DAYS)
         if base_date < oldest_allowed:
             raise ValueError(

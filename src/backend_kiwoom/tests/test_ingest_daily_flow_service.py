@@ -144,6 +144,7 @@ def _stub_client(
         exchange: ExchangeType = ExchangeType.KRX,
         indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyMarketRow]:
         store = krx_responses if exchange is ExchangeType.KRX else nxt_responses
         result = store.get(stock_code, [])
@@ -448,6 +449,7 @@ async def test_execute_skips_inactive_stocks(
         exchange: ExchangeType = ExchangeType.KRX,
         indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyMarketRow]:
         called.append(stock_code)
         return [_row("20250908")]
@@ -637,6 +639,7 @@ async def test_execute_propagates_indc_mode_to_adapter(
         exchange: ExchangeType = ExchangeType.KRX,
         indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyMarketRow]:
         captured_modes.append(indc_mode)
         return []
@@ -672,6 +675,7 @@ async def test_execute_default_indc_mode_is_quantity(
         exchange: ExchangeType = ExchangeType.KRX,
         indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyMarketRow]:
         captured_modes.append(indc_mode)
         return []
@@ -686,3 +690,193 @@ async def test_execute_default_indc_mode_is_quantity(
     await uc.execute(base_date=date(2025, 9, 8))
 
     assert captured_modes == [DailyMarketDisplayMode.QUANTITY]
+
+
+# ---------- ka10086 호환 stock_code 가드 (ETF/ETN/우선주 skip) ----------
+
+
+@pytest.mark.asyncio
+async def test_execute_skips_etf_etn_with_alphabetic_stock_code(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """영문 포함 stock_code (ETF/ETN — `0000D0`) 는 fullmatch fail → 사전 skip + 가시성 로깅.
+
+    OHLCV 백필 패턴 일관 — KOSPI active 의 12% 영문 포함 코드. build_stk_cd ValueError
+    로 호출 차단되어 errors 누적되던 것을 사전 필터.
+    """
+    await _create_active_stock(session, "005930", "삼성전자")
+    await _create_active_stock(session, "0000D0", "코덱스200ETF")  # ETF — fullmatch fail
+    await session.commit()
+
+    captured_codes: list[str] = []
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        query_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyMarketRow]:
+        captured_codes.append(stock_code)
+        return []
+
+    client = AsyncMock(spec=KiwoomMarketCondClient)
+    client.fetch_daily_market = _fetch
+    uc = IngestDailyFlowUseCase(
+        session_provider=session_provider,
+        mrkcond_client=client,
+        nxt_collection_enabled=False,
+    )
+    result = await uc.execute(base_date=date(2025, 9, 8))
+
+    assert captured_codes == ["005930"], "ETF (0000D0) skip — 005930 만 호출"
+    assert result.total == 1, "raw_stocks 2 → 호환 1 (skip 1)"
+    assert result.failed == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_skips_short_stock_code(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """알파벳 포함 stock_code (ETN — `12345A`) 는 fullmatch fail → skip."""
+    await _create_active_stock(session, "005930", "삼성전자")
+    await _create_active_stock(session, "12345A", "ETN샘플", market="0")
+    await session.commit()
+
+    captured_codes: list[str] = []
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        query_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyMarketRow]:
+        captured_codes.append(stock_code)
+        return []
+
+    client = AsyncMock(spec=KiwoomMarketCondClient)
+    client.fetch_daily_market = _fetch
+    uc = IngestDailyFlowUseCase(
+        session_provider=session_provider,
+        mrkcond_client=client,
+        nxt_collection_enabled=False,
+    )
+    result = await uc.execute(base_date=date(2025, 9, 8))
+
+    assert captured_codes == ["005930"]
+    assert result.total == 1
+
+
+# ---------- since_date 전파 (CLI backfill — max_pages 초과 방어) ----------
+
+
+@pytest.mark.asyncio
+async def test_execute_propagates_since_date_to_adapter(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """UseCase.execute(since_date=...) 가 mrkcond.fetch_daily_market 까지 그대로 전파."""
+    await _create_active_stock(session, "005930", "삼성전자")
+    await session.commit()
+
+    captured_since: list[date | None] = []
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        query_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyMarketRow]:
+        captured_since.append(since_date)
+        return []
+
+    client = AsyncMock(spec=KiwoomMarketCondClient)
+    client.fetch_daily_market = _fetch
+    uc = IngestDailyFlowUseCase(
+        session_provider=session_provider,
+        mrkcond_client=client,
+        nxt_collection_enabled=False,
+    )
+    await uc.execute(base_date=date(2025, 9, 8), since_date=date(2022, 9, 8))
+
+    assert captured_since == [date(2022, 9, 8)]
+
+
+@pytest.mark.asyncio
+async def test_execute_skip_base_date_validation_allows_old_base_date(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """`_skip_base_date_validation=True` → 1년 cap 우회 (CLI backfill H-1)."""
+    await _create_active_stock(session, "005930", "삼성전자")
+    await session.commit()
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        query_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyMarketRow]:
+        return []
+
+    client = AsyncMock(spec=KiwoomMarketCondClient)
+    client.fetch_daily_market = _fetch
+    uc = IngestDailyFlowUseCase(
+        session_provider=session_provider,
+        mrkcond_client=client,
+        nxt_collection_enabled=False,
+    )
+    # 3년 전 base_date — _skip_base_date_validation=False 면 ValueError
+    old_base = date.today() - timedelta(days=3 * 365)
+    result = await uc.execute(base_date=old_base, _skip_base_date_validation=True)
+
+    assert result.total == 1
+
+
+@pytest.mark.asyncio
+async def test_execute_only_stock_codes_filters(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """`only_stock_codes` 가 active stock 후보 list 를 좁힌다 (CLI 디버그 / resume)."""
+    await _create_active_stock(session, "005930", "삼성전자")
+    await _create_active_stock(session, "000660", "SK하이닉스")
+    await session.commit()
+
+    captured_codes: list[str] = []
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        query_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        indc_mode: DailyMarketDisplayMode = DailyMarketDisplayMode.QUANTITY,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyMarketRow]:
+        captured_codes.append(stock_code)
+        return []
+
+    client = AsyncMock(spec=KiwoomMarketCondClient)
+    client.fetch_daily_market = _fetch
+    uc = IngestDailyFlowUseCase(
+        session_provider=session_provider,
+        mrkcond_client=client,
+        nxt_collection_enabled=False,
+    )
+    await uc.execute(base_date=date(2025, 9, 8), only_stock_codes=["005930"])
+
+    assert captured_codes == ["005930"]

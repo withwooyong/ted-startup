@@ -1,102 +1,125 @@
 # Session Handoff
 
-> Last updated: 2026-05-10 (KST) — 운영 실측 measurement 완료
+> Last updated: 2026-05-10 (KST) — daily_flow (ka10086) 백필 CLI 신규 완료
 > Branch: `master`
-> Latest commit (커밋 대기): `docs(kiwoom): 운영 실측 measurement 완료 — full 3년 백필 34분 / failed 0 / NUMERIC 안전`
-> 직전 푸시: `d60a9b3` — since_date guard fix
-> 미푸시 commit: `76b3a4a` (max-stocks fix), `c75ede6` (ETF guard) + 본 chunk
+> Latest commit: `<this commit>` — feat(kiwoom): daily_flow (ka10086) 백필 CLI 신규
+> 미푸시 commit: 1 건 (사용자 push 명시 대기)
 
 ## Current Status
 
-`backfill_ohlcv.py` smoke → mid → full **3 단계 측정 완료**. **full 3년 백필 34분 / 4078 호환 / 0 failed** (KRX 2,732,031 rows + NXT 152,152 rows). NUMERIC(8,4) `turnover_rate` max 3,257.80 (cap 33%) — **마이그레이션 불필요**. ADR § 26.5 + results.md 채움. 본 chunk 는 **코드 0 변경 docs only** — 측정 결과 documentation.
+`scripts/backfill_daily_flow.py` 신규 + `IngestDailyFlowUseCase` 확장. **OHLCV 백필 (§ 26) 운영 실측에서 발견된 차단 fix 3건 패턴을 처음부터 사전 적용** — mock 테스트가 못 잡는 운영 edge case 방어.
 
-## Completed This Session (커밋 대기)
+**핵심 산출**:
+- 새 CLI: `scripts/backfill_daily_flow.py` (~480 lines, OHLCV 백필 패턴 1:1 응용 + indc-mode 옵션)
+- mrkcond.py since_date — chart.py 패턴 헬퍼 2건 (`_page_reached_since` / `_row_on_or_after`)
+- IngestDailyFlowUseCase — `_KA10086_COMPATIBLE_RE` ETF 가드 + only_stock_codes/skip_base_date_validation/since_date 확장
+- ADR § 27 신규 + plan doc `phase-c-backfill-daily-flow.md` 신규
+- 테스트 +31 (993 → 1024) / coverage 95%
 
-| # | Task | 산출물 | Notes |
-|---|------|--------|-------|
-| 1 | **smoke 측정** | KOSPI 10/1y → 6 success_krx / 0 failed / 1s | 3 fix (since_date / max-stocks / ETF guard) 동시 작동 검증 |
-| 2 | **mid 측정** | KOSPI 100/3y → 78 success / 0 failed / 44s | dry-run 추정 5분 → 실측 44s (8.5x 빠름) |
-| 3 | **full 측정** | active 4078/3y → 4078 success_krx + 626 NXT / 0 failed / **34분** | dry-run 추정 1h 13m → 실측 34m (2.1x 빠름) |
-| 4 | NUMERIC SQL 측정 | `turnover_rate` max 3,257.80 / cap 33% | `change_rate` 등은 daily_flow chunk 에서 측정 |
-| 5 | ADR § 26.5 채움 | 측정값 4건 + 신규 발견 3건 + follow-up F6 + 적재 통계 | `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` |
-| 6 | results.md 채움 | 빈 양식 → 측정값 전 항목 채움 | `src/backend_kiwoom/docs/operations/backfill-measurement-results.md` |
-| 7 | STATUS / HANDOFF / CHANGELOG 동시 갱신 | 3 문서 동시 갱신 + 미해결 #4/#5/#6 해소 표시 | backend_kiwoom CLAUDE.md § 1 |
+## Completed This Session
+
+| # | Task | 핵심 |
+|---|------|------|
+| 1 | **plan doc 신규** | `docs/plans/phase-c-backfill-daily-flow.md` — chunk DoD / 영향 범위 / 운영 미해결 4건 (CLAUDE.md § 3 권고) |
+| 2 | **TDD red 작성** | mrkcond +2 / daily_flow_service +5 / CLI +24 cases (Step 0) |
+| 3 | **mrkcond.py since_date** | `fetch_daily_market(since_date=)` + 헬퍼 2건. chart.py 패턴 1:1 |
+| 4 | **IngestDailyFlowUseCase 확장** | ETF 가드 (raw_stocks fullmatch + sample 5 로깅) + execute/refresh_one 신규 파라미터 (모두 디폴트값 — 라우터/cron 호환) |
+| 5 | **backfill_daily_flow.py CLI 신규** | argparse / resolve_indc_mode / dry-run (1 page ~300 거래일 추정) / resume (`stock_daily_flow.trading_date` max) / `_build_use_case` 외부 lifespan |
+| 6 | **Verification 4 관문** | ruff PASS / mypy --strict PASS / 1024 tests / coverage 95% |
+| 7 | **STATUS / CHANGELOG / ADR § 27 / plan doc 동시 갱신** | CLAUDE.md § 1 일관 |
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 1 | 본 세션 산출물 커밋 + 푸시 | pending | 사용자 승인 후. 미푸시 commit 누적: 76b3a4a + c75ede6 + 본 chunk |
-| 2 | **daily_flow (ka10086) 백필 CLI** | not started | 다음 chunk 1순위. `change_rate` / `foreign_holding_ratio` / `credit_ratio` NUMERIC 측정 |
-| 3 | **scheduler_enabled 운영 cron 활성** | pending | 측정 #4 미수행 — 1주 모니터 후 ADR § 26.5 추가 |
-| 4 | follow-up F6/F7/F8 | pending | LOW 우선순위 일괄 분석 |
+| 1 | **daily_flow 백필 운영 실측** (사용자 수동) | not started | smoke → mid → full 3 단계 (OHLCV § 26.5 흐름). § 27.5 채우기 |
+| 2 | **scheduler_enabled 운영 cron 활성** | not started | 측정 #4 (일간 cron elapsed) — OHLCV HANDOFF 부터 누적 미수행 |
+| 3 | follow-up F6/F7/F8 일괄 분석 | not started | LOW (since_date edge case / turnover_rate 음수 / 빈 응답 1 종목) |
+| 4 | ETF/ETN OHLCV 별도 endpoint (옵션 c) | not started | 본 chunk 가드는 skip 만 |
+| 5 | refactor R2 (1R Defer 일괄) | pending | 기존 유지 |
 
 ## Key Decisions Made
 
-### 운영 실측 핵심 결과 4건
+### 운영 차단 fix 3건 사전 패턴 적용
 
-1. **NUMERIC(8,4) turnover_rate 마이그레이션 불필요** — max 3,257.80 (cap 33%)
-2. **NXT 수집 prod 활성** — 626 종목 sync 검증
-3. **3년 백필 시간 예산 ~ 34분** — daily_flow 백필도 유사 범위 추정
-4. **ETF/ETN 정책 (a) 채택** — UseCase 가드 + 향후 별도 endpoint chunk
+OHLCV 백필 (`d60a9b3`/`76b3a4a`/`c75ede6`) 의 fix 패턴이 daily_flow 에서도 **사전 적용 (운영 실측 진입 전)**:
 
-### 운영 발견 누적 6건 (이번 측정 chain)
+| # | OHLCV 운영 차단 | daily_flow 사전 적용 |
+|---|----------------|--------------------|
+| 1 | since_date guard | ✅ mrkcond.py `_page_reached_since` / `_row_on_or_after` |
+| 2 | `--max-stocks` CLI bug | ✅ `_list_active_stock_codes` + `effective_stock_codes` 일관 (코드 0 차이) |
+| 3 | ETF/ETN 호환 가드 | ✅ `_KA10086_COMPATIBLE_RE` 사전 필터 + sample 5 가시성 로깅 |
 
-| 순위 | 항목 | 해소 |
-|------|------|------|
-| #1 | since_date guard 누락 (max_pages 초과) | ✅ `d60a9b3` |
-| #2 | `--max-stocks` CLI bug | ✅ `76b3a4a` |
-| #3 | ETF/ETN stock_code 호환성 | ✅ `c75ede6` |
-| F6 | since_date edge case (2 종목 더 과거) | LOW follow-up |
-| F7 | turnover_rate 음수 anomaly | LOW follow-up |
-| F8 | 1 종목 빈 응답 | LOW follow-up |
+**의의**: mock 테스트가 운영 edge case (cont-yn=N 짧은 종료, 빈 next-key, ETF 코드) 를 재현 못 한다는 한계 (`12f0daf` HANDOFF) 를 운영 실측 진입 전 일괄 사전 적용으로 부분 완화. 새 운영 edge case 발견 시 OHLCV 와 동일 chunk 분리 방침 (즉시 fix + 다음 chunk).
 
-### 코드 0 변경 chunk
+### CLI 구조 — period dispatch 부재
 
-본 chunk 는 docs / ADR 갱신만 — 코드 변경 0. 측정 결과를 단일 commit 으로 명시하는 것이 변경 추적 명확성에 유리 (직전 chunk 들과 분리).
+OHLCV 백필 (`backfill_ohlcv.py` 637줄) 의 `--period` 분기와 `_RESUME_TABLE_BY_PERIOD` 매핑은 daily_flow 에 불필요 (단일 endpoint ka10086). 따라서:
+
+- `_RESUME_TABLE` 단일 상수 (`kiwoom.stock_daily_flow`)
+- `compute_resume_remaining_codes` 시그니처에 period 인자 없음
+- CLI 약 480줄로 OHLCV 대비 단순
+
+### `--indc-mode` 노출 결정
+
+`IngestDailyFlowUseCase` 의 `indc_mode` 는 lifespan factory 가 settings 기반 단일 정책 묶음 (계획서 § 6.3). 그러나 백필 CLI 는 디버그 / cross-check 용으로 quantity / amount 를 모두 시도해보고 싶을 수 있어 CLI 옵션으로 노출 (`resolve_indc_mode` 헬퍼 + tests 3 cases).
+
+### 코드 변경 vs 운영 실측 chunk 분리
+
+OHLCV 백필 chunk (`055e81e`) 와 동일 정책 — 본 chunk 는 **CLI 코드 + 패턴 사전 적용 + 단위 테스트** 범위. 운영 실측 (smoke / mid / full) 은 사용자 수동 실행 후 별도 measurement chunk (§ 27.5 채움).
 
 ## Known Issues
 
-- (해소) since_date / max-stocks / ETF — 3 fix 모두 ✅
-- **F6**: since_date guard 가 일부 종목 (002690 동일제강 / 004440 삼일씨엔에스) 에서 break 안 됨. 4078 중 2 종목 = 0.05%. row 수 3,626 / 2,732,031 = 0.13%. 데이터 가치 nuetral~plus
-- **F7**: turnover_rate min -57.32 — 회전율 음수는 보통 없음. 수정주가 조정 또는 키움 데이터 표기 anomaly 추정
-- **F8**: full backfill 의 1 종목이 빈 응답 (4078 fetch 시도 / DISTINCT stock_id 4077 적재). 신규 상장 직전 / 거래 정지 후보
+본 chunk 신규 발견 0건. 기존 알려진 항목:
+
+- **OHLCV F6/F7/F8** (LOW): since_date edge case (002690) / turnover_rate 음수 / 빈 응답 1 종목
 - **일간 cron elapsed 미측정** — `scheduler_enabled=true` 활성 후 1주 모니터 필요
+- **ETF/ETN OHLCV 자체** — 가드는 skip 만. 옵션 (c) 별도 chunk 필요
 
 ## Context for Next Session
 
 ### 사용자의 원래 의도
 
-`backfill_ohlcv.py` 실측 진입 흐름 (1순위 → 2순위 → smoke → mid → full). 본 chunk 가 마지막 단계 (full + measurement docs). 다음은 daily_flow 또는 운영 cron 활성.
+직전 세션 종료 시점 1순위 결정 — **daily_flow 백필 CLI**. HANDOFF Pending #1 → 본 chunk 가 흐름 완주.
 
 ### 선택된 접근 + 이유
 
-- **본 chunk = docs only** — 코드 변경 없는 측정 결과 documentation. 직전 3 chunk (since_date / max-stocks / ETF) 와 분리해 변경 추적 명확
-- **measurement 순서 smoke → mid → full** — 안전 단계적 검증. 각 단계 결과로 다음 단계 진입 결정
+- **OHLCV 백필 패턴 1:1 응용** — period dispatch 만 제거. 학습 비용 최소화 + 검증된 구조 재사용
+- **운영 차단 fix 패턴 사전 적용** — OHLCV 에서 운영 진입 후 발견된 3건을 daily_flow 진입 전 일괄 적용 (mock 한계 부분 완화)
+- **단일 chunk** — ~750~1000 LOC 추정 → 실측 ~750 LOC. 1500 LOC 미만으로 chunk 분할 불필요
 
-### 사용자 제약 / 선호
+### 사용자 제약 / 선호 (반복 등장)
 
 - 한글 커밋 메시지
-- 푸시 명시적 요청 시만
+- 푸시는 명시 요청 시만 (`git push` 와 commit 분리)
 - backend_kiwoom CLAUDE.md § 1 — STATUS / HANDOFF / CHANGELOG 동시 갱신
-- 운영 검증 chunk 분리 패턴 유지
+- chunk 분리 패턴: 운영 발견 즉시 fix + 새 발견은 다음 chunk
 
 ### 다음 세션 진입 시 결정 필요
 
-본 chunk commit 후 미푸시 누적 (`76b3a4a` + `c75ede6` + 본 chunk) push 결정.
+다음 chunk 1순위 후보 (사용자 선택):
 
-다음 chunk 1순위:
-1. **daily_flow (ka10086) 백필 CLI** — `scripts/backfill_daily_flow.py` 신규 + `change_rate` 등 NUMERIC 측정
-2. **scheduler_enabled 활성** — 측정 #4 (일간 cron) 보완
+1. **daily_flow 백필 운영 실측** (사용자 수동) — OHLCV § 26.5 와 동일 흐름. smoke / mid / full 3 단계 + ADR § 27.5 채움
+2. **scheduler_enabled 운영 cron 활성** + 1주 모니터 (HANDOFF 부터 누적 미수행)
+3. follow-up F6/F7/F8 일괄 분석 — LOW
+4. ETF/ETN OHLCV 별도 endpoint (옵션 c) — 신규 도메인
 
-## Files Modified This Session (커밋 대기)
+## Files Modified This Session
+
+본 chunk 누적 (1 commit 예정):
 
 ```
-docs/ADR/ADR-0001-backend-kiwoom-foundation.md                            (수정 — § 26.5 채움)
-src/backend_kiwoom/docs/operations/backfill-measurement-results.md       (수정 — 빈 양식 → 측정값 전 항목 채움)
-src/backend_kiwoom/STATUS.md                                              (수정)
-CHANGELOG.md                                                              (수정 — prepend)
-HANDOFF.md                                                                (본 파일)
+src/backend_kiwoom/app/adapter/out/kiwoom/mrkcond.py                       (수정 — since_date 옵션 + 헬퍼 2)
+src/backend_kiwoom/app/application/service/daily_flow_service.py           (수정 — ETF 가드 + only_stock_codes/skip_past_cap/since_date)
+src/backend_kiwoom/scripts/backfill_daily_flow.py                          (신규 ~480 lines)
+src/backend_kiwoom/tests/test_kiwoom_mrkcond_client.py                     (수정 — +2 since_date cases)
+src/backend_kiwoom/tests/test_ingest_daily_flow_service.py                 (수정 — +5 cases / _stub_client since_date kwarg)
+src/backend_kiwoom/tests/test_backfill_daily_flow_cli.py                   (신규 ~24 cases)
+src/backend_kiwoom/docs/plans/phase-c-backfill-daily-flow.md               (신규 plan doc)
+src/backend_kiwoom/STATUS.md                                                (수정)
+docs/ADR/ADR-0001-backend-kiwoom-foundation.md                             (수정 — § 27 신규)
+CHANGELOG.md                                                                (수정 — 1 항목 prepend)
+HANDOFF.md                                                                  (본 파일)
 ```
 
-총 5 파일 / 수정 5 / 약 +220 줄
+테스트: 993 → 1024 (+31). coverage 95% (threshold 80%).

@@ -398,3 +398,75 @@ async def test_fetch_daily_market_pydantic_validation_error() -> None:
         adapter = KiwoomMarketCondClient(kc)
         with pytest.raises(KiwoomResponseValidationError):
             await adapter.fetch_daily_market("005930", query_date=date(2024, 11, 25))
+
+
+# ---------- since_date — 운영 차단 fix (max_pages 초과 방어, ka10081 일관) ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_market_since_date_breaks_pagination_when_oldest_row_passes_threshold() -> None:
+    """page 의 가장 오래된 row date <= since_date → 다음 page 요청 안 함.
+
+    ka10086 도 ka10081 와 같은 의미 (qry_dt 이후 시계열 신→구 정렬). since_date guard 가
+    백필 하한일 도달 시 조기 break + 마지막 페이지 fragment (since_date 미만 row) 응답에서 제거.
+    """
+    body_with_oldest_row_below_since = {
+        "stk_cd": "005930",
+        "daly_stkpc": [
+            {"date": "20241125", "ind": "+100"},
+            {"date": "20241120", "ind": "+200"},  # since_date=20241122 보다 과거 → break + filter
+        ],
+        "return_code": 0,
+        "return_msg": "정상",
+    }
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(
+            200,
+            json=body_with_oldest_row_below_since,
+            headers={"cont-yn": "Y", "next-key": "abc"},
+        )
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomMarketCondClient(kc)
+        rows = await adapter.fetch_daily_market(
+            "005930", query_date=date(2024, 11, 25), since_date=date(2024, 11, 22)
+        )
+
+    assert call_count == 1, "page1 oldest row (20241120) <= since_date (20241122) → break"
+    # 20241120 row 는 since_date 미만이라 filter out, 20241125 만 남음
+    assert len(rows) == 1
+    assert rows[0].date == "20241125"
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_market_since_date_none_keeps_existing_pagination() -> None:
+    """since_date=None (디폴트) → 기존 cont-yn 페이지네이션 동작 유지 (운영 cron 호환)."""
+    page2_body = {
+        "stk_cd": "005930",
+        "daly_stkpc": [
+            {"date": "20241124", "ind": "+50"},
+        ],
+        "return_code": 0,
+        "return_msg": "정상",
+    }
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
+                200, json=_SAMSUNG_FLOW_BODY, headers={"cont-yn": "Y", "next-key": "abc"}
+            )
+        return httpx.Response(200, json=page2_body, headers={"cont-yn": "N"})
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomMarketCondClient(kc)
+        rows = await adapter.fetch_daily_market("005930", query_date=date(2024, 11, 25))
+
+    assert call_count == 2, "since_date 없으면 cont-yn=N 까지 모두 fetch"
+    assert len(rows) == 2

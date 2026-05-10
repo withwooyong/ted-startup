@@ -7,6 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] feat(kiwoom): daily_flow (ka10086) 백필 CLI 신규 — OHLCV 운영 차단 fix 3건 사전 적용
+
+`scripts/backfill_daily_flow.py` 신규 + `IngestDailyFlowUseCase` 확장. OHLCV 백필 (§ 26) 운영 실측에서 발견된 차단 fix 3건 (since_date guard / `--max-stocks` 정상 적용 / ETF 호환 가드) 을 처음부터 패턴 그대로 내장 — mock 테스트가 못 잡는 운영 edge case 사전 방어.
+
+### 변경 요약
+
+| # | 영역 | 변경 |
+|---|------|------|
+| 1 | `scripts/backfill_daily_flow.py` 신규 | argparse + `--indc-mode {quantity,amount}` + `--years/--start-date/--end-date/--resume/--max-stocks/--dry-run` + `_build_use_case` lifespan 외부 + try/finally graceful close |
+| 2 | `app/adapter/out/kiwoom/mrkcond.py` | `fetch_daily_market` 에 `since_date: date \| None` 신규 + `_page_reached_since` / `_row_on_or_after` 헬퍼 (chart.py 패턴 1:1 응용) |
+| 3 | `app/application/service/daily_flow_service.py` | `_KA10086_COMPATIBLE_RE` ETF 가드 + `execute(only_stock_codes=, _skip_base_date_validation=, since_date=)` 확장 + `refresh_one(_skip_base_date_validation=)` + `_validate_base_date(skip_past_cap=)` 분기. 모든 신규 파라미터 디폴트값 — router/cron 호환 |
+| 4 | 신규 plan doc `docs/plans/phase-c-backfill-daily-flow.md` | chunk DoD / 영향 범위 / self-check / 운영 미해결 4건 |
+| 5 | ADR § 27 신규 | 결정 / 변경 범위 / 측정 대상 4건 / 운영 차단 fix 패턴 일관성 검증 |
+| 6 | 테스트 +31 cases | mrkcond +2 (since_date 페이지네이션 + None 호환) / daily_flow_service +5 (ETF/ETN/since_date 전파/skip_base_date/only_stock_codes) / backfill_daily_flow_cli +24 |
+
+### Backwards 호환
+
+- `IngestDailyFlowUseCase.execute` / `refresh_one` 신규 파라미터 모두 디폴트값 — 기존 router (`app/adapter/web/routers/daily_flow.py`) / cron (`app/batch/daily_flow_job.py`) 호출 호환
+- `KiwoomMarketCondClient.fetch_daily_market(since_date=None)` 디폴트 — 운영 cron 기존 동작 유지
+
+### 운영 검증
+
+- 단위 + 통합: **1024 tests passed** (993 → +31), coverage 95% (threshold 80%)
+- ruff + mypy --strict: PASS
+- 운영 실측 (smoke → mid → full): **본 chunk 범위 외** — 사용자 수동 실행 후 별도 measurement chunk (OHLCV 패턴 동일)
+
+---
+
 ## [2026-05-10] docs(kiwoom): 운영 실측 measurement 완료 — full 3년 백필 34분 / failed 0 / NUMERIC 안전
 
 `backfill_ohlcv.py` smoke → mid → full 3 단계 측정 완료. ADR § 26.5 + results.md 채움. **코드 변경 0** — 측정 결과 documentation.

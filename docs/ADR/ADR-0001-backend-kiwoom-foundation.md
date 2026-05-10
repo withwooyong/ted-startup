@@ -1717,3 +1717,59 @@ C-backfill 의 후속으로 **운영 실측 사전 준비물 일괄 정비** —
 - 측정 #3 NUMERIC overflow 발생 → **NUMERIC 컬럼 마이그레이션 chunk** (Migration 013) 가 1순위
 - 측정 #4 일간 cron 시간 예산 초과 → **concurrency 조정 / page-level chunking chunk**
 - 측정 1~4 모두 가설 적중 → **gap detection** 또는 **daily_flow 백필** 로 진행
+
+---
+
+## 27. daily_flow (ka10086) 백필 CLI (2026-05-10, ✅ 코드/테스트 완료, ⏳ 운영 실측 대기)
+
+> 관련 plan doc: [`phase-c-backfill-daily-flow.md`](../plans/phase-c-backfill-daily-flow.md)
+
+### 27.1 결정
+
+OHLCV 백필 (§ 26) 운영 실측 완료 후 **daily_flow (ka10086) 백필 CLI** 신규. OHLCV 백필에서 발견된 운영 차단 fix 3건 (since_date guard / `--max-stocks` 정상 적용 / ETF 호환 가드) 을 처음부터 패턴 그대로 내장 — mock 테스트가 못 잡는 운영 edge case 사전 방어.
+
+### 27.2 변경 범위
+
+- **`scripts/backfill_daily_flow.py` 신규** — `IngestDailyFlowUseCase` 의 1년 cap 우회 + `--indc-mode {quantity,amount}` + 동일 `--years/--start-date/--end-date/--resume/--max-stocks/--dry-run` 인자
+- **`mrkcond.py` `fetch_daily_market` since_date 추가** — chart.py 패턴 1:1 응용. `_page_reached_since` / `_row_on_or_after` 헬퍼. `since_date=None` 디폴트로 운영 cron 호환
+- **`IngestDailyFlowUseCase.execute` 시그니처 확장** — `only_stock_codes` / `_skip_base_date_validation` / `since_date` 파라미터 신규 (모두 디폴트값 — 라우터/cron 호환)
+- **`IngestDailyFlowUseCase.refresh_one` `_skip_base_date_validation` 추가** — CLI backfill H-1 일관
+- **`_KA10086_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)` ETF 가드** — raw_stocks fullmatch 사전 필터 + sample 5 가시성 로깅 (OHLCV daily/weekly 정책 일관)
+
+### 27.3 산출물
+
+- 코드: 3 파일 수정 + 1 파일 신규 (`scripts/backfill_daily_flow.py`)
+- 테스트: +31 cases (993 → 1024) — mrkcond +2 / service +5 / CLI +24
+- plan doc: `docs/plans/phase-c-backfill-daily-flow.md` 신규
+- 운영 실측: **본 chunk 범위 외** — OHLCV 백필 패턴 동일 (사용자 수동 smoke → mid → full)
+
+### 27.4 측정 대상 (운영 미해결 신규 4건)
+
+| # | 항목 | 가설 | 결정 기준 |
+|---|------|------|-----------|
+| 1 | 페이지네이션 빈도 (3년) | ka10086 22 필드 → 1 page ~300 거래일 → 3년 = 2~3 page (계획서 § 12.7) | 실측 < 5 page 면 OK, 초과 시 max_pages 상향 |
+| 2 | 3년 백필 elapsed | OHLCV 34분 + 페이지네이션 +α (50~100분) | 24h 이내면 OK, 초과 시 concurrency 조정 |
+| 3 | NUMERIC change_rate / foreign_holding_ratio / credit_ratio 분포 | 7,500 종목 백필 시 일부 magnitude overflow 가능 | overflow 발생 시 별도 Migration chunk |
+| 4 | 빈 응답 / ETF skip 비율 | OHLCV 와 일치 (ETF ~7%, 빈 응답 ~0.025%) | 일치 시 cross-check 검증 완료 |
+
+### 27.5 실측 결과 (TBD — 사용자 수동 실측 후 채움)
+
+(OHLCV § 26.5 와 동일 형식. 측정 후 results.md + 본 § 채움)
+
+### 27.6 운영 차단 fix 패턴 일관성 검증
+
+OHLCV 백필 (`d60a9b3`/`76b3a4a`/`c75ede6`) 의 3건 fix 가 daily_flow 백필에서 **사전 적용** 되었는지 self-check:
+
+| # | 운영 차단 | OHLCV fix commit | daily_flow 적용 |
+|---|----------|-----------------|----------------|
+| 1 | since_date guard | `d60a9b3` | ✅ mrkcond.py `_page_reached_since` / `_row_on_or_after` |
+| 2 | `--max-stocks` CLI | `76b3a4a` | ✅ `_list_active_stock_codes` + `effective_stock_codes` 로직 일관 |
+| 3 | ETF/ETN 호환 가드 | `c75ede6` | ✅ `_KA10086_COMPATIBLE_RE` 사전 필터 + sample 로깅 |
+
+mock 테스트가 운영 edge case 를 재현 못 하는 한계 (`12f0daf` HANDOFF) 를 운영 실측 진입 전 패턴 적용으로 부분 완화. 새 운영 edge case 발견 시 OHLCV 와 동일 chunk 분리 방침 (즉시 fix + 다음 chunk).
+
+### 27.7 다음 chunk 후보
+
+- 사용자 수동 실측 (smoke → mid → full) 후 § 27.5 채움 (OHLCV § 26.5 와 동일 흐름)
+- 측정 #3 NUMERIC overflow 발생 → 별도 Migration chunk
+- 모든 가설 적중 → **scheduler_enabled 운영 cron 활성** 으로 진행 (HANDOFF Pending #2)
