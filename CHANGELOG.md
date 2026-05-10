@@ -7,6 +7,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] fix(kiwoom): NXT 빈 응답 sentinel 무한 루프 fix — mrkcond + chart 4곳 `if not <list>: break`
+
+`4e75dd3` full backfill 결과 NXT 166 fail (활성 626 의 26.5%) 의 근본 원인 분석 + 즉시 fix. 키움 서버가 NXT 출범 (2025-03-04) 이전 base_dt 요청 시 빈 응답 + cont-yn=Y + next-key sentinel 후 page 1 next-key 로 되돌아가는 **무한 루프** 발견. `_page_reached_since` 가 빈 rows 시 False 반환이라 break 안 됨.
+
+### 근본 원인 (NXT 010950 ka10086 3년 reproduce)
+
+next-key 추적:
+- p1~p14: 정상 데이터 (resp-cnt=20)
+- p15: NXT 출범 직전 마지막 row (resp-cnt=10)
+- **p16: resp-cnt=0 + next-key=`A010950_NX20260511000000-1`** (sentinel)
+- **p17~: next-key=`A010950_NX2026051120260409` (p1 next-key) — page 1 부터 반복**
+
+`max_pages=40` 도달 fail. 1년 백필은 since_date 가 page 1~13 안에서 break 라 PASS, 3년 백필만 NXT 출범 이전 base_dt 진입 → 무한 루프.
+
+### 변경 요약
+
+| # | 영역 | 변경 |
+|---|------|------|
+| 1 | `app/adapter/out/kiwoom/mrkcond.py` `fetch_daily_market` | `if not parsed.daly_stkpc: break` 추가 — since_date guard 이전 |
+| 2 | `app/adapter/out/kiwoom/chart.py` `fetch_daily` | `if not parsed.stk_dt_pole_chart_qry: break` 추가 |
+| 3 | `app/adapter/out/kiwoom/chart.py` `fetch_weekly` | `if not parsed.stk_stk_pole_chart_qry: break` 추가 |
+| 4 | `app/adapter/out/kiwoom/chart.py` `fetch_monthly` | `if not parsed.stk_mth_pole_chart_qry: break` 추가 |
+| 5 | tests +2 cases | mrkcond + chart daily 빈 응답 + cont-yn=Y break 검증 |
+
+### chart.py 적용 이유
+
+OHLCV ka10081 도 동일 패턴 잠재 위험 (저거래 종목 / 장기 휴장 / NXT 출범 이전 base_dt). 현재 page row 수 ~600 이라 fail 안 했지만 patten 일관성 + 잠재 위험 방어.
+
+### 운영 검증
+
+- ruff PASS / mypy --strict PASS / **1026 tests** PASS (1024 → +2)
+- 010950 3년 reproduce fix 후: total 1 / success_krx 1 / success_nxt 1 / failed 0 / **13s** (이전 19s + fail)
+
+### Backwards 호환
+
+- since_date=None (운영 cron) 호환 — 정상 응답에서는 빈 응답 발생 안 함
+- 빈 응답 + cont-yn=N 인 정상 종료 case 도 동일하게 break (영향 없음)
+- 첫 page 빈 응답 (활성도 없는 종목 / 휴장 base_dt) 시 cont-yn 무시하고 break — 안전한 동작
+
+### 다음 chunk
+
+failed 166 NXT 종목 resume 재시도 (`--resume` ~36분 추정) → 컬럼 동일값 검증 (LOW)
+
+---
+
 ## [2026-05-11] docs(kiwoom): daily_flow Stage 0~3 + NUMERIC SQL 측정 완료 — full 9h 53m / NXT 166 fail / 마이그레이션 불필요
 
 `scripts/backfill_daily_flow.py` 운영 실측 measurement chunk. Stage 0 dry-run → Stage 1 smoke (fix 후 재시도 PASS) → Stage 2 mid → Stage 3 full → NUMERIC SQL 4 컬럼 → since_date edge cross-check 모두 완료. **코드 변경 0** — 측정 결과 documentation.

@@ -1776,7 +1776,7 @@ OHLCV 백필 (§ 26) 운영 실측 완료 후 **daily_flow (ka10086) 백필 CLI*
 
 1. **`DAILY_MARKET_MAX_PAGES = 10` 부족** (smoke 첫 시도, chunk `7c07fb7`) — mrkcond.py:50 가설 "1 page ~300 거래일" 실측 ~22 거래일 (13배 틀림). 1년 백필 = 약 12 page → max_pages 도달 fail. fix: `=40`. smoke + mid + full KRX 모두 PASS
 
-2. **NXT 166 종목 max_pages=40 도 부족** (full, MEDIUM, 별도 분석 chunk) — NXT 활성 626 중 166 fail (26.5%). sample 모두 NXT only KiwoomMaxPagesExceededError. 가설: NXT 응답이 KRX 보다 page row 수 더 적거나 cont-yn=Y 비정상 유지. NXT 출범 2025-03-04 이후 1년 2개월 데이터인데 max_pages=40 도달 = NXT 응답 패턴 차이
+2. **NXT 166 종목 max_pages=40 도 부족** (full, MEDIUM, ✅ **해소 — chunk `<flow-empty-fix>`**) — NXT 활성 626 중 166 fail (26.5%). **근본 원인**: 키움 서버가 NXT 출범 (2025-03-04) 이전 base_dt 요청 시 resp-cnt=0 + cont-yn=Y + next-key sentinel (`...20260511000000-1`) 후 page 1 next-key 로 되돌아가는 **무한 루프** (NXT 010950 ka10086 3년 단독 reproduce 검증, p1~p15 정상 + p16 sentinel + p17~ page 1 부터 반복). `_page_reached_since` 가 빈 rows 시 False 반환 → break X. **fix**: mrkcond.py / chart.py 4 곳에 `if not parsed.<list>: break` 추가. 010950 3년 백필 PASS (13s / 0 fail / NXT 1 적재). ka10081 도 일관성 + 잠재 위험 (저거래/장기 휴장 종목) 방어 적용
 
 3. **컬럼 동일값 의심** (NUMERIC SQL, LOW) — `credit_rate ≡ credit_balance_rate` / `foreign_rate ≡ foreign_weight` (min/max/p01/p99/rows 모두 일치). C-2γ Migration 008 의 D-E 중복 컬럼 DROP 패턴과 유사 → follow-up `<>` 검증 chunk → 동일 시 Migration DROP
 

@@ -443,6 +443,40 @@ async def test_fetch_daily_market_since_date_breaks_pagination_when_oldest_row_p
 
 
 @pytest.mark.asyncio
+async def test_fetch_daily_market_empty_response_breaks_pagination() -> None:
+    """빈 응답 (resp-cnt=0) + cont-yn=Y → 다음 페이지 요청 안 함.
+
+    NXT 출범 (2025-03-04) 이전 base_dt 요청 시 키움 서버가 빈 row + cont-yn=Y +
+    next-key sentinel 패턴으로 page 1 next-key 로 되돌아가는 무한 루프 방어
+    (NXT 010950 ka10086 3년 백필 reproduce 검증, 2026-05-11). since_date guard
+    가 빈 rows 시 False 반환이라 별도 break 필요.
+    """
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
+                200, json=_SAMSUNG_FLOW_BODY, headers={"cont-yn": "Y", "next-key": "abc"}
+            )
+        # page 2: 빈 응답 + cont-yn=Y (sentinel 무한 루프 패턴)
+        return httpx.Response(
+            200,
+            json={"stk_cd": "005930", "daly_stkpc": [], "return_code": 0, "return_msg": "정상"},
+            headers={"cont-yn": "Y", "next-key": "sentinel-loop"},
+        )
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomMarketCondClient(kc)
+        rows = await adapter.fetch_daily_market("005930", query_date=date(2024, 11, 25))
+
+    assert call_count == 2, "page2 빈 응답 → cont-yn=Y 무시하고 break"
+    # page 1 의 row 만 적재 (_SAMSUNG_FLOW_BODY 의 daly_stkpc = 1 row)
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
 async def test_fetch_daily_market_since_date_none_keeps_existing_pagination() -> None:
     """since_date=None (디폴트) → 기존 cont-yn 페이지네이션 동작 유지 (운영 cron 호환)."""
     page2_body = {

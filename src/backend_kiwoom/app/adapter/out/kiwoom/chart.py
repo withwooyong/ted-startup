@@ -278,6 +278,13 @@ class KiwoomChartClient:
 
             all_rows.extend(parsed.stk_dt_pole_chart_qry)
 
+            # 빈 응답 가드 — 키움 서버가 NXT 출범 이전 base_dt 등 sentinel 패턴에서
+            # resp-cnt=0 + cont-yn=Y 무한 루프 가능 (mrkcond ka10086 010950 reproduce
+            # 검증, 2026-05-11). ka10081 page row 수 ~600 이라 현재 fail 없지만 잠재
+            # 위험 (저거래 종목 / 장기 휴장) 방어. since_date guard 와 별도.
+            if not parsed.stk_dt_pole_chart_qry:
+                break
+
             # since_date guard — 페이지의 가장 오래된 row date 가 since_date 보다 과거면
             # 다음 페이지 요청 stop. ka10081 응답은 신→구 정렬 (next-key 가 점점 과거).
             # 운영 검증: base_dt 만 보내면 종목 상장일까지 무한 페이징 → max_pages 초과 fail.
@@ -376,6 +383,10 @@ class KiwoomChartClient:
 
             all_rows.extend(parsed.stk_stk_pole_chart_qry)
 
+            # 빈 응답 가드 (fetch_daily 와 동일 — sentinel 무한 루프 방어).
+            if not parsed.stk_stk_pole_chart_qry:
+                break
+
             if since_date is not None and self._page_reached_since(
                 parsed.stk_stk_pole_chart_qry, since_date
             ):
@@ -448,6 +459,10 @@ class KiwoomChartClient:
                 )
 
             all_rows.extend(parsed.stk_mth_pole_chart_qry)
+
+            # 빈 응답 가드 (fetch_daily 와 동일 — sentinel 무한 루프 방어).
+            if not parsed.stk_mth_pole_chart_qry:
+                break
 
             if since_date is not None and self._page_reached_since(
                 parsed.stk_mth_pole_chart_qry, since_date

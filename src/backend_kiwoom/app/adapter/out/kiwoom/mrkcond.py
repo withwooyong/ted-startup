@@ -143,6 +143,13 @@ class KiwoomMarketCondClient:
 
             all_rows.extend(parsed.daly_stkpc)
 
+            # 빈 응답 가드 — 키움 서버가 NXT 출범 (2025-03-04) 이전 base_dt 요청 시
+            # resp-cnt=0 + cont-yn=Y + next-key sentinel 패턴으로 page 1 next-key 로
+            # 되돌아가는 무한 루프 (NXT 010950 ka10086 3년 백필 reproduce 검증, 2026-05-11).
+            # since_date guard 가 빈 rows 시 False 반환이라 별도 break 필요.
+            if not parsed.daly_stkpc:
+                break
+
             # since_date guard — chart.py fetch_daily 와 동일 의미. ka10086 응답은 신→구
             # 정렬 가정 (계획서 § 6.1) — 페이지의 마지막 row 가 가장 과거. 가장 과거 row 의
             # date 가 since_date 보다 과거 (이하) 면 다음 페이지 요청 stop.

@@ -556,6 +556,35 @@ async def test_fetch_daily_since_date_breaks_pagination_when_oldest_row_passes_t
 
 
 @pytest.mark.asyncio
+async def test_fetch_daily_empty_response_breaks_pagination() -> None:
+    """빈 응답 + cont-yn=Y → 다음 페이지 요청 안 함 (sentinel 무한 루프 방어).
+
+    mrkcond ka10086 NXT 010950 reproduce 와 동일 패턴. ka10081 도 일관성 + 잠재 위험 방어.
+    """
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
+                200, json=_SAMSUNG_DAILY_BODY, headers={"cont-yn": "Y", "next-key": "abc"}
+            )
+        return httpx.Response(
+            200,
+            json={"stk_cd": "005930", "stk_dt_pole_chart_qry": [], "return_code": 0, "return_msg": "정상"},
+            headers={"cont-yn": "Y", "next-key": "sentinel-loop"},
+        )
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_daily("005930", base_date=date(2025, 9, 8))
+
+    assert call_count == 2, "page2 빈 응답 → cont-yn=Y 무시하고 break"
+    assert len(rows) == 2  # page 1 의 row 만
+
+
+@pytest.mark.asyncio
 async def test_fetch_daily_since_date_none_keeps_existing_pagination() -> None:
     """since_date=None (디폴트) → 기존 cont-yn 페이지네이션 동작 유지 (운영 cron 호환)."""
     page2_body = {
