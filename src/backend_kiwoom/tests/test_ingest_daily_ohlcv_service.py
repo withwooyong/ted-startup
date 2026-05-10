@@ -127,6 +127,7 @@ def _stub_client(
         exchange: ExchangeType = ExchangeType.KRX,
         adjusted: bool = True,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyChartRow]:
         store = krx_responses if exchange is ExchangeType.KRX else nxt_responses
         result = store.get(stock_code, [])
@@ -431,6 +432,7 @@ async def test_execute_skips_inactive_stocks(
         exchange: ExchangeType = ExchangeType.KRX,
         adjusted: bool = True,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyChartRow]:
         called.append(stock_code)
         return [_row("20250908")]

@@ -110,6 +110,7 @@ class IngestDailyOhlcvUseCase:
         only_market_codes: Sequence[str] | None = None,
         only_stock_codes: Sequence[str] | None = None,
         _skip_base_date_validation: bool = False,
+        since_date: date | None = None,
     ) -> OhlcvSyncResult:
         """active stock 순회 → ka10081 호출 → KRX (+ 옵션 NXT) 적재.
 
@@ -121,6 +122,9 @@ class IngestDailyOhlcvUseCase:
             _skip_base_date_validation: True 면 base_date 의 1년 cap 우회 (CLI backfill 전용).
                 미래 가드는 유지 (오타 방어). 운영 라우터는 디폴트 False — R1 invariant 유지
                 (C-backfill H-1).
+            since_date: ka10081 페이지네이션 하한일 — 이 날짜보다 과거 페이지는 요청 안 함.
+                CLI backfill 전용 (max_pages 초과 방어). None (디폴트) 이면 운영 cron 기존
+                동작 유지 (1 페이지로 종료).
 
         Raises:
             ValueError: base_date 가 미래 또는 (skip=False 시) today - 365일 초과 과거.
@@ -152,7 +156,9 @@ class IngestDailyOhlcvUseCase:
         for stock in active_stocks:
             # 2-1. KRX (디폴트 항상 시도)
             try:
-                await self._ingest_one(stock, base_date=asof, exchange=ExchangeType.KRX)
+                await self._ingest_one(
+                    stock, base_date=asof, exchange=ExchangeType.KRX, since_date=since_date
+                )
                 success_krx += 1
             except KiwoomError as exc:
                 failed += 1
@@ -185,7 +191,9 @@ class IngestDailyOhlcvUseCase:
             if not (self._nxt_enabled and stock.nxt_enable):
                 continue
             try:
-                await self._ingest_one(stock, base_date=asof, exchange=ExchangeType.NXT)
+                await self._ingest_one(
+                    stock, base_date=asof, exchange=ExchangeType.NXT, since_date=since_date
+                )
                 success_nxt += 1
             except KiwoomError as exc:
                 failed += 1
@@ -302,7 +310,12 @@ class IngestDailyOhlcvUseCase:
         )
 
     async def _ingest_one(
-        self, stock: Stock, *, base_date: date, exchange: ExchangeType
+        self,
+        stock: Stock,
+        *,
+        base_date: date,
+        exchange: ExchangeType,
+        since_date: date | None = None,
     ) -> int:
         """한 종목·한 거래소 sync — 키움 호출 + 정규화 + DB upsert. 영향 row 수 반환."""
         # 1. 키움 API 호출 (트랜잭션 밖 — DB 락 점유 시간 최소)
@@ -311,6 +324,7 @@ class IngestDailyOhlcvUseCase:
             base_date=base_date,
             exchange=exchange,
             adjusted=True,
+            since_date=since_date,
         )
 
         # 2. 정규화 (chart.py to_normalized 가 BIGINT/NaN 가드 + date.min 표식 적용)

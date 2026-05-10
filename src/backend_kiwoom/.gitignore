@@ -20,3 +20,7 @@ build/
 # dry-run 캡처 — vendor (Kiwoom) 응답 raw + 파생 분석.
 # raw 응답은 외부 시스템 데이터 → 외부 노출 위험. 분석 결과는 ADR / CHANGELOG 에 요약 기록.
 captures/
+
+# 운영 실측 / 백필 로그 — DEBUG 레벨이 vendor 응답 raw 노출 가능. 결과만 ADR / results.md 에 요약.
+logs/
+

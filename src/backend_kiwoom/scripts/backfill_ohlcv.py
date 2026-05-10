@@ -7,6 +7,10 @@
 ka10081 (일봉) + ka10082/83 (주/월봉) 의 IngestUseCase 를 그대로 재사용 + period dispatch.
 
 사용 예:
+    # 환경변수 (.env.prod 가 backend_kiwoom/ 또는 루트에 있으면 자동 로드 — export 불필요)
+    #   KIWOOM_DATABASE_URL='postgresql+asyncpg://kiwoom:kiwoom@localhost:5433/kiwoom_db'
+    #   KIWOOM_CREDENTIAL_MASTER_KEY='Fernet32B...'
+
     # dry-run — 종목 수 + 호출 수 + 시간 추정만 (DB 적재 X)
     python scripts/backfill_ohlcv.py --period daily --years 3 --alias prod --dry-run
 
@@ -44,10 +48,18 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 # scripts/ → backend_kiwoom/ 루트 import 보장
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# .env.prod 자동 로드 — backend_kiwoom/.env.prod (symlink 또는 cp) → 루트 ../../.env.prod 순서.
+# pydantic-settings 가 cwd 기준 로드라서 backend_kiwoom 외부에서 실행 시 KIWOOM_DATABASE_URL 등 누락 방지.
+for candidate in (ROOT / ".env.prod", ROOT.parent.parent / ".env.prod", ROOT / ".env"):
+    if candidate.exists():
+        load_dotenv(candidate, override=False)
 
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
@@ -582,6 +594,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                     only_market_codes=only_market_codes or None,
                     only_stock_codes=effective_stock_codes,
                     _skip_base_date_validation=True,
+                    since_date=start_date,
                 )
             else:
                 period_enum = Period.WEEKLY if args.period == "weekly" else Period.MONTHLY
@@ -591,6 +604,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                     only_market_codes=only_market_codes or None,
                     only_stock_codes=effective_stock_codes,
                     _skip_base_date_validation=True,
+                    since_date=start_date,
                 )
     except Exception:
         logger.exception("백필 실행 중 시스템 예외")

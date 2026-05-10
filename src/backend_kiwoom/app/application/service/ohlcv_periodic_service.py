@@ -110,6 +110,7 @@ class IngestPeriodicOhlcvUseCase:
         only_market_codes: Sequence[str] | None = None,
         only_stock_codes: Sequence[str] | None = None,
         _skip_base_date_validation: bool = False,
+        since_date: date | None = None,
     ) -> OhlcvSyncResult:
         """active stock 순회 → ka10082/83 호출 → KRX (+ 옵션 NXT) 적재.
 
@@ -119,6 +120,8 @@ class IngestPeriodicOhlcvUseCase:
             only_market_codes: 특정 시장만 sync. None 이면 전체.
             _skip_base_date_validation: True 면 base_date 의 1년 cap 우회 (CLI backfill 전용).
                 미래 가드는 유지. 운영 라우터는 디폴트 False (C-backfill H-1).
+            since_date: ka10082/83 페이지네이션 하한일 (CLI backfill 전용). None 이면 운영
+                cron 기존 동작 — daily 와 동일 fix (max_pages 초과 방어).
 
         Raises:
             ValueError: base_date 가 미래 또는 (skip=False 시) today - 365일 초과 과거 /
@@ -151,7 +154,13 @@ class IngestPeriodicOhlcvUseCase:
         for stock in active_stocks:
             # 2-1. KRX
             try:
-                await self._ingest_one(stock, period=period, base_date=asof, exchange=ExchangeType.KRX)
+                await self._ingest_one(
+                    stock,
+                    period=period,
+                    base_date=asof,
+                    exchange=ExchangeType.KRX,
+                    since_date=since_date,
+                )
                 success_krx += 1
             except KiwoomError as exc:
                 failed += 1
@@ -188,7 +197,13 @@ class IngestPeriodicOhlcvUseCase:
             if not (self._nxt_enabled and stock.nxt_enable):
                 continue
             try:
-                await self._ingest_one(stock, period=period, base_date=asof, exchange=ExchangeType.NXT)
+                await self._ingest_one(
+                    stock,
+                    period=period,
+                    base_date=asof,
+                    exchange=ExchangeType.NXT,
+                    since_date=since_date,
+                )
                 success_nxt += 1
             except KiwoomError as exc:
                 failed += 1
@@ -314,6 +329,7 @@ class IngestPeriodicOhlcvUseCase:
         period: Period,
         base_date: date,
         exchange: ExchangeType,
+        since_date: date | None = None,
     ) -> int:
         """한 종목·한 거래소·한 period sync — 키움 호출 + 정규화 + DB upsert."""
         # 1. period 분기 — fetch_weekly / fetch_monthly
@@ -325,6 +341,7 @@ class IngestPeriodicOhlcvUseCase:
                     base_date=base_date,
                     exchange=exchange,
                     adjusted=True,
+                    since_date=since_date,
                 )
             )
         elif period is Period.MONTHLY:
@@ -334,6 +351,7 @@ class IngestPeriodicOhlcvUseCase:
                     base_date=base_date,
                     exchange=exchange,
                     adjusted=True,
+                    since_date=since_date,
                 )
             )
         else:

@@ -1,107 +1,107 @@
 # Session Handoff
 
-> Last updated: 2026-05-10 (KST) — ka10099 운영 검증 + 2 차단 버그 fix
+> Last updated: 2026-05-10 (KST) — backfill_ohlcv smoke 실 호출 + since_date guard fix
 > Branch: `master`
-> Latest commit (커밋 대기): `fix(kiwoom): 운영 검증 도구 보강 + 실 호출에서 발견된 2 차단 버그 fix`
-> 직전 푸시: `e9ab050` — DATABASE_URL → KIWOOM_DATABASE_URL rename
+> Latest commit (커밋 대기): `fix(kiwoom): backfill_ohlcv 페이지네이션 종료 조건 신규 + dotenv autoload 보강`
+> 직전 푸시: `ba531d9` — CHANGELOG 누락 보정
 
 ## Current Status
 
-**ka10099 첫 실 호출 성공** — `register_credential.py` (alias=prod 등록) → `sync_stock_master.py` 실행 흐름 완성. **5 시장 / 4373 active stock / 630 NXT / 1.7초 elapsed**. 동시에 **2 운영 차단 버그 발견·수정**. 테스트 985 → 988. 운영 미해결 #1 (페이지네이션 빈도) 부분 검증: ka10099 는 단일 호출 (cont-yn=N).
+**backfill_ohlcv.py 첫 실 smoke** 에서 **운영 차단 버그 1건 발견·수정**. `KiwoomChartClient.fetch_daily/weekly/monthly` 가 base_dt 만 받고 종료 범위 없어 종목 상장일까지 무한 페이징 → max_pages 도달로 fail (KOSPI 1980년대 상장 종목 영향). **`since_date` 파라미터 신규** + UseCase + CLI 전파. 동시에 `backfill_ohlcv.py` dotenv autoload 누락 (직전 세션 register/sync 만 적용) 보완. 테스트 988 → 990. 실 호출 KOSPI 1782 success / 8m 55s / max_pages 초과 0건.
 
 ## Completed This Session (커밋 대기)
 
 | # | Task | 산출물 | Notes |
 |---|------|--------|-------|
-| 1 | 마스터키 운영 가이드 | `docs/operations/credential-master-key-guide.md` (신규) | 왜 필요 / 무엇이 아닌가 / 생성·보관·회전·분실 시 절차 |
-| 2 | 2 admin 스크립트 dotenv autoload | `scripts/register_credential.py` / `sync_stock_master.py` | backend_kiwoom/.env.prod → ../../env.prod 순서로 autoload. KIWOOM_API_KEY/SECRET fallback (키움 공식 명명) |
-| 3 | **next-key 빈값 fix** (운영 차단) | `app/adapter/out/kiwoom/_client.py:216, 299` | `next-key=""` 응답을 형식 오류로 reject 하던 정규식 검증 → 빈값 정상 처리. **모든 키움 API + cron 차단 해소** |
-| 4 | **upsert_many chunk 분할 fix** (운영 차단) | `app/adapter/out/persistence/repositories/stock.py` | asyncpg bind parameter 32767 한도 초과 (KOSPI 2440 × 14 = 34160). 1000/batch chunk 분할 |
-| 5 | 단위 테스트 +5 cases | `test_kiwoom_client.py` 2 / `test_stock_repository.py` 1 / `test_register_credential_cli.py` 2 | 빈 next-key / 2500 row chunking / API_KEY fallback / precedence |
-| 6 | STATUS / HANDOFF / CHANGELOG 갱신 | 3 문서 동시 갱신 | backend_kiwoom CLAUDE.md § 1 |
+| 1 | **since_date guard fix** (운영 차단) | `app/adapter/out/kiwoom/chart.py` (fetch_daily/weekly/monthly + helper 2 static method) | 페이지의 가장 오래된 row date <= since_date 면 다음 page 요청 중단. mock 테스트가 못 잡은 이유: cont-yn=N 으로 짧게 종료하는 fixture 만 사용 |
+| 2 | UseCase 시그니처 전파 | `app/application/service/ohlcv_daily_service.py` (execute / _ingest_one), `app/application/service/ohlcv_periodic_service.py` (동일) | 디폴트 None → 운영 cron 호환 (기존 1 page 종료 동작) |
+| 3 | CLI 전달 | `scripts/backfill_ohlcv.py` (since_date=start_date) | `--years 3` / `--start-date` 가 실질적 페이지네이션 cap 으로 작동 |
+| 4 | dotenv autoload 누락 보완 | `scripts/backfill_ohlcv.py` (register/sync 와 동일 패턴) | 직전 세션 admin 도구 보강에서 backfill 만 누락 |
+| 5 | 단위 테스트 +2 cases | `tests/test_kiwoom_chart_client.py` since_date page break / since_date=None 기존 동작 유지 | mock 시그니처에 since_date 인자 추가 (`tests/test_ingest_daily_ohlcv_service.py` _fetch stub 2곳) |
+| 6 | CHANGELOG / STATUS / HANDOFF 동시 갱신 | 3 문서 동시 갱신 | backend_kiwoom CLAUDE.md § 1 |
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
 | 1 | 본 세션 산출물 커밋 + 푸시 | pending | 사용자 승인 후 — 한 commit 통합 |
-| 2 | **backfill_ohlcv.py 실측** | not started | 다음 단계. smoke 10 → mid 100 → full 3000 |
-| 3 | gap detection / daily_flow 백필 / refactor R2 / ka10094 | pending | 실측 결과 후 우선순위 결정 |
-| 4 | ADR § 26.5 채움 | pending | results.md 채운 후 |
+| 2 | **CLI bug fix**: `--max-stocks` 무시 | pending | 신규 발견 — effective_stock_codes 가 max_stocks 미반영. 다음 chunk |
+| 3 | **ETF/ETN stock_code 호환성**: 251 종목 ValueError | pending | 신규 발견 — `0000D0` 같은 영문 코드. 정책 결정 필요 (skip vs 별도 endpoint) |
+| 4 | mid-scale (KOSPI 100 / 3년) → full | not started | --max-stocks fix 후 진입 |
+| 5 | ADR § 26.5 채움 | pending | 본 chunk 의 정량화 결과 (1 page / 0.3s/stock) 기록 |
 
-## Key Decisions Made (운영 검증)
+## Key Decisions Made
 
-### 발견된 운영 차단 버그 2건
+### 운영 차단 버그 발견·수정 — `since_date` guard
 
-| # | 버그 | 발견 시점 | mock 테스트가 못 잡은 이유 |
-|---|------|----------|-------------------------|
-| next-key 빈값 reject | `_client.py` 정규식 `^[...]+$` | sync_stock_master.py 첫 실 호출 | mock 응답이 항상 `next-key="page-2"` 같은 non-empty 값 사용 |
-| upsert_many bind 한도 초과 | `stock.py` 의 PG insert | 같은 호출, KOSPI 적재 시점 | 단위 테스트가 2~10 row 만 사용 (실 운영 2440) |
+| 항목 | 내용 |
+|------|------|
+| 발견 시점 | smoke 첫 호출 (`002810` KOSPI 1980년대 상장) — 4분 / 8.8MB DEBUG 로그 |
+| 증상 | `next-key` 응답이 `2006/06 → 2004/06 → 2002/01` 과거로 거슬러 → max_pages=10 도달 → `KiwoomMaxPagesExceededError` |
+| 원인 | ka10081 응답이 base_dt 부터 종목 상장일까지 무한 페이징. 종료 조건 = (cont-yn=N) 또는 (max_pages 도달) 만 존재 |
+| Fix | 페이지의 가장 오래된 row date <= since_date 면 break. since_date=None (디폴트) 면 기존 동작 유지 (운영 cron 1 page 종료 호환) |
+| 검증 | KOSPI 2031 종목 / 1782 success / 0 max_pages 초과 / avg 0.3s/stock |
 
-→ **운영 실측의 가치 입증**. 모든 endpoint 가 `_client.py` 사용 → 자동 cron (daily_flow / weekly / monthly OHLCV 등) 도 모두 차단 상태였을 것
+### Mock 테스트의 한계 (직전 세션 패턴 재현)
 
-### admin 도구 사용성 보강
-
-- **dotenv autoload** — symlink/cp 없이도 `.env.prod` 가 backend_kiwoom 또는 루트에 있으면 자동 로드
-- **KIWOOM_API_KEY/SECRET fallback** — 사용자 .env.prod 명명 (키움 공식) 호환. 둘 다 있으면 KIWOOM_APPKEY 우선
-- **마스터키 가이드 문서** — 향후 운영자 / 신규 입문자 학습 자료
+- 직전 세션: `next-key=""` 빈값 reject (`_client.py`) — mock 응답이 항상 non-empty 사용해서 못 잡음
+- 본 세션: `since_date` 종료 조건 누락 — mock 응답이 cont-yn=N 으로 짧게 종료해서 못 잡음
+- **공통**: 운영 실측의 가치 입증. 모든 endpoint 가 같은 chart.py 사용 → 백필 cron 도 차단 상태였을 것
 
 ### 단일 commit 결정
 
-- 운영 차단 버그 fix + admin 도구 보강 + 마스터키 가이드를 **한 commit 으로 통합** (사용자 결정 1번)
-- 맥락 일관: 첫 실 호출 → 버그 발견 → 즉시 fix 라는 흐름이 자연스러움
+since_date fix + dotenv autoload + 테스트 + 문서 갱신을 **한 commit 으로 통합** (사용자 결정 1번). 맥락 일관: smoke 진입 → fix → 검증.
+
+### 신규 발견 분리 (다음 chunk)
+
+- `--max-stocks 10` 무시 bug → 다음 chunk
+- 251 ETF/ETN ValueError → 다음 chunk + 정책 결정
 
 ## Known Issues
 
-- **다른 endpoint 도 동일 next-key 패턴 사용** — `_client.py` 의 두 위치 모두 fix 됨. 회귀 테스트 988 cases 통과
-- **upsert_many chunk 분할은 stock.py 만 적용** — 다른 Repository (stock_price_krx 등) 도 같은 패턴이면 같은 한도 영향. 운영 실측에서 발견 시 동일 fix 적용
-- **운영 미해결 #1 ka10099 페이지네이션** — 단일 호출 (4782 종목 1회). 다른 endpoint (ka10081 일봉 3년) 는 페이지네이션 발생 가능 — backfill_ohlcv 실측에서 검증
-- **sync_stock_master 의 KOSPI 2440 → DB 2031** — §11.2 정책 (cross-market conflict 시 market_code 덮어씀) 적용. ETF/REIT 등이 KOSPI stock_code 와 겹쳐 재배정. 정상 동작
+- **`--max-stocks` 가 실제 백필에서 무시됨** — `effective_stock_codes` 가 only_stock_codes 만 반영. CLI bug. 다음 chunk
+- **ETF/ETN stock_code 호환성** — `kiwoom.stock` 의 모든 active 가 ka10081 호환 가정이 틀림. 영문 포함 코드 (예: `0000D0`) 는 build_stk_cd 의 6자리 ASCII 숫자 검증에서 ValueError. 정책 옵션: (a) ka10081 호출 전 stock_code 가드로 skip / (b) 별도 ETF endpoint / (c) Stock 테이블에 ka10081 호환 플래그 컬럼
+- **다른 endpoint 도 동일 since_date 미적용** — ka10081/82/83 만 fix. ka10086 (수급), ka10001 (펀더멘털) 등은 단일 페이지라 영향 없음 (확인 필요)
 
 ## Context for Next Session
 
 ### 사용자의 원래 의도
 
-ka10099 종목 마스터 sync 진행 → 운영 데이터 적재 시작. 본 chunk 가 그 첫 실 호출 + 도구 보강.
+backfill_ohlcv.py 실측 진입 (1순위) → smoke → mid → full 단계. 본 chunk 가 smoke 단계에서 발견된 운영 차단 fix.
 
 ### 선택된 접근 + 이유
 
-- **dotenv autoload** — 사용자가 symlink 안 만들어도 동작
-- **KIWOOM_API_KEY fallback** — 사용자 환경의 명명을 코드가 따라감 (사용자 강제 변경 회피)
-- **2 차단 버그 즉시 fix** — admin 도구 첫 실행에서 발견됨, 동일 commit 으로 묶어 맥락 일관
+- **since_date 옵션 추가** — caller (CLI) 가 백필 하한일 명시. 운영 cron 기존 동작 (since_date=None) 유지로 회귀 0
+- **3 메서드 일괄 적용** — fetch_daily / weekly / monthly 모두 같은 함정. helper 메서드 추출 (`_page_reached_since`, `_row_on_or_after`) 로 중복 차단
+- **dotenv autoload 동시 보완** — register/sync 와의 일관성. smoke 진입 차단 (KIWOOM_DATABASE_URL 미로드) 도 같이 해소
 
 ### 사용자 제약 / 선호
 
 - 한글 커밋 메시지
 - 푸시 명시적 요청 시만
 - backend_kiwoom CLAUDE.md § 1 — STATUS / HANDOFF / CHANGELOG 동시 갱신
-- 큰 chunk 도 통합 가능 (옵션 1 commit 통합 선택)
+- 진행 중 발견된 새 운영 이슈는 **다음 chunk 로 분리** (현재 chunk 마무리 우선) — 본 세션 결정
 
 ### 다음 세션 진입 시 결정 필요
 
-본 chunk commit + push 후:
+본 chunk commit 후:
 
-1. **backfill_ohlcv.py 실측 진입** (권장 1순위)
-   - smoke: `--max-stocks 10 --only-market-codes 0 --years 1`
-   - mid: `--max-stocks 100 --only-market-codes 0 --years 3`
-   - full: `--years 3` (active 4373 KRX+NXT)
-2. **다른 Repository 의 chunk 분할 일괄 점검** — stock_price_krx / stock_price_nxt / stock_price_periodic / stock_daily_flow 의 upsert_many. backfill 실측 중 발견 시 별도 chunk
-3. **운영 cron 활성화** — `scheduler_enabled=True` + alias env 채움 → daily/weekly/monthly OHLCV + daily_flow 자동 실행
+1. **CLI bug fix**: `--max-stocks` 가 effective_stock_codes 에 반영되도록 (1순위 — 빠른 fix)
+2. **ETF/ETN 정책 결정** + 적용 (2순위 — 정책 + 코드)
+3. **smoke 재시도** — `--max-stocks 10` 정상 작동 검증 → mid (100/3년) → full
 
 ## Files Modified This Session (커밋 대기)
 
 ```
-src/backend_kiwoom/docs/operations/credential-master-key-guide.md   (신규, ~250줄)
-src/backend_kiwoom/scripts/register_credential.py                   (수정 — dotenv + fallback)
-src/backend_kiwoom/scripts/sync_stock_master.py                     (수정 — dotenv)
-src/backend_kiwoom/app/adapter/out/kiwoom/_client.py                (수정 — fix 1)
-src/backend_kiwoom/app/adapter/out/persistence/repositories/stock.py (수정 — fix 2)
-src/backend_kiwoom/tests/test_kiwoom_client.py                       (수정 — +2 cases)
-src/backend_kiwoom/tests/test_stock_repository.py                    (수정 — +1 case)
-src/backend_kiwoom/tests/test_register_credential_cli.py             (수정 — +2 cases / 격리 보강)
-src/backend_kiwoom/STATUS.md                                         (수정)
-CHANGELOG.md                                                         (수정 — prepend)
-HANDOFF.md                                                           (본 파일)
+src/backend_kiwoom/app/adapter/out/kiwoom/chart.py                     (수정 — fetch_daily/weekly/monthly + 2 helper)
+src/backend_kiwoom/app/application/service/ohlcv_daily_service.py     (수정 — execute / _ingest_one since_date)
+src/backend_kiwoom/app/application/service/ohlcv_periodic_service.py  (수정 — 동일)
+src/backend_kiwoom/scripts/backfill_ohlcv.py                          (수정 — dotenv + since_date 전달)
+src/backend_kiwoom/tests/test_kiwoom_chart_client.py                   (수정 — +2 since_date cases)
+src/backend_kiwoom/tests/test_ingest_daily_ohlcv_service.py            (수정 — _fetch stub 시그니처)
+src/backend_kiwoom/STATUS.md                                          (수정)
+CHANGELOG.md                                                          (수정 — prepend)
+HANDOFF.md                                                            (본 파일)
 ```
 
-총 11 파일 / 신규 1 + 수정 10 / +500 줄
+총 9 파일 / 수정 9 / 약 +200 줄

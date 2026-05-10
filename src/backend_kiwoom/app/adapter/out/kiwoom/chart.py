@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -191,6 +192,7 @@ class KiwoomChartClient:
         exchange: ExchangeType = ExchangeType.KRX,
         adjusted: bool = True,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[DailyChartRow]:
         """단일 종목·단일 거래소의 일봉 시계열. cont-yn 자동 페이지네이션.
 
@@ -200,6 +202,10 @@ class KiwoomChartClient:
             exchange: KRX (디폴트) / NXT / SOR. build_stk_cd 가 suffix 합성.
             adjusted: True 면 수정주가 (백테스팅 디폴트). False 는 raw 비교 검증용.
             max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 DAILY_MAX_PAGES.
+            since_date: 백필 하한일. 페이지의 가장 오래된 row 가 since_date 보다 과거면
+                다음 페이지 요청 중단. 운영 차단 fix — ka10081 은 base_dt 만 받고 종료
+                범위가 없어, 오래된 종목 (1980년대 상장) 은 max_pages 도달로 fail. None
+                (디폴트) 면 기존 동작 (운영 cron 호환).
 
         Raises:
             ValueError: stock_code 가 6자리 ASCII 숫자 외 (build_stk_cd 사전 검증).
@@ -272,7 +278,40 @@ class KiwoomChartClient:
 
             all_rows.extend(parsed.stk_dt_pole_chart_qry)
 
+            # since_date guard — 페이지의 가장 오래된 row date 가 since_date 보다 과거면
+            # 다음 페이지 요청 stop. ka10081 응답은 신→구 정렬 (next-key 가 점점 과거).
+            # 운영 검증: base_dt 만 보내면 종목 상장일까지 무한 페이징 → max_pages 초과 fail.
+            if since_date is not None and self._page_reached_since(
+                parsed.stk_dt_pole_chart_qry, since_date
+            ):
+                break
+
+        # since_date 보다 과거인 row 제거 (마지막 페이지 fragment).
+        if since_date is not None:
+            all_rows = [r for r in all_rows if self._row_on_or_after(r, since_date)]
+
         return all_rows
+
+    @staticmethod
+    def _page_reached_since(rows: Sequence[DailyChartRow], since_date: date) -> bool:
+        """페이지의 가장 오래된 row date 가 since_date 보다 과거 (이하) 면 True.
+
+        ka10081/82/83 응답은 신→구 정렬 가정 — 마지막 row 가 가장 과거. 빈 dt 는 무시.
+        Weekly/MonthlyChartRow 는 DailyChartRow subclass — Sequence (covariant) 로 호환.
+        """
+        for row in reversed(rows):
+            parsed = _parse_yyyymmdd(row.dt)
+            if parsed is not None:
+                return parsed <= since_date
+        return False
+
+    @staticmethod
+    def _row_on_or_after(row: DailyChartRow, since_date: date) -> bool:
+        """row date >= since_date 면 True. 빈 dt (date.min) 는 keep — Repository 가 skip."""
+        parsed = _parse_yyyymmdd(row.dt)
+        if parsed is None:
+            return True
+        return parsed >= since_date
 
     async def fetch_weekly(
         self,
@@ -282,11 +321,12 @@ class KiwoomChartClient:
         exchange: ExchangeType = ExchangeType.KRX,
         adjusted: bool = True,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[WeeklyChartRow]:
         """ka10082 주봉 OHLCV — fetch_daily 패턴 복제. list 키 + api_id 만 다름.
 
         Parameters / Raises 는 fetch_daily 와 동일 (api_id="ka10082", list 키
-        `stk_stk_pole_chart_qry`).
+        `stk_stk_pole_chart_qry`). `since_date` 도 fetch_daily 와 동일 의미.
 
         `dt` 의미는 주의 첫 거래일 (가설 — 운영 first-call 후 확정).
         """
@@ -336,6 +376,14 @@ class KiwoomChartClient:
 
             all_rows.extend(parsed.stk_stk_pole_chart_qry)
 
+            if since_date is not None and self._page_reached_since(
+                parsed.stk_stk_pole_chart_qry, since_date
+            ):
+                break
+
+        if since_date is not None:
+            all_rows = [r for r in all_rows if self._row_on_or_after(r, since_date)]
+
         return all_rows
 
     async def fetch_monthly(
@@ -346,11 +394,12 @@ class KiwoomChartClient:
         exchange: ExchangeType = ExchangeType.KRX,
         adjusted: bool = True,
         max_pages: int | None = None,
+        since_date: date | None = None,
     ) -> list[MonthlyChartRow]:
         """ka10083 월봉 OHLCV — fetch_daily 패턴 복제. list 키 + api_id 만 다름.
 
         Parameters / Raises 는 fetch_daily 와 동일 (api_id="ka10083", list 키
-        `stk_mth_pole_chart_qry`).
+        `stk_mth_pole_chart_qry`). `since_date` 도 fetch_daily 와 동일 의미.
 
         `dt` 의미는 달의 첫 거래일 (가설 — 운영 first-call 후 확정).
         """
@@ -399,6 +448,14 @@ class KiwoomChartClient:
                 )
 
             all_rows.extend(parsed.stk_mth_pole_chart_qry)
+
+            if since_date is not None and self._page_reached_since(
+                parsed.stk_mth_pole_chart_qry, since_date
+            ):
+                break
+
+        if since_date is not None:
+            all_rows = [r for r in all_rows if self._row_on_or_after(r, since_date)]
 
         return all_rows
 

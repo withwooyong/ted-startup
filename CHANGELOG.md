@@ -7,6 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] fix(kiwoom): backfill_ohlcv 페이지네이션 종료 조건 신규 + dotenv autoload 보강
+
+`backfill_ohlcv.py --period daily --years 1 --alias prod` smoke 첫 실 호출에서 발견된 운영 차단 버그 1건 즉시 수정 + dotenv autoload 누락 보완.
+
+### Fixed (운영 차단 버그)
+
+- **`app/adapter/out/kiwoom/chart.py`** — `KiwoomChartClient.fetch_daily/weekly/monthly` 에 `since_date` 파라미터 신규. 페이지의 가장 오래된 row date <= since_date 면 다음 page 요청 중단 + 결과 list 에서 since_date 미만 row 제거. **운영 차단** (ka10081 은 base_dt 만 받고 종료 범위가 없어 종목 상장일까지 무한 페이징 → max_pages 도달로 fail). KOSPI 1980년대 상장 종목 (예: `002810`) 이 직접적 영향. mock 테스트는 cont-yn=N 으로 짧게 종료해서 발견 못 함
+
+### Changed
+
+- **`app/application/service/ohlcv_daily_service.py`** — `IngestDailyOhlcvUseCase.execute` / `_ingest_one` 에 `since_date` 옵션 전파. 디폴트 None → 운영 cron 기존 동작 호환
+- **`app/application/service/ohlcv_periodic_service.py`** — 동일 (주/월봉 ka10082/83)
+- **`scripts/backfill_ohlcv.py`** — `since_date=start_date` 전달 (`--years` / `--start-date` 가 실질적 페이지네이션 cap 으로 작동). dotenv autoload 추가 (register/sync 와 동일 패턴 — 직전 세션 누락분 보완)
+- 단위 테스트 +2 cases — `test_kiwoom_chart_client.py` since_date page break / since_date=None 기존 동작 유지
+
+### Verification
+
+- pytest: 988 → **990 cases (+2)** / All passed (회귀 0)
+- mypy --strict: app/ 72 files / scripts/backfill_ohlcv.py 1 file / 0 errors
+- ruff check: All passed
+- 실 운영: `--period daily --years 1 --only-market-codes 0` (KOSPI) — 2031 종목 / **1782 success_krx / 354 success_nxt / 251 ValueError (ETF/ETN stock_code 영문)** / 0 KiwoomMaxPagesExceededError / **8m 55s** (avg 0.3s/stock — since_date guard 1 page 종료 검증)
+
+### 운영 미해결 #1 정량화 (since_date guard 적용 후)
+
+- **ka10081 페이지네이션 빈도** (1년 daily): 종목당 **1 page** (since_date 가 page 1 안에서 break). ADR § 26.5 갱신 대상
+
+### 신규 발견 (다음 chunk 분리)
+
+- **CLI bug**: `--max-stocks 10` 가 dry-run 만 적용. 실 백필은 active 전체 처리 (smoke 가 mid-scale 가 됨). `effective_stock_codes` 계산 시 max_stocks 미반영
+- **ETF/ETN stock_code 호환성**: 251 종목 (12.36%) ValueError — `0000D0`, `0001P0` 같은 영문 포함 코드. ka10081 호환성 가정 (모든 active stock = 6자리 ASCII 숫자) 검증 누락. ka10099 sync 가 ETF/ETN 도 stock 테이블에 적재하므로 별도 가드 필요
+
+---
+
 ## [2026-05-10] fix(kiwoom): 운영 검증 도구 보강 + 실 호출에서 발견된 2 차단 버그 fix
 
 ka10099 첫 실 호출 (`sync_stock_master.py --alias prod`) 에서 발견된 운영 차단 버그 2건 즉시 수정. 동시에 admin 도구 사용성 보강 (.env 자동 로드 + 명명 호환). **5 시장 / 4373 active stock / 630 NXT 적재 성공** (1.7s).

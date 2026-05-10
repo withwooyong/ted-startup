@@ -523,3 +523,74 @@ async def test_fetch_daily_nxt_request_accepts_full_suffix_response() -> None:
         )
 
     assert len(rows) == 2
+
+
+# ---------- since_date — 운영 차단 fix (max_pages 초과 방어) ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_since_date_breaks_pagination_when_oldest_row_passes_threshold() -> None:
+    """page 의 가장 오래된 row date <= since_date → 다음 page 요청 안 함.
+
+    운영 차단 fix — ka10081 은 base_dt 만 받고 종료 범위 없음. 오래된 종목 (1980년대
+    상장) 은 max_pages 도달로 fail. since_date guard 가 백필 하한일 도달 시 조기 break.
+    """
+    page1_body = {**_SAMSUNG_DAILY_BODY}  # 20250908 / 20250905 (since_date=20250906 보다 과거 1건)
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(200, json=page1_body, headers={"cont-yn": "Y", "next-key": "abc"})
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_daily(
+            "005930", base_date=date(2025, 9, 8), since_date=date(2025, 9, 6)
+        )
+
+    assert call_count == 1, "page1 의 oldest row (20250905) <= since_date (20250906) → break"
+    # 20250905 row 는 since_date 미만이라 filter out, 20250908 만 남음
+    assert len(rows) == 1
+    assert rows[0].dt == "20250908"
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_since_date_none_keeps_existing_pagination() -> None:
+    """since_date=None (디폴트) → 기존 cont-yn 페이지네이션 동작 유지 (운영 cron 호환)."""
+    page2_body = {
+        "stk_cd": "005930",
+        "stk_dt_pole_chart_qry": [
+            {
+                "cur_prc": "68000",
+                "trde_qty": "7500000",
+                "trde_prica": "510000",
+                "dt": "20250901",
+                "open_pric": "68100",
+                "high_pric": "68500",
+                "low_pric": "67800",
+                "pred_pre": "-100",
+                "pred_pre_sig": "5",
+                "trde_tern_rt": "-0.10",
+            }
+        ],
+        "return_code": 0,
+        "return_msg": "정상",
+    }
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
+                200, json=_SAMSUNG_DAILY_BODY, headers={"cont-yn": "Y", "next-key": "abc"}
+            )
+        return httpx.Response(200, json=page2_body, headers={"cont-yn": "N"})
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_daily("005930", base_date=date(2025, 9, 8))
+
+    assert call_count == 2, "since_date 없으면 cont-yn=N 까지 모두 fetch"
+    assert len(rows) == 3
