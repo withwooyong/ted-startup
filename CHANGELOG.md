@@ -7,6 +7,66 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] docs(kiwoom): failed 166 NXT resume PASS + 컬럼 동일값 확정 — Migration 013 DROP chunk 진입
+
+`72dbe69` (NXT sentinel break fix) 후 failed 166 NXT 종목 `--only-stock-codes` 명시 resume + 컬럼 동일값 SQL 검증. **코드 변경 0** — 측정 + 검증 결과 documentation.
+
+### 1. Resume 결과 (failed 166 NXT)
+
+| 항목 | 값 |
+|------|-----|
+| 명령어 | `--years 3 --alias prod --only-stock-codes <166 CSV>` |
+| total / success_krx / success_nxt / failed | **166 / 166 / 10 / 0** |
+| elapsed | **21m 33s** (avg 7.8s/stock) |
+
+**해석**: success_nxt=10 — 166 중 NXT 활성 10 종목만 신규 적재. 나머지 156 은 KRX-only (이미 첫 full 에서 적재됨). 첫 full 의 `failed=166` 은 (stock × NXT exchange) 단위 카운트로 NXT 시도 실패만 표시.
+
+### 2. 최종 DB 상태 — OHLCV 일치 ✅
+
+| exchange | stocks | rows | oldest | newest |
+|----------|--------|------|--------|--------|
+| KRX | **4077** | 2,727,337 | 2023-05-11 | 2026-05-08 |
+| NXT | **626** | 152,163 | 2025-03-17 | 2026-05-08 |
+| **total** | — | **2,879,500** | — | — |
+
+stocks (KRX 4077 / NXT 626) OHLCV full backfill 결과와 **정확히 일치**.
+
+### 3. 컬럼 동일값 검증 — ✅ **확정 (100% 동일)**
+
+```sql
+SELECT
+    COUNT(*) AS total,
+    COUNT(*) FILTER (WHERE credit_rate IS DISTINCT FROM credit_balance_rate) AS credit_diff,
+    COUNT(*) FILTER (WHERE foreign_rate IS DISTINCT FROM foreign_weight) AS foreign_diff
+FROM kiwoom.stock_daily_flow;
+-- total=2,879,500 / credit_diff=0 / foreign_diff=0
+```
+
+**결과**: 2,879,500 rows 전체에서 두 쌍 컬럼 모두 0건 차이 (NULL 포함 `IS DISTINCT FROM` 비교 정확).
+
+**의미**: ka10086 응답이 두 필드를 동일값으로 채움 (또는 어댑터 매핑이 동일 source 를 두 컬럼에 적재). C-2γ Migration 008 의 D-E 중복 3 컬럼 DROP 패턴 응용 가능.
+
+### Changed
+
+- `src/backend_kiwoom/docs/operations/backfill-daily-flow-results.md` § 0 / § 2.4 (resume + 최종 DB) / § 5.6 (컬럼 동일값 확정) / § 9 #1 #2 해소 / § 11 우선순위 / § 14 timeline 추가
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 27 헤더 / § 27.5 #3 (컬럼 동일값 확정 → Migration 013) / chunk 산출 갱신
+- `src/backend_kiwoom/STATUS.md` § 0 / § 3 sub-chunk 추가 / § 4 #16 해소 / § 5 우선순위 (Migration 013 1순위) / § 6
+
+### 운영 검증
+
+- 코드 변경 0 — 1026 tests 그대로
+- DB 적재 KRX 4077 + NXT 626 = OHLCV 결과와 일치 (cross-check PASS)
+
+### 다음 chunk
+
+**Migration 013 — `credit_balance_rate` + `foreign_weight` DROP** (C-2γ Migration 008 패턴 응용):
+- ORM `StockDailyFlow` 2 컬럼 제거
+- 어댑터 (mrkcond.py / daily_flow_service.py) 매핑 정리
+- 통합 / 단위 테스트
+- 운영 검증
+
+---
+
 ## [2026-05-11] fix(kiwoom): NXT 빈 응답 sentinel 무한 루프 fix — mrkcond + chart 4곳 `if not <list>: break`
 
 `4e75dd3` full backfill 결과 NXT 166 fail (활성 626 의 26.5%) 의 근본 원인 분석 + 즉시 fix. 키움 서버가 NXT 출범 (2025-03-04) 이전 base_dt 요청 시 빈 응답 + cont-yn=Y + next-key sentinel 후 page 1 next-key 로 되돌아가는 **무한 루프** 발견. `_page_reached_since` 가 빈 rows 시 False 반환이라 break 안 됨.
