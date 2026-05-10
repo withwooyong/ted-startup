@@ -7,6 +7,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] docs(kiwoom): 운영 실측 measurement 완료 — full 3년 백필 34분 / failed 0 / NUMERIC 안전
+
+`backfill_ohlcv.py` smoke → mid → full 3 단계 측정 완료. ADR § 26.5 + results.md 채움. **코드 변경 0** — 측정 결과 documentation.
+
+### 운영 실측 결과 요약
+
+| Stage | 명령어 요지 | total | success | failed | elapsed |
+|-------|------------|-------|---------|--------|---------|
+| smoke | KOSPI 10 / 1y | 6 (raw 10 → ETF 4 skip) | 6 KRX / 2 NXT | 0 | 1s |
+| mid | KOSPI 100 / 3y | 78 (raw 100 → ETF 22 skip) | 78 KRX / 21 NXT | 0 | 44s |
+| **full** | active 4373 / 3y | **4078** (ETF 295 skip) | **4078 KRX / 626 NXT** | **0** | **34분** |
+
+### 운영 미해결 정량화
+
+- **#1 페이지네이션 빈도**: 1년 daily 종목당 1 page / 3년 daily 1~2 page (since_date guard 작동)
+- **#2 3년 백필 elapsed**: dry-run 추정 1h 13m → 실측 34분 (NXT 활성 15% / since_date guard 영향)
+- **#3 NUMERIC(8,4) `turnover_rate`**: max 3,257.80 (cap ±9999.9999 의 33%) / ABS>1000 = 24 rows (0.0009%) → **마이그레이션 불필요**
+- #4 일간 cron elapsed: 본 chunk 미측정 (scheduler_enabled 활성화 chunk 대기)
+- `change_rate` / `foreign_holding_ratio` / `credit_ratio`: ka10086 daily_flow 백필 chunk 에서 측정
+
+### Changed
+
+- **`docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 26.5** — 측정값 4건 채움 + 신규 발견 3건 (since_date / max-stocks / ETF guard) + follow-up F6 (since_date edge case 0.13% 영향) + KRX/NXT 적재 통계
+- **`src/backend_kiwoom/docs/operations/backfill-measurement-results.md`** — 빈 양식 → 측정값 전 항목 채움. TL;DR / Stage 0~3 / 측정 #1~#3 / 위험 5건 / 결정 4건 / 다음 chunk 우선순위 갱신
+
+### Verification
+
+- 코드 변경 0. pytest 993 cases 그대로
+- DB 적재: KRX 2,732,031 rows / DISTINCT stock 4,077 / NXT 152,152 rows / DISTINCT stock 626
+
+### follow-up 발견 (LOW 4건)
+
+| # | 항목 | 영향 |
+|---|------|------|
+| F6 | since_date guard edge case (2 종목 더 과거 적재) | 0.13% rows |
+| F7 | turnover_rate min -57.32 (음수 anomaly) | 키움 데이터 특성 |
+| F8 | 1 종목 빈 응답 (4078 fetch / 4077 적재) | 1/4078 = 0.025% |
+| (옵션 c) | ETF/ETN 자체 OHLCV 별도 endpoint | 백테스팅 가치 |
+
+---
+
 ## [2026-05-10] feat(kiwoom): ka10081/82/83 호환 stock_code 사전 가드 + smoke 통과 검증
 
 `backfill_ohlcv.py` smoke 운영 발견 — `kiwoom.stock` 의 active 약 6.7% (KOSPI 12%) 가 ETF/ETN/우선주 (영문 포함 코드, 예: `0000D0`, `00088K`). build_stk_cd 의 6자리 ASCII 숫자 검증에서 ValueError → errors 누적되던 것을 UseCase 가드로 사전 skip + 가시성 로깅.

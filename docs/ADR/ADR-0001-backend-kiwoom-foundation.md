@@ -1672,16 +1672,38 @@ C-backfill 의 후속으로 **운영 실측 사전 준비물 일괄 정비** —
 - **DB 부하** — 단일 worker × 6000 호출 → connection pool (`database_pool_size=5`) 가 흡수
 - **resume 한계** — `max(trading_date) >= end_date` 만 본다. 부분 일자 누락 (gap) 은 별도 chunk
 
-### 26.5 실측 결과 (사용자 측정 후 채움)
+### 26.5 실측 결과 (2026-05-10, ✅ 측정 완료)
 
-> **상태**: ⏳ 측정 전 — 본 § 은 사용자가 results.md 채운 후 핵심 발견만 요약해 채운다.
+> **측정 환경**: docker-compose 5433 / 운영 키움 (alias=prod) / since_date guard + max-stocks fix + ETF guard 적용 후
+> **상세**: `docs/operations/backfill-measurement-results.md`
 
 | 측정 항목 | 가설 (dry-run) | 실측 | 결정 / 후속 |
 |----------|---------------|------|------------|
-| 1 페이지네이션 빈도 | 종목당 2 페이지 | (측정 후) | (확인 / 분기 가설 재검토) |
-| 2 3년 elapsed (KRX+NXT, active 3000) | 약 4시간 (lower-bound) | (측정 후) | (±50% margin 안인지) |
-| 3 NUMERIC(8,4) overflow | 한도 내 (가설) | (측정 후) | (overflow 발생 시 마이그레이션 chunk) |
-| 4 일간 cron elapsed | 약 30~60분 (추정) | (측정 후) | (운영 cron 시간 예산 안인지) |
+| 1 페이지네이션 빈도 (1년 daily) | 종목당 2 페이지 | **종목당 1 페이지** (since_date 가 page 1 안에서 break) | since_date guard 작동 확인. 운영 cron (1년 cap) 은 1 호출로 충분 |
+| 1' 페이지네이션 빈도 (3년 daily) | 종목당 2 페이지 | **종목당 1~2 페이지** (avg 0.5s/stock — page 2 일부 발생) | 가설 적중. 6 페이지 이상 종목 0 |
+| 2 3년 elapsed (KRX+NXT, active 4078 호환) | 약 4시간 (lower-bound) | **34분** (KRX 4078 100% / NXT 626 활성만 / failed 0) | dry-run 추정 (4시간) 보다 **빠름** — 페이지 1~2 + 0.25s rate + DB upsert. 직렬 worker 단독 충분 |
+| 3 NUMERIC(8,4) overflow (turnover_rate) | 한도 내 (가설) | **max 3,257.80** (cap ±9999.9999 의 33%) / ABS>1000 = 24 rows (0.0009%) | 마이그레이션 불필요. `change_rate`/`foreign_holding_ratio`/`credit_ratio` 는 daily_flow 백필 chunk 에서 측정 |
+| 4 일간 cron elapsed | 약 30~60분 (추정) | (미측정 — 운영 cron 활성화 후) | 본 chunk 외. backfill 적용된 since_date=None 디폴트 운영 동작은 1 페이지 종료 가정 (cron 실측 시 검증) |
+
+**신규 운영 발견 (3건)** — smoke / mid / full 단계에서 발견된 운영 차단 또는 사용성 이슈, 즉시 fix:
+
+1. **`since_date` guard 누락** (chunk `d60a9b3`, smoke) — `KiwoomChartClient.fetch_daily/weekly/monthly` 가 `base_dt` 만 받고 종료 범위 없어 종목 상장일까지 무한 페이징 → max_pages 도달로 fail. `since_date` 옵션 신규 + UseCase + CLI 전파. 운영 cron (since_date=None) 호환
+2. **`--max-stocks` CLI bug** (chunk `76b3a4a`, smoke) — `_count_active_stocks` 만 적용되고 실 백필 호출 시 `effective_stock_codes=None` 이 되어 active 전체 처리되던 bug. resume 분기와 동일하게 `_list_active_stock_codes` 호출 + 변수명 rename
+3. **ETF/ETN/우선주 stock_code 호환성** (chunk `c75ede6`, smoke) — `kiwoom.stock` active 의 6.7% (KOSPI 12%) 가 영문 포함 코드 (예: `0000D0`, `00088K`). `IngestDailyOhlcvUseCase` / `IngestPeriodicOhlcvUseCase` 가 `^[0-9]{6}$` 패턴 fullmatch 만 keep + skip 로깅. ETF/ETN 자체 OHLCV 는 향후 별도 chunk (옵션 c)
+
+**since_date guard edge case** (follow-up F6):
+- 4078 종목 중 2 종목 (`002690` 동일제강 / `004440` 삼일씨엔에스) 만 since_date (2023-05-11) 보다 과거 데이터 적재 (2015-09-24~ / 2016-03-30~). `_page_reached_since` 또는 `_row_on_or_after` 의 edge case 추정
+- 영향 범위: 3,626 rows / 2,732,031 = 0.13%. 데이터 품질 측면 nuetral~plus (오래된 베이스라인). 추가 분석 다음 chunk
+- 운영 차단 효과는 정상 작동 (failed 0 / max_pages 0)
+
+**KRX 적재 통계** (post-backfill):
+- 총 row: 2,732,031 / DISTINCT stock: 4,077 (4078 호환 중 1 종목 빈 응답 추정)
+- 일자 범위: 2015-09-24 ~ 2026-05-08 (위 follow-up F6)
+- 평균 row/stock: 670 (3년 750 거래일 기준 — 신규 상장 종목은 짧음)
+
+**NXT 적재 통계**:
+- 총 row: 152,152 / DISTINCT stock: 626
+- 일자 범위: 2025-03-04 ~ 2026-05-08 (NXT 출범 시점부터)
 
 ### 26.6 결과 활용
 
