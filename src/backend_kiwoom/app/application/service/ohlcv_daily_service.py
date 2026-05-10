@@ -27,6 +27,7 @@ stock_id resolution invariant:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
@@ -41,10 +42,16 @@ from app.adapter.out.kiwoom.chart import (
     KiwoomChartClient,
     NormalizedDailyOhlcv,
 )
+from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_price import StockPriceRepository
 from app.application.constants import ExchangeType, StockListMarketType
 from app.application.exceptions import StockMasterNotFoundError
+
+# ka10081 호환 stock_code 패턴 — `^[0-9]{6}$` 만 통과 (build_stk_cd 와 일치).
+# ka10099 sync 가 ETF/ETN/우선주 (예: `0000D0`, `00088K`) 도 stock 테이블에 적재하므로
+# UseCase 단계에서 사전 필터 — 호출 자체 차단 (build_stk_cd ValueError 회피).
+_KA10081_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +152,21 @@ class IngestDailyOhlcvUseCase:
             if only_stock_codes:
                 stmt = stmt.where(Stock.stock_code.in_(only_stock_codes))
             stmt = stmt.order_by(Stock.market_code, Stock.stock_code)
-            active_stocks = list((await session.execute(stmt)).scalars())
+            raw_stocks = list((await session.execute(stmt)).scalars())
+
+        # 1-1. ka10081 호환 stock_code 만 keep — ETF/ETN/우선주 (영문 포함) skip + 가시성 로깅.
+        # smoke 검증에서 KOSPI active 의 12% 가 영문 포함 코드 (`0000D0` 같은 ETF) 로 판명.
+        # build_stk_cd ValueError 로 호출 차단되어 errors 누적되던 것을 사전 필터.
+        active_stocks = [s for s in raw_stocks if _KA10081_COMPATIBLE_RE.fullmatch(s.stock_code)]
+        skipped_count = len(raw_stocks) - len(active_stocks)
+        if skipped_count > 0:
+            sample = [s.stock_code for s in raw_stocks if not _KA10081_COMPATIBLE_RE.fullmatch(s.stock_code)][:5]
+            logger.info(
+                "ka10081 호환 가드 — active %d 중 %d 종목 skip (ETF/ETN/우선주 추정), sample=%s",
+                len(raw_stocks),
+                skipped_count,
+                sample,
+            )
 
         success_krx = 0
         success_nxt = 0

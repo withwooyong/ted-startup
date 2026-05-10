@@ -207,6 +207,31 @@ async def test_execute_monthly_krx_only(
     client.fetch_weekly.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_execute_weekly_skips_alpha_stock_codes(
+    session: AsyncSession,
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+) -> None:
+    """ka10082/83 호환 가드 — daily 와 동일 정책 (ETF/ETN/우선주 사전 skip)."""
+    await _create_active_stock(session, "005930", market="0")  # 호환
+    await _create_active_stock(session, "0000D0", market="0")  # ETF — skip
+    await _create_active_stock(session, "00088K", market="0")  # 우선주 — skip
+    client = _make_chart_client(weekly_rows=[_make_weekly_row()])
+
+    use_case = IngestPeriodicOhlcvUseCase(
+        session_provider=session_provider,
+        chart_client=client,
+        nxt_collection_enabled=False,
+    )
+    result = await use_case.execute(period=Period.WEEKLY, base_date=date(2025, 9, 8))
+
+    # 호환 1 종목만 호출. ETF/우선주 2 종목은 사전 가드로 skip.
+    assert result.total == 1
+    assert result.success_krx == 1
+    assert result.failed == 0
+    client.fetch_weekly.assert_awaited_once()
+
+
 # ---------- 2. NXT 분기 ----------
 
 

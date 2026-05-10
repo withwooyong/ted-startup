@@ -7,6 +7,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] feat(kiwoom): ka10081/82/83 호환 stock_code 사전 가드 + smoke 통과 검증
+
+`backfill_ohlcv.py` smoke 운영 발견 — `kiwoom.stock` 의 active 약 6.7% (KOSPI 12%) 가 ETF/ETN/우선주 (영문 포함 코드, 예: `0000D0`, `00088K`). build_stk_cd 의 6자리 ASCII 숫자 검증에서 ValueError → errors 누적되던 것을 UseCase 가드로 사전 skip + 가시성 로깅.
+
+### Added
+
+- **`app/application/service/ohlcv_daily_service.py`** — `IngestDailyOhlcvUseCase.execute` active stock 조회 후 `_KA10081_COMPATIBLE_RE` (`STK_CD_LOOKUP_PATTERN` 재사용) 패턴 fullmatch 종목만 keep. skip 종목 수 + sample 5개 logger.info — 운영 가시성. 정책 옵션 (a) UseCase 가드 채택 (사용자 결정 — Migration 0, 즉시 적용, ETF OHLCV 는 향후 별도 chunk)
+- **`app/application/service/ohlcv_periodic_service.py`** — `IngestPeriodicOhlcvUseCase.execute` 동일 가드 (ka10082/83 도 chart.py build_stk_cd 공유)
+- 단위 테스트 +2 cases — `tests/test_ingest_daily_ohlcv_service.py::test_execute_skips_alpha_stock_codes` / `tests/test_ohlcv_periodic_service.py::test_execute_weekly_skips_alpha_stock_codes`. ETF `0000D0` + 우선주 `00088K` 사전 skip 검증 (호출 자체 차단)
+
+### Verification
+
+- pytest: 991 → **993 cases (+2)** / All passed (회귀 0)
+- mypy --strict: app/ 72 files / 0 errors
+- ruff check: All passed
+- 실 운영 smoke 통과: `--period daily --years 1 --only-market-codes 0 --max-stocks 10`
+  - `active 10 중 4 종목 skip (ETF/ETN/우선주 추정), sample=['0000D0', '0000H0', '0000J0', '0000Y0']`
+  - `total: 6 / success_krx: 6 / success_nxt: 2 / failed: 0 / elapsed: 1s`
+  - **3 fix (since_date / max-stocks / ETF guard) 모두 함께 작동 검증**
+
+### 운영 미해결 #9 해소
+
+- ETF/ETN stock_code ValueError 12% → **0건** (사전 가드 차단). ETF/ETN 자체 OHLCV 는 향후 별도 chunk (옵션 c)
+
+---
+
 ## [2026-05-10] fix(kiwoom): backfill_ohlcv `--max-stocks` 가 실 백필에서 무시되던 CLI bug fix
 
 직전 since_date guard chunk 의 smoke 검증 중 발견된 **CLI 사용성 차단 bug** 즉시 수정.

@@ -23,6 +23,7 @@ OhlcvSyncOutcome / OhlcvSyncResult 는 ka10081 의 동명 타입과 **동일 구
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
@@ -37,12 +38,16 @@ from app.adapter.out.kiwoom.chart import (
     KiwoomChartClient,
     NormalizedDailyOhlcv,
 )
+from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_price_periodic import (
     StockPricePeriodicRepository,
 )
 from app.application.constants import ExchangeType, Period, StockListMarketType
 from app.application.exceptions import StockMasterNotFoundError
+
+# ka10082/83 호환 stock_code 패턴 — daily (ka10081) 와 동일 (chart.py 의 build_stk_cd 공유).
+_KA10082_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +148,20 @@ class IngestPeriodicOhlcvUseCase:
             if only_stock_codes:
                 stmt = stmt.where(Stock.stock_code.in_(only_stock_codes))
             stmt = stmt.order_by(Stock.market_code, Stock.stock_code)
-            active_stocks = list((await session.execute(stmt)).scalars())
+            raw_stocks = list((await session.execute(stmt)).scalars())
+
+        # 1-1. ka10082/83 호환 stock_code 만 keep — daily 와 동일 정책 (ETF/ETN/우선주 skip).
+        active_stocks = [s for s in raw_stocks if _KA10082_COMPATIBLE_RE.fullmatch(s.stock_code)]
+        skipped_count = len(raw_stocks) - len(active_stocks)
+        if skipped_count > 0:
+            sample = [s.stock_code for s in raw_stocks if not _KA10082_COMPATIBLE_RE.fullmatch(s.stock_code)][:5]
+            logger.info(
+                "%s 호환 가드 — active %d 중 %d 종목 skip (ETF/ETN/우선주 추정), sample=%s",
+                self._api_id_for(period),
+                len(raw_stocks),
+                skipped_count,
+                sample,
+            )
 
         success_krx = 0
         success_nxt = 0

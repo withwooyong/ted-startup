@@ -448,6 +448,53 @@ async def test_execute_skips_inactive_stocks(
     assert result.total == 1
 
 
+# ---------- 10-bis. ka10081 호환 가드 (ETF/ETN/우선주 skip) ----------
+
+
+@pytest.mark.asyncio
+async def test_execute_skips_alpha_stock_codes(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """영문 포함 stock_code (`0000D0` ETF / `00088K` 우선주) 는 호출 전 사전 skip.
+
+    smoke 운영 발견 — `kiwoom.stock` 의 active 중 ETF/ETN/우선주 약 6.7% 가 영문
+    포함 코드. 이전엔 build_stk_cd 가 ValueError 던져 errors 에 누적. UseCase
+    가드로 호출 자체 차단 (불필요 try/except 회피).
+    """
+    await _create_active_stock(session, "005930", "삼성전자")  # 호환
+    await _create_active_stock(session, "0000D0", "TIGER ETF")  # ETF — skip
+    await _create_active_stock(session, "00088K", "한화3우B")  # 우선주 — skip
+    await session.commit()
+
+    called: list[str] = []
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        base_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        adjusted: bool = True,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyChartRow]:
+        called.append(stock_code)
+        return [_row("20250908")]
+
+    client = AsyncMock(spec=KiwoomChartClient)
+    client.fetch_daily = _fetch
+    uc = IngestDailyOhlcvUseCase(
+        session_provider=session_provider, chart_client=client, nxt_collection_enabled=False
+    )
+    result = await uc.execute(base_date=date(2025, 9, 8))
+
+    # 호환 1 종목 (005930) 만 호출. ETF/우선주 2 종목은 사전 가드로 skip.
+    assert called == ["005930"]
+    assert result.total == 1
+    assert result.success_krx == 1
+    assert result.failed == 0
+
+
 # ---------- 11. 빈 응답 ----------
 
 
