@@ -361,3 +361,58 @@ async def test_compute_resume_remaining_codes_no_data_returns_all(
     # cleanup
     async with factory() as session, session.begin():
         await session.execute(text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TST701', 'TST702')"))
+
+
+# ---------- 10. --max-stocks limit (운영 발견 fix) ----------
+
+
+@pytest.mark.asyncio
+async def test_list_active_stock_codes_applies_max_stocks_limit(engine: Any) -> None:
+    """`_list_active_stock_codes` 가 max_stocks 로 결과 list limit 적용.
+
+    운영 차단 fix — 이전엔 `_count_active_stocks` 만 max_stocks 반영하고 실 백필
+    호출 시 effective_stock_codes 가 None 이 되어 active 전체 처리. async_main 의
+    max_stocks branch 가 본 함수 호출해 explicit list 를 UseCase 에 전달.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from scripts.backfill_ohlcv import _count_active_stocks, _list_active_stock_codes
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    test_codes = [f"TM80{i}" for i in range(5)]  # TM800~TM804 = 5 종목
+    async with factory() as session, session.begin():
+        for code in test_codes:
+            await session.execute(
+                text(
+                    "INSERT INTO kiwoom.stock (stock_code, stock_name, market_code, is_active) "
+                    f"VALUES ('{code}', 'tm', '0', true) ON CONFLICT DO NOTHING"
+                )
+            )
+
+    try:
+        async with factory() as session:
+            # max_stocks=2 → count + list 모두 2 (이전 bug: list 가 5 반환)
+            count = await _count_active_stocks(
+                session,
+                only_market_codes=[],
+                only_stock_codes=test_codes,
+                max_stocks=2,
+            )
+            codes = await _list_active_stock_codes(
+                session,
+                only_market_codes=[],
+                only_stock_codes=test_codes,
+                max_stocks=2,
+            )
+        assert count == 2
+        assert len(codes) == 2
+        assert all(c in test_codes for c in codes)
+    finally:
+        async with factory() as session, session.begin():
+            await session.execute(
+                text(
+                    "DELETE FROM kiwoom.stock WHERE stock_code IN "
+                    f"({','.join(repr(c) for c in test_codes)})"
+                )
+            )

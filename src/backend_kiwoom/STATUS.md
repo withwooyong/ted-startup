@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-10 (backfill_ohlcv smoke + since_date guard 운영 차단 fix)
+> **마지막 갱신**: 2026-05-10 (backfill_ohlcv `--max-stocks` CLI bug fix)
 
 ---
 
@@ -12,11 +12,11 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard — Phase C 96%) |
-| 마지막 완료 chunk | **since_date guard fix** (chart.py 페이지네이션 종료 조건 + dotenv autoload 보완) |
-| 다음 chunk | **CLI bug fix** (`--max-stocks` 무시) → **ETF/ETN 정책 결정** → smoke 재시도 → mid (KOSPI 100/3년) → full |
+| 마지막 완료 chunk | **`--max-stocks` CLI bug fix** (effective_stock_codes 가 max_stocks 미반영하던 버그) |
+| 다음 chunk | **ETF/ETN 정책 결정** → smoke 재시도 → mid (KOSPI 100/3년) → full |
 | 25 Endpoint 진행 | **10 / 25 완료** (40%). P0 5/5 완료. P1 6/8 완료. CLI 도구 3건 (backfill_ohlcv + register_credential + sync_stock_master) |
-| 누적 chunk | 28 commits (Phase A: 8 / Phase B: 4 / Phase C: 14 + since_date fix 1 / R1: 1 / 보안 PR 2) |
-| 테스트 | **990 cases** (+2: since_date page break / since_date=None 기존 동작 유지) |
+| 누적 chunk | 29 commits (Phase A: 8 / Phase B: 4 / Phase C: 14 + since_date fix 1 + max-stocks fix 1 / R1: 1 / 보안 PR 2) |
+| 테스트 | **991 cases** (+1: `_list_active_stock_codes` max_stocks limit 검증) |
 | 운영 검증 | ka10099 ✅ 4373 stock 적재 / ka10081 ✅ KOSPI 1782 success / 페이지네이션: 1년 = 1 page (since_date guard 작동 / #1 정량화) |
 
 ---
@@ -120,7 +120,7 @@ P3 (선택):
 | 5 | active 3000 + NXT 1500 sync 실측 시간 | dry-run § 20.4 | 운영 1주 모니터 (30~60분 추정) |
 | 6 | NUMERIC(8,4) magnitude 분포 | dry-run § 20.4 | C-backfill chunk 후 |
 | 7 | C-2α 상속 (NUMERIC magnitude / idx_daily_flow_exchange cardinality) | ADR § 18.4 | C-backfill chunk |
-| **8** | **CLI bug**: `--max-stocks` 가 dry-run 만 적용. 실 백필은 active 전체 처리 | smoke 2026-05-10 | 다음 chunk |
+| ~~8~~ | ~~CLI bug: `--max-stocks` 무시~~ | smoke 2026-05-10 | ✅ 해소 (`<this commit>`) |
 | **9** | **ETF/ETN stock_code 호환성**: 251 종목 ValueError (`0000D0` 같은 영문 코드). ka10081 호환성 가정 (모든 active = 6자리 ASCII 숫자) 검증 누락 | smoke 2026-05-10 | 다음 chunk + 정책 결정 |
 
 ---
@@ -129,14 +129,13 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| 1 | **`--max-stocks` CLI fix** | smoke 발견 — effective_stock_codes 계산 시 max_stocks 미반영. fix 1줄 + 테스트 1 | CLI 1 + tests 1 |
-| 2 | **ETF/ETN stock_code 정책 + 가드** | smoke 발견 251 종목 ValueError. 옵션: (a) ka10081 호출 전 skip / (b) Stock 테이블에 ka10081 호환 플래그 / (c) 별도 ETF endpoint | 정책 결정 + UseCase 가드 + 테스트 |
-| 3 | **운영 실측 measurement (mid → full)** | --max-stocks fix 후 smoke 재시도 → mid 100/3년 → full 3000/3년 → NUMERIC SQL → results.md 채움 → ADR § 26.5 갱신 | 수동 4~8h + 후처리 1h |
-| 4 | daily_flow (ka10086) 백필 CLI | OHLCV 와 구조 다름 — `scripts/backfill_daily_flow.py` 신규 (indc_mode 파라미터 추가) | CLI 1 + tests |
-| 5 | refactor R2 (1R Defer 일괄 정리) | L-2 (NotImplementedError 핸들러) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 (`# type: ignore` → `cast()`) / E-2 (reset_* docstring) / gap detection | refactor 5건 일괄 |
-| 6 | ka10094 (년봉, P2) | C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화 — 현재 NotImplementedError) | Migration 1 + ~200줄 |
-| 7 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
-| 8 | Phase D 진입 — ka10080 분봉 | 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
+| 1 | **ETF/ETN stock_code 정책 + 가드** | smoke 발견 251 종목 ValueError. 옵션: (a) ka10081 호출 전 skip / (b) Stock 테이블에 ka10081 호환 플래그 / (c) 별도 ETF endpoint | 정책 결정 + UseCase 가드 + 테스트 |
+| 2 | **운영 실측 measurement (mid → full)** | smoke 재시도 → mid 100/3년 → full 3000/3년 → NUMERIC SQL → results.md 채움 → ADR § 26.5 갱신 | 수동 4~8h + 후처리 1h |
+| 3 | daily_flow (ka10086) 백필 CLI | OHLCV 와 구조 다름 — `scripts/backfill_daily_flow.py` 신규 (indc_mode 파라미터 추가) | CLI 1 + tests |
+| 4 | refactor R2 (1R Defer 일괄 정리) | L-2 (NotImplementedError 핸들러) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 (`# type: ignore` → `cast()`) / E-2 (reset_* docstring) / gap detection | refactor 5건 일괄 |
+| 5 | ka10094 (년봉, P2) | C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화 — 현재 NotImplementedError) | Migration 1 + ~200줄 |
+| 6 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
+| 7 | Phase D 진입 — ka10080 분봉 | 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
 | ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration 013 + ALTER COLUMN |
 
 ---
@@ -170,7 +169,8 @@ P3 (선택):
 - C-3β — ka10082/83 주/월봉 자동화 (IngestPeriodicOhlcvUseCase + Router 4 path + Scheduler 금 19:30 / 매월 1일 03:00) `2d4e2ae`
 - **C-backfill** — OHLCV 통합 백필 CLI (`scripts/backfill_ohlcv.py` daily/weekly/monthly + dry-run + resume + `_skip_base_date_validation` 옵션) `055e81e`
 - **C-운영실측 준비** — runbook + 결과 템플릿 + ADR § 26 (코드 0 변경) `62079f1`
-- **C-since_date fix** — backfill_ohlcv smoke 첫 호출 운영 차단 fix (chart.py fetch_daily/weekly/monthly 에 since_date 옵션 + UseCase + CLI 전파 + dotenv autoload 누락 보완) `<this commit>`
+- **C-since_date fix** — backfill_ohlcv smoke 첫 호출 운영 차단 fix (chart.py fetch_daily/weekly/monthly 에 since_date 옵션 + UseCase + CLI 전파 + dotenv autoload 누락 보완) `d60a9b3`
+- **C-max-stocks fix** — `--max-stocks` 가 dry-run 만 적용되고 실 백필에서 무시되던 CLI bug fix (변수명 `resume_only_codes` → `explicit_stock_codes` + max_stocks 단독 branch 추가) `<this commit>`
 - **C-도커실환경** — backend_kiwoom 전용 docker-compose + runbook 실 환경 값 채움 (검증 완료) `243d4c7`
 - **C-admin-CLI** — register_credential.py + sync_stock_master.py + 11 테스트 (ka10099 진입 도구) `12e09c2`
 - **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `e9ab050`

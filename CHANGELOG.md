@@ -7,6 +7,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] fix(kiwoom): backfill_ohlcv `--max-stocks` 가 실 백필에서 무시되던 CLI bug fix
+
+직전 since_date guard chunk 의 smoke 검증 중 발견된 **CLI 사용성 차단 bug** 즉시 수정.
+
+### Fixed
+
+- **`scripts/backfill_ohlcv.py`** `async_main` — `--max-stocks N` 인자가 `_count_active_stocks` (dry-run 추정) 만 적용되고 실 백필 호출 시 `effective_stock_codes=None` 으로 치환되어 active 전체 처리되던 bug. 직전 smoke 가 `--max-stocks 10` 의도로 KOSPI 2031 종목 mid-scale 가 됨. resume 분기와 동일하게 `_list_active_stock_codes` 호출해 explicit 종목 list 를 UseCase 에 전달하도록 수정. 변수명 `resume_only_codes` → `explicit_stock_codes` (resume / max_stocks 단독 모두 채우는 의미 명확)
+
+### Added
+
+- 단위 테스트 +1 case — `tests/test_backfill_ohlcv_cli.py::test_list_active_stock_codes_applies_max_stocks_limit`. `_count_active_stocks` + `_list_active_stock_codes` 가 동일 max_stocks 적용 검증 (DB 통합 테스트, testcontainers 활용)
+
+### Verification
+
+- pytest: 990 → **991 cases (+1)** / All passed (회귀 0)
+- mypy --strict: scripts/backfill_ohlcv.py / 0 errors
+- ruff check: All passed
+
+---
+
 ## [2026-05-10] fix(kiwoom): backfill_ohlcv 페이지네이션 종료 조건 신규 + dotenv autoload 보강
 
 `backfill_ohlcv.py --period daily --years 1 --alias prod` smoke 첫 실 호출에서 발견된 운영 차단 버그 1건 즉시 수정 + dotenv autoload 누락 보완.

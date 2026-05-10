@@ -516,9 +516,9 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
     settings = get_settings()
     nxt_enabled = settings.nxt_collection_enabled
 
-    # active stock count + resume 시 적재 대기 종목 산출 (1 세션에 통합)
+    # active stock count + resume / max_stocks 시 명시 종목 list 산출 (1 세션에 통합)
     sessionmaker = get_sessionmaker()
-    resume_only_codes: list[str] | None = None
+    explicit_stock_codes: list[str] | None = None
     try:
         async with sessionmaker() as session:
             active_count = await _count_active_stocks(
@@ -527,7 +527,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                 only_stock_codes=only_stock_codes,
                 max_stocks=args.max_stocks,
             )
-            if args.resume and active_count > 0:
+            if active_count > 0 and (args.resume or args.max_stocks is not None):
                 # 1차 후보 코드 조회 (only_market_codes / only_stock_codes / max_stocks 반영)
                 candidate_codes = await _list_active_stock_codes(
                     session,
@@ -535,13 +535,18 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                     only_stock_codes=only_stock_codes,
                     max_stocks=args.max_stocks,
                 )
-                resume_only_codes = await compute_resume_remaining_codes(
-                    session,
-                    period=args.period,
-                    end_date=end_date,
-                    candidate_codes=candidate_codes,
-                )
-                active_count = len(resume_only_codes)
+                if args.resume:
+                    explicit_stock_codes = await compute_resume_remaining_codes(
+                        session,
+                        period=args.period,
+                        end_date=end_date,
+                        candidate_codes=candidate_codes,
+                    )
+                    active_count = len(explicit_stock_codes)
+                else:
+                    # --max-stocks 단독 — UseCase 에 limit 적용 종목 list 명시 전달.
+                    # active_count 는 _count_active_stocks 가 이미 max_stocks 반영.
+                    explicit_stock_codes = candidate_codes
     except Exception:
         logger.exception("DB 연결 실패")
         return 3
@@ -578,9 +583,9 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
         start_date,
         end_date,
     )
-    # only_stock_codes 결정: resume 모드 시 resume_only_codes 가 우선, 없으면 CLI 인자
+    # only_stock_codes 결정: resume / --max-stocks 시 산출된 explicit list 가 우선, 없으면 CLI 인자
     effective_stock_codes: list[str] | None = (
-        resume_only_codes if resume_only_codes is not None else (only_stock_codes or None)
+        explicit_stock_codes if explicit_stock_codes is not None else (only_stock_codes or None)
     )
 
     started = time.monotonic()
