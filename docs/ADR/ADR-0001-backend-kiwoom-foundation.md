@@ -1720,7 +1720,7 @@ C-backfill 의 후속으로 **운영 실측 사전 준비물 일괄 정비** —
 
 ---
 
-## 27. daily_flow (ka10086) 백필 CLI (2026-05-10, ✅ 코드/테스트 + 실측 가이드 완료, ⏳ 사용자 수동 실측 대기)
+## 27. daily_flow (ka10086) 백필 CLI (2026-05-10, ✅ 코드/테스트 + 실측 가이드 + Stage 0/1 + MAX_PAGES fix 완료, ⏳ Stage 2/3 대기)
 
 > 관련 plan doc: [`phase-c-backfill-daily-flow.md`](../plans/phase-c-backfill-daily-flow.md)
 > 운영 실측 runbook: [`backfill-daily-flow-runbook.md`](../../src/backend_kiwoom/docs/operations/backfill-daily-flow-runbook.md)
@@ -1754,15 +1754,39 @@ OHLCV 백필 (§ 26) 운영 실측 완료 후 **daily_flow (ka10086) 백필 CLI*
 | 3 | NUMERIC change_rate / foreign_holding_ratio / credit_ratio 분포 | 7,500 종목 백필 시 일부 magnitude overflow 가능 | overflow 발생 시 별도 Migration chunk |
 | 4 | 빈 응답 / ETF skip 비율 | OHLCV 와 일치 (ETF ~7%, 빈 응답 ~0.025%) | 일치 시 cross-check 검증 완료 |
 
-### 27.5 실측 결과 (TBD — 사용자 수동 실측 후 채움)
+### 27.5 실측 결과 (부분 — Stage 0/1 + 운영 차단 1건 fix, mid/full TBD)
 
-(OHLCV § 26.5 와 동일 형식. 측정 후 results.md + 본 § 채움)
+> **측정 환경**: docker-compose 5433 / 운영 키움 (alias=prod) / 2026-05-10 17:43~18:25 KST
+> **상세**: `backfill-daily-flow-results.md`
 
-**측정 절차 가이드** (2026-05-10 추가, 코드 변경 0 chunk):
+| 측정 항목 | 가설 (계획서 / dry-run) | 실측 | 결정 / 후속 |
+|----------|----------------------|------|------------|
+| **Stage 0 dry-run** | active 4373 / pages 4 / total 34,984 / 추정 2h 25m | dry-run 출력 동일 | ✅ DB / env 정상 |
+| **Stage 1 smoke (1년)** 첫 시도 | OHLCV 패턴 — 5초 내 PASS | ❌ **8건 KiwoomMaxPagesExceededError** | 즉시 fix 진입 |
+| **1 page 거래일 수 (실측)** | ~300 거래일 (mrkcond:50 가설) | **~22 거래일** (next-key 추적) | **가설 13배 틀림** |
+| **smoke 재시도** (after fix) | 1년 = 12 page 가능 | ✅ total 6 / failed 0 / 25s / NXT 2 적재 | PASS |
+| Stage 2 mid (3년 KOSPI 100) | TBD | TBD | TBD |
+| Stage 3 full (3년 active 4078) | OHLCV 34분 + 페이지네이션 +α | TBD | TBD |
+| NUMERIC(8,4) 4 컬럼 | TBD | TBD | TBD |
 
-- runbook: `backfill-daily-flow-runbook.md` (12 §) — § 1 사전 조건 / § 2 dry-run / § 3 smoke / § 4 mid / § 5 full / § 7 NUMERIC SQL (4 컬럼) / § 8 일간 cron / § 12 OHLCV 결과 cross-check
-- results 양식: `backfill-daily-flow-results.md` (13 §) — TBD 자리에 측정값 채움. § 13 운영 차단 fix 패턴 사전 적용 검증 자리 포함
-- 본 § 27.5 갱신은 results.md 채움 완료 후 핵심 결정만 표로 옮김 (raw 측정은 results.md 유지)
+**신규 운영 발견 (1건) — chunk `<this commit>`**:
+
+- **`DAILY_MARKET_MAX_PAGES = 10` 부족** (smoke 첫 시도) — mrkcond.py:50 의 가설 "1 page ~300 거래일" 실측 ~22 거래일 (13배 틀림). 1년 백필 = 약 12 page 필요 → max_pages 도달 fail. fix: `MAX_PAGES = 40` (3년 ≈ 32 page + 안전 마진 8). smoke 재시도 PASS. mock 테스트 (`since_date_breaks_pagination` 등) 가 page row 수 가정을 검증 못 함 — **운영 호출에서만 발견 가능 패턴** (OHLCV `d60a9b3` 와 동일 mock 한계)
+
+**ka10086 (mrkcond) vs ka10081 (chart) 1 page row 수 차이**:
+
+| endpoint | 1 page 거래일 수 (실측) | MAX_PAGES (수정 후) | 3년 백필 page |
+|----------|------------------------|---------------------|----------------|
+| ka10081 (OHLCV) | ~600 (chart.py:176) | 10 | 1~2 |
+| ka10086 (daily_flow) | **~22** (next-key 실측) | **40** (`<this commit>`) | ~32 |
+
+**원인 가설**: ka10086 응답 22 필드 (신용 + 투자자별 + 외인) 의 row 가 base_dt 기준 약 1개월 단위로 잘림 (단위 지급은 키움 서버 측 로직). 첫 page 만 ~80 거래일 (4개월) 다른 패턴 — 추후 검증 (follow-up)
+
+**측정 절차 가이드** (2026-05-10 `7be3185`):
+
+- runbook: `backfill-daily-flow-runbook.md` (12 §)
+- results 양식: `backfill-daily-flow-results.md` (13 §)
+- 본 § 27.5 갱신은 단계별 측정 진행 시 추가 (mid / full / NUMERIC 채움)
 
 ### 27.6 운영 차단 fix 패턴 일관성 검증
 

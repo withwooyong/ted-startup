@@ -7,6 +7,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] fix(kiwoom): daily_flow smoke 첫 호출 운영 차단 fix — DAILY_MARKET_MAX_PAGES 10 → 40
+
+`scripts/backfill_daily_flow.py` smoke 첫 호출 (KOSPI 10 / 1년) 에서 `KiwoomMaxPagesExceededError` 8건 발견. mrkcond.py:50 의 가설 "1 page ~300 거래일" 가 실측 13배 틀림 (실측 ~22 거래일/page) — `DAILY_MARKET_MAX_PAGES = 10` 부족.
+
+### 변경 요약
+
+| # | 영역 | 변경 |
+|---|------|------|
+| 1 | `app/adapter/out/kiwoom/mrkcond.py:50` | `DAILY_MARKET_MAX_PAGES = 10 → 40` + 주석 갱신 (실측 1 page ~22 거래일 / 3년 ~32 page / 안전 마진 8) |
+| 2 | `docs/operations/backfill-daily-flow-results.md` § 0 / § 2.2 | smoke 첫 시도 차단 발견 + 즉시 fix + 재시도 PASS 기록 (6/2/0 / 25s) |
+| 3 | ADR § 27 헤더 + § 27.5 | 상태 라벨 + 측정 결과 표 + ka10086 vs ka10081 1 page row 수 차이 분석 (~22 vs ~600) |
+| 4 | STATUS.md § 0 / § 3 / § 4 / § 5 / § 6 | C-flow-MAX_PAGES fix sub-chunk 추가 + 알려진 이슈 #14 해소 |
+
+### 근본 원인 분석
+
+next-key 헤더 추적:
+- p1 next=20260108 → p2 base 2026-01-08 (1 page ≈ 80 거래일, 첫 page 만 광범위)
+- p2~p7 next-key: 20251208 → 20251110 → 20251013 → 20250908 → 20250810 → 20250713
+- p2~ 평균 1 page ≈ **22 거래일** (월 단위)
+- 1년 (250 거래일) 도달 = 약 12 page 필요 → max_pages=10 부족
+
+원인 가설 — ka10086 응답 22 필드 (신용 + 투자자별 + 외인) 의 row 가 base_dt 기준 약 1개월 단위로 잘림 (키움 서버 측 로직). 첫 page 만 ~80 거래일 (4개월) 다른 패턴은 추후 follow-up.
+
+### fix 패턴 사전 적용 검증 부분 결과 (ADR § 27.6 cross-check)
+
+| # | 운영 차단 | OHLCV fix commit | daily_flow smoke 검증 |
+|---|----------|-----------------|---------------------|
+| 1 | since_date guard | `d60a9b3` | ⚠ logic 정상이지만 max_pages=10 한계로 도달 전 abort → 본 fix 로 해소 |
+| 2 | `--max-stocks` CLI | `76b3a4a` | ✅ 정상 작동 (raw 10 → 호환 6, active 전체 호출 안 됨) |
+| 3 | ETF/ETN 호환 가드 | `c75ede6` | ✅ 정상 작동 (`_KA10086_COMPATIBLE_RE` 4 종목 skip + sample 로깅) |
+
+mock 테스트 한계 (`12f0daf` HANDOFF) 재확인 — page row 수 가정 (mrkcond:50 의 ~300 거래일 가설) 은 운영 호출에서만 검증 가능. `since_date_breaks_pagination` 같은 mock 테스트는 since_date 의 break 조건만 검증, page row 수 자체는 검증 못 함.
+
+### 운영 검증
+
+- ruff PASS / mypy --strict PASS / 1024 tests PASS (mrkcond 17 cases, 상수값 변경만이라 영향 없음)
+- smoke 재시도 (KOSPI 10 / 1년): total 6 / failed 0 / 25s — since_date guard 정상 작동
+
+### Backwards 호환
+
+- 운영 cron (since_date=None 디폴트) 호환 — max_pages 만 상향, break 조건 변경 없음
+- 라우터 (`/api/kiwoom/daily-flow/sync`, 1년 cap) 호환 — 1년 = 12 page < 40 안전
+
+### 다음 단계
+
+Stage 2 mid (KOSPI 100 / 3년) → Stage 3 full (active 4078 / 3년) → NUMERIC SQL 4 컬럼 → ADR § 27.5 결과 표 채움.
+
+---
+
 ## [2026-05-10] docs(kiwoom): daily_flow 운영 실측 가이드 신규 — runbook + results doc (코드 0 변경)
 
 `scripts/backfill_daily_flow.py` (ka10086) 운영 실측을 위한 단계별 절차 + 결과 양식 신규. OHLCV § 26 (`backfill-measurement-runbook.md` / `backfill-measurement-results.md`) 패턴 1:1 복제 후 ka10086 차이만 반영. ADR § 27 헤더에 doc 참조 추가 + § 27.5 측정 자리 명시.

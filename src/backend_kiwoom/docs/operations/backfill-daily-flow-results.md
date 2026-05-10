@@ -1,18 +1,23 @@
 # 운영 실측 결과 — daily_flow (ka10086) 3년 백필
 
-> **상태**: ⏳ **측정 대기** (사용자 수동 실행 후 채움)
-> **측정자**: TBD
-> **측정일**: TBD
+> **상태**: 🔄 **부분 측정** (Stage 0 dry-run + Stage 1 smoke + MAX_PAGES fix 완료, mid~full 대기)
+> **측정자**: Ted (dry-run/smoke: Claude assist)
+> **측정일**: 2026-05-10 (Stage 0 dry-run / Stage 1 smoke + MAX_PAGES fix) / mid~full TBD
 > **참조**: `backfill-daily-flow-runbook.md` (절차) / `scripts/backfill_daily_flow.py` (CLI)
 > **운영 환경**: docker-compose 5433 / 운영 키움 (alias=prod) / NXT_COLLECTION_ENABLED=true
 
 ---
 
-## 0. 요약 (TL;DR — 측정 후 채움)
+## 0. 요약 (TL;DR — 부분 채움)
 
-(예시 — OHLCV § 0 형식 참고)
+Stage 0 dry-run + Stage 1 smoke 완료. **smoke 첫 시도에서 신규 운영 차단 1건 발견 → 즉시 fix**:
 
-> 3년 KRX+NXT daily_flow 백필이 **TBD분** (active 4078 호환 / TBD failed) 으로 dry-run 추정 TBD 보다 TBD. NUMERIC(8,4) `credit_rate` / `credit_balance_rate` / `foreign_rate` / `foreign_weight` 의 max TBD — 마이그레이션 TBD. 운영 차단 fix 3건 사전 적용 (since_date / max-stocks / ETF guard) — 신규 발견 TBD건.
+- **`DAILY_MARKET_MAX_PAGES = 10` 부족** — 가설 "1 page ~300 거래일" 실측 ~22 거래일 (13배 틀림). 1년 백필 = 약 12 page 필요 → max_pages 도달 fail
+- **fix**: `MAX_PAGES = 10 → 40` (3년 ≈ 32 page + 안전 마진 8)
+- **smoke 재시도 PASS**: total 6 / failed 0 / 25s
+- 사전 적용 fix 패턴 검증: ✅ max-stocks / ✅ ETF guard / ⚠ since_date (logic 정상, max_pages 부족으로 도달 전 abort)
+
+mid + full + NUMERIC SQL TBD.
 
 ---
 
@@ -20,12 +25,13 @@
 
 | 항목 | 값 |
 |------|-----|
-| 측정 시점 | TBD (KST, full backfill) |
+| 측정 시점 (dry-run) | 2026-05-10 17:43 KST |
+| 측정 시점 (full backfill) | TBD |
 | KIWOOM_DEFAULT_ENV | prod |
-| NXT_COLLECTION_ENABLED | TBD |
+| NXT_COLLECTION_ENABLED | true (dry-run 출력 "NXT collection: enabled") |
 | KIWOOM_MIN_REQUEST_INTERVAL_SECONDS | 0.25 (기본) |
 | INDC_MODE | quantity (기본) |
-| active stock 수 | TBD (OHLCV 기준 4373 호환 4078) |
+| active stock 수 | **4373** (kiwoom.stock.is_active=true / 5 시장 모두 — dry-run 출력) |
 | DB 마이그레이션 head | 012_stock_price_monthly_nxt |
 | 백필 CLI commit | `23f601b` (since_date + max-stocks + ETF guard 사전 적용) |
 
@@ -33,31 +39,79 @@
 
 ## 2. 단계별 실측
 
-### 2.1 Stage 0 — Dry-run
+### 2.1 Stage 0 — Dry-run (2026-05-10 17:43 KST, ✅ 완료)
 
-| --years | active | NXT | total_calls | estimated |
-|---------|--------|-----|-------------|-----------|
-| 3 | TBD | TBD | TBD | TBD |
+| --years | active | NXT | exchanges/stock | pages/call | total_calls | rate_limit | estimated |
+|---------|--------|-----|-----------------|------------|-------------|------------|-----------|
+| 3 | **4373** | enabled | 2 | **4** | **34,984** | 0.25s | **2h 25m 46s** |
 
-> dry-run 추정값 (lower-bound). 실측은 다음 단계.
+**관찰**:
+- `pages/call=4` — ka10086 1 page ~300 거래일 가정 (1095 days / 300 = 3.65 → ceil 4)
+- `total_calls=34,984` = 4373 × 2 × 4
+- `estimated=2h 25m 46s` = 34,984 × 0.25s = 약 8,746s
+
+**OHLCV 대비** (§ 12 cross-check 첫 데이터):
+| 항목 | OHLCV daily | daily_flow |
+|------|-------------|------------|
+| active | 4373 | 4373 (동일) |
+| pages/call (dry-run) | 2 | **4** (2x) |
+| total_calls (dry-run) | 17,492 | **34,984** (2x) |
+| estimated | 1h 12m 53s | **2h 25m 46s** (2x) |
+| 실측 | **34분** (2.1x 빠름) | TBD |
+
+> 가설: since_date guard 가 page 1~2 안에서 break → 실측은 dry-run 의 50% 미만 추정. OHLCV 패턴 (2.1x 빠름) 적용 시 daily_flow 실측 약 1h 10m 추정.
+
+> dry-run 추정값 (lower-bound). 실측은 다음 단계 (smoke → mid → full).
 
 ---
 
 ### 2.2 Stage 1 — Smoke (KOSPI 10 / 1년)
 
+#### 첫 시도 (2026-05-10 18:01 KST) — ❌ **운영 차단 발견**
+
 | 항목 | 값 |
 |------|-----|
-| 명령어 | `--years 1 --max-stocks 10 --only-market-codes 0` |
-| total | TBD (raw 10 → ETF skip TBD → 호환 TBD) |
-| success_krx / success_nxt / failed | TBD / TBD / TBD |
-| elapsed | TBD |
-| avg/stock | TBD |
-| pages observed (`grep next_key`) | TBD |
+| 명령어 | `--years 1 --max-stocks 10 --only-market-codes 0 --log-level DEBUG` |
+| total | 6 (raw 10 → ETF 4 skip → 호환 6) |
+| success_krx / success_nxt / failed | 0 / 0 / **8** (ratio 133%) |
+| elapsed | 19s |
+| 차단 원인 | **`KiwoomMaxPagesExceededError` 8건 — `DAILY_MARKET_MAX_PAGES = 10` 초과** |
+
+**근본 원인 (next-key 헤더 추적)**:
+- p1 next=20260108 → p2 base 2026-01-08 (응답 가장 과거 ≈ 2026-01-09, ~80 거래일/page)
+- p2~p7 next-key 진행: 20251208 → 20251110 → 20251013 → 20250908 → 20250810 → 20250713
+- p2~ 평균 1 page ≈ **22 거래일** (월 단위)
+- 1년 (250 거래일) 도달 = 약 12 page 필요 → max_pages=10 부족
+- **계획서 § 12.7 가설 "1 page ~300 거래일" 13배 틀림** (mrkcond.py:50 주석)
+
+**fix 패턴 사전 적용 검증 부분 결과**:
+- ✅ `--max-stocks` CLI fix 작동 (raw 10 → 호환 6 정상 — active 전체 호출 안 됨)
+- ✅ ETF/ETN 호환 가드 작동 (`_KA10086_COMPATIBLE_RE` skip 4 종목)
+- ❌ since_date guard — logic 자체 정상이지만 max_pages=10 한계로 도달 전 abort
+
+#### 즉시 fix (2026-05-10 18:24 KST, `<this commit>`)
+
+```python
+# mrkcond.py:50 변경
+- DAILY_MARKET_MAX_PAGES = 10  # ~300 거래일 추정 (가설)
++ DAILY_MARKET_MAX_PAGES = 40  # 실측 ~22 거래일/page → 3년 ≈ 32 page (안전 마진 8)
+```
+
+#### 재시도 (2026-05-10 18:25 KST) — ✅ **PASS**
+
+| 항목 | 값 |
+|------|-----|
+| 명령어 | `--years 1 --max-stocks 10 --only-market-codes 0 --log-level INFO` |
+| total | **6** (raw 10 → ETF 4 skip → 호환 6) |
+| success_krx / success_nxt / failed | **6 / 2 / 0** (ratio 0%) |
+| elapsed | **25s** |
+| avg/stock | 4.2s |
+| pages observed | 1년 백필 시 종목당 ~12 page (KRX) + ~5 page (NXT) |
 
 **관찰**:
-- 인증 정상 / DB upsert 성공 / max_pages 초과 TBD건
-- ka10086 호환 가드 (`_KA10086_COMPATIBLE_RE`) 로깅: TBD
-- ETF skip sample 5: TBD
+- 인증 정상 / DB upsert 성공 / max_pages 초과 0건
+- since_date guard 정상 작동 — 12 page 도달 시 break (max_pages=40 한계 못 미침)
+- NXT 활성 6 종목 중 2 종목만 적재 (NXT 출범 2025-03-04 이후 종목)
 
 ---
 

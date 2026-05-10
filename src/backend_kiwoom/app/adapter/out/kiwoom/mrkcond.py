@@ -47,7 +47,9 @@ class KiwoomMarketCondClient:
 
     PATH = "/api/dostk/mrkcond"
     DAILY_MARKET_API_ID = "ka10086"
-    DAILY_MARKET_MAX_PAGES = 10  # 22 필드라 페이지 row 수 ka10081 보다 적을 가능성 (~300 거래일 추정)
+    # 실측 (2026-05-10 smoke `7be3185`): 1 page ≈ 22 거래일 (첫 page ~80, p2~ ~22).
+    # 가설 "~300 거래일/page" 13배 틀림. 3년 백필 (~750 거래일) ≈ 32 page → 40 (안전 마진 8).
+    DAILY_MARKET_MAX_PAGES = 40
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
