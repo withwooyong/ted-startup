@@ -7,6 +7,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] docs(kiwoom): daily_flow Stage 0~3 + NUMERIC SQL 측정 완료 — full 9h 53m / NXT 166 fail / 마이그레이션 불필요
+
+`scripts/backfill_daily_flow.py` 운영 실측 measurement chunk. Stage 0 dry-run → Stage 1 smoke (fix 후 재시도 PASS) → Stage 2 mid → Stage 3 full → NUMERIC SQL 4 컬럼 → since_date edge cross-check 모두 완료. **코드 변경 0** — 측정 결과 documentation.
+
+### 운영 실측 결과 요약
+
+| Stage | 명령어 요지 | total | success | failed | elapsed |
+|-------|------------|-------|---------|--------|---------|
+| smoke | KOSPI 10 / 1y (재시도) | 6 | 6 KRX / 2 NXT | 0 | 25s |
+| mid | KOSPI 100 / 3y | 78 | 78 KRX / 21 NXT | 0 | 13m 8s |
+| **full** | active 4078 / 3y | **4078** | **3922 KRX / 616 NXT** | **166** (NXT only) | **9h 53m 34s** |
+
+### 측정 결과 정량화 (ADR § 27.4 운영 미해결 4건)
+
+- **#1 페이지네이션 빈도**: 1 page ≈ 22 거래일 (실측, 가설 "~300 거래일" 13배 틀림). 3년 = 평균 ~32 page
+- **#2 3년 백필 elapsed**: 9h 53m 34s (avg 8.7s/stock — OHLCV 0.5s 의 17.4배). 페이지 수 차이가 원인
+- **#3 NUMERIC(8,4) 4 컬럼**: max 16.39 (`credit_*`) / 100.00 (`foreign_*`) — cap 1% 이내, gt_100/gt_1000 모두 0 → **마이그레이션 불필요**
+- **#4 일간 cron elapsed**: 본 chunk 미수행 (scheduler_enabled 활성화 chunk 대기)
+
+### 신규 발견 (본 chunk)
+
+| # | 항목 | 심각도 | 후속 chunk |
+|---|------|--------|-----------|
+| 1 | **NXT 166 종목 max_pages=40 도 부족** (활성 626 의 26.5%) | **MEDIUM** | NXT 응답 패턴 분석 chunk |
+| 2 | **컬럼 동일값 의심** (`credit_rate ≡ credit_balance_rate`, `foreign_rate ≡ foreign_weight` — min/max/p01/p99 모두 일치) | LOW | `<>` 검증 → 동일 시 Migration DROP (C-2γ 패턴) |
+| 3 | KRX 빈 응답 1 종목 (success_krx=3922 vs DISTINCT=3921) | LOW | OHLCV F8 통합 |
+| 4 | KRX 적재 -156 stocks vs OHLCV 4077 | LOW | item 1 과 통합 분석 |
+
+### since_date guard cross-check (OHLCV F6 비교)
+
+- **0 rows** since_date 미만 적재 (OHLCV 의 002690/004440 같은 edge case 없음)
+- **결론**: daily_flow `_page_reached_since_market` 가 OHLCV `chart.py` 보다 **정확**. F6 edge case 별도 분석 우선순위 ↓
+
+### Changed
+
+- `src/backend_kiwoom/docs/operations/backfill-daily-flow-results.md` — § 0~14 모두 채움 (TBD 제거)
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 27 — 헤더 라벨 + § 27.5 표 (Stage 2/3 + NUMERIC + 컬럼 동일값 + since_date edge) + 신규 발견 3건
+- `src/backend_kiwoom/STATUS.md` § 0 / § 3 / § 4 / § 5 / § 6 — measurement chunk 완료 / 신규 이슈 #15 (NXT) #16 (컬럼 동일값) / 다음 chunk 우선순위 재조정
+
+### 운영 검증
+
+- 코드 변경 0 — 1024 tests 그대로
+- KRX 적재: 2,636,175 rows / DISTINCT 3921 stocks / 2023-05-11 ~ 2026-05-08
+- NXT 적재: 149,262 rows / DISTINCT 616 stocks / 2025-03-17 ~ 2026-05-08
+
+### 다음 chunk
+
+1. NXT 166 fail 분석 (MEDIUM) → 운영 cron 영향 검증
+2. 컬럼 동일값 검증 (LOW) → Migration DROP 결정
+
+---
+
 ## [2026-05-10] fix(kiwoom): daily_flow smoke 첫 호출 운영 차단 fix — DAILY_MARKET_MAX_PAGES 10 → 40
 
 `scripts/backfill_daily_flow.py` smoke 첫 호출 (KOSPI 10 / 1년) 에서 `KiwoomMaxPagesExceededError` 8건 발견. mrkcond.py:50 의 가설 "1 page ~300 거래일" 가 실측 13배 틀림 (실측 ~22 거래일/page) — `DAILY_MARKET_MAX_PAGES = 10` 부족.

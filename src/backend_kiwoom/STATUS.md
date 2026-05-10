@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-10 (daily_flow smoke 첫 호출 운영 차단 fix — DAILY_MARKET_MAX_PAGES 10 → 40 / smoke 재시도 PASS)
+> **마지막 갱신**: 2026-05-11 (daily_flow Stage 0~3 + NUMERIC SQL 측정 완료 — full 9h 53m / NXT 166 fail / 마이그레이션 불필요 / 컬럼 동일값 의심)
 
 ---
 
@@ -12,10 +12,10 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **daily_flow MAX_PAGES fix** (smoke 첫 호출 운영 차단 — `DAILY_MARKET_MAX_PAGES = 10 → 40` + smoke 재시도 PASS) |
-| 다음 chunk | **daily_flow Stage 2/3 측정** (mid KOSPI 100 → full active 4078 → NUMERIC SQL 4 컬럼) → scheduler_enabled 운영 cron 활성 → ka10094 |
+| 마지막 완료 chunk | **daily_flow Stage 0~3 measurement** (full 9h 53m / KRX 0 fail / NXT 166 fail / NUMERIC 4 컬럼 마이그레이션 불필요) |
+| 다음 chunk | **NXT 166 종목 max_pages 분석** (MEDIUM) → 컬럼 동일값 검증 (LOW) → scheduler_enabled 운영 cron 활성 → ka10094 |
 | 25 Endpoint 진행 | **10 / 25 완료** (40%). CLI 도구 4건 (backfill_ohlcv + backfill_daily_flow + register_credential + sync_stock_master) |
-| 누적 chunk | 34 commits (Phase A: 8 / Phase B: 4 / Phase C: 15 + since_date 1 + max-stocks 1 + ETF guard 1 + measurement docs 1 + daily_flow 백필 1 + daily_flow 실측 가이드 1 + daily_flow MAX_PAGES fix 1 / R1: 1 / 보안 PR 2) |
+| 누적 chunk | 35 commits (Phase A: 8 / Phase B: 4 / Phase C: 16 + since_date 1 + max-stocks 1 + ETF guard 1 + measurement docs 1 + daily_flow 백필 1 + daily_flow 실측 가이드 1 + daily_flow MAX_PAGES fix 1 + daily_flow measurement 1 / R1: 1 / 보안 PR 2) |
 | 테스트 | **1024 cases** (993 → +31: mrkcond +2 / daily_flow_service +5 / backfill_daily_flow_cli +24) |
 | 운영 검증 | ✅ **full 3년 OHLCV 백필 34분 / 4078 호환 / 0 failed**. daily_flow 백필 ⏳ 사용자 실측 대기 |
 
@@ -107,7 +107,7 @@ P3 (선택):
 | **C-backfill-flow** | `scripts/backfill_daily_flow.py` (ka10086) — mrkcond since_date / ETF 가드 / `--indc-mode` / OHLCV 운영 차단 fix 3건 사전 적용 | ✅ | 1024 tests / +31 (mrkcond +2 / service +5 / CLI +24) — ADR § 27 / `phase-c-backfill-daily-flow.md` |
 | **C-flow-실측 준비** | daily_flow 운영 실측 runbook + results doc 신규 (코드 0 변경) — OHLCV § 26 패턴 1:1 + ka10086 차이 반영 (단일 endpoint / `--indc-mode` / NUMERIC 4 컬럼) | ✅ | runbook 12 § + results 13 § / ADR § 27.5 자리 명시 + § 27 헤더 doc 참조 추가 |
 | **C-flow-MAX_PAGES fix** | smoke 첫 호출 운영 차단 — `DAILY_MARKET_MAX_PAGES = 10 → 40` (가설 13배 틀림 / 실측 1 page ~22 거래일). smoke 재시도 PASS (6/2/0/25s) | ✅ | 1024 tests 그대로 — 상수 변경만 / ADR § 27.5 + § 27.6 갱신 |
-| C-flow-실측 측정 | mid (KOSPI 100/3y) + full (active 4078/3y) + NUMERIC SQL 4 컬럼 + ADR § 27.5 결과 표 채움 | ⏳ | 사용자 진행 결정 |
+| **C-flow-실측 측정** | Stage 0~3 + NUMERIC SQL 4 컬럼 + ADR § 27.5 결과 표 채움 | ✅ | full 9h 53m (3922/616/166 / NXT 166 fail) / NUMERIC 마이그레이션 불필요 / since_date edge 0 / 컬럼 동일값 의심 |
 | C-4 (선택) | ka10094 (년봉) — P2 | ⏳ | `endpoint-09-ka10094.md` |
 
 ---
@@ -122,8 +122,10 @@ P3 (선택):
 | ~~4~~ | ~~페이지네이션 빈도~~ | smoke 2026-05-10 | ✅ 정량화: 1년 = 1 page / 3년 = 1~2 page |
 | ~~5~~ | ~~active 3000 + NXT 1500 sync 실측 시간~~ | full 2026-05-10 | ✅ **34분** (4078 호환 / NXT 626 / 0 failed) |
 | ~~6~~ | ~~NUMERIC(8,4) magnitude 분포 (turnover_rate)~~ | full 2026-05-10 | ✅ max 3,257.80 / cap 33% / 마이그레이션 불필요 |
-| 7 | C-2α 상속 (foreign_holding_ratio / credit_ratio NUMERIC magnitude / idx_daily_flow_exchange cardinality) | ADR § 18.4 | **Stage 2/3 측정 chunk 에서 SQL 채움** — Stage 1 smoke PASS 완료 (ADR § 27.5) |
-| ~~14~~ | ~~`DAILY_MARKET_MAX_PAGES=10` 부족~~ | smoke 2026-05-10 | ✅ 해소 (`<this commit>`) — 가설 "1 page ~300 거래일" 13배 틀림 / fix `=40` |
+| ~~7~~ | ~~C-2α 상속 (foreign_holding_ratio / credit_ratio NUMERIC magnitude)~~ | ADR § 18.4 | ✅ 해소 — Stage 3 measurement: 4 컬럼 max < 100 / 마이그레이션 불필요 |
+| ~~14~~ | ~~`DAILY_MARKET_MAX_PAGES=10` 부족~~ | smoke 2026-05-10 | ✅ 해소 (`7c07fb7`) — fix `=40` |
+| **15** | **NXT 166 종목 max_pages=40 도 부족** | full 2026-05-11 | MEDIUM — NXT 활성 626 중 166 fail (26.5%). 별도 분석 chunk 필요 |
+| **16** | **컬럼 동일값 의심** (`credit_rate ≡ credit_balance_rate` / `foreign_rate ≡ foreign_weight`) | NUMERIC SQL 2026-05-11 | LOW — `<>` 검증 chunk → 동일 시 Migration DROP (C-2γ 패턴) |
 | ~~8~~ | ~~CLI bug: `--max-stocks` 무시~~ | smoke 2026-05-10 | ✅ 해소 (`76b3a4a`) |
 | ~~9~~ | ~~ETF/ETN stock_code 호환성: 251 종목 ValueError~~ | smoke 2026-05-10 | ✅ 해소 (`c75ede6`) — UseCase 가드 (옵션 a) |
 | **10 (F6)** | since_date guard edge case — 2 종목 (002690, 004440) 만 since_date 보다 과거 적재 | full 2026-05-10 | LOW — 0.13% rows / 데이터 nuetral~plus. follow-up |
@@ -137,7 +139,8 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| 1 | **daily_flow Stage 2/3 측정** | smoke PASS 후 mid (KOSPI 100/3y) → full (active 4078/3y) + NUMERIC 4 컬럼 (`credit_rate`/`credit_balance_rate`/`foreign_rate`/`foreign_weight`) SQL → results.md / ADR § 27.5 채움 | mid 수분 (12 page * 100 stock * 0.25s) + full 추정 1h~2h 30m |
+| 1 | **NXT 166 종목 max_pages 분석 chunk** (신규 발견 MEDIUM) | full 결과 NXT 166 종목 (활성 626 의 26.5%) max_pages=40 도달 fail. log + cont-yn + next-key 추적 → NXT-only since_date guard / max_pages 별도 / 응답 패턴 차이 분석 | ~1~2일 |
+| 2 | **컬럼 동일값 검증 chunk** (LOW) | `credit_rate <> credit_balance_rate` / `foreign_rate <> foreign_weight` SQL 검증 → 동일 시 Migration DROP (C-2γ 패턴) | ~1일 |
 | 2 | **scheduler_enabled 운영 cron 활성** | 측정 #4 (일간 cron elapsed) 미수행. 1주 모니터 → ADR § 26.5 추가 | env 변경 + 1주 운영 모니터 |
 | 3 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 | 분석 + 정책 결정 |
 | 4 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
@@ -184,7 +187,8 @@ P3 (선택):
 - **C-운영실측 measurement** — smoke + mid + full 3 단계 측정 + NUMERIC SQL + ADR § 26.5 / results.md 채움 (코드 0 변경). 4078 종목 / 34분 / 0 failed `12f0daf`
 - **C-backfill-flow** — `scripts/backfill_daily_flow.py` 신규 + mrkcond.py since_date + IngestDailyFlowUseCase ETF 가드 + only_stock_codes/skip_base_date_validation/since_date 확장. 1024 tests / +31 (ADR § 27 + plan doc 신규) `23f601b`
 - **C-flow-실측 준비** — daily_flow 운영 실측 runbook + results doc 신규 (`backfill-daily-flow-runbook.md` 12 § + `backfill-daily-flow-results.md` 13 §). OHLCV § 26 패턴 1:1 + ka10086 차이. 코드 0 변경 `7be3185`
-- **C-flow-MAX_PAGES fix** — smoke 첫 호출 (`7be3185` 후) `KiwoomMaxPagesExceededError` 8건 → mrkcond.py:50 `DAILY_MARKET_MAX_PAGES = 10 → 40` (가설 "1 page ~300 거래일" 13배 틀림 / 실측 ~22 거래일 / 1년 = 12 page / 3년 = 32 page). smoke 재시도 PASS (6/2/0 / 25s) `<this commit>`
+- **C-flow-MAX_PAGES fix** — smoke 첫 호출 (`7be3185` 후) `KiwoomMaxPagesExceededError` 8건 → mrkcond.py:50 `DAILY_MARKET_MAX_PAGES = 10 → 40`. smoke 재시도 PASS (6/2/0 / 25s) `7c07fb7`
+- **C-flow-measurement** — Stage 0~3 + NUMERIC SQL 측정 완료 (코드 0 변경). full 9h 53m (3922/616/166 — KRX 0 fail / NXT 166 fail) / NUMERIC 4 컬럼 max < 100 (마이그레이션 불필요) / since_date edge 0 (OHLCV F6 보다 정확) / 컬럼 동일값 의심 (`credit_rate ≡ credit_balance_rate` / `foreign_rate ≡ foreign_weight`) `<this commit>`
 - **C-도커실환경** — backend_kiwoom 전용 docker-compose + runbook 실 환경 값 채움 (검증 완료) `243d4c7`
 - **C-admin-CLI** — register_credential.py + sync_stock_master.py + 11 테스트 (ka10099 진입 도구) `12e09c2`
 - **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `e9ab050`

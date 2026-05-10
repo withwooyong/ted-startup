@@ -1720,7 +1720,7 @@ C-backfill 의 후속으로 **운영 실측 사전 준비물 일괄 정비** —
 
 ---
 
-## 27. daily_flow (ka10086) 백필 CLI (2026-05-10, ✅ 코드/테스트 + 실측 가이드 + Stage 0/1 + MAX_PAGES fix 완료, ⏳ Stage 2/3 대기)
+## 27. daily_flow (ka10086) 백필 CLI (2026-05-10~11, ✅ 코드/테스트 + 가이드 + Stage 0~3 + MAX_PAGES fix + NUMERIC SQL 완료)
 
 > 관련 plan doc: [`phase-c-backfill-daily-flow.md`](../plans/phase-c-backfill-daily-flow.md)
 > 운영 실측 runbook: [`backfill-daily-flow-runbook.md`](../../src/backend_kiwoom/docs/operations/backfill-daily-flow-runbook.md)
@@ -1765,13 +1765,22 @@ OHLCV 백필 (§ 26) 운영 실측 완료 후 **daily_flow (ka10086) 백필 CLI*
 | **Stage 1 smoke (1년)** 첫 시도 | OHLCV 패턴 — 5초 내 PASS | ❌ **8건 KiwoomMaxPagesExceededError** | 즉시 fix 진입 |
 | **1 page 거래일 수 (실측)** | ~300 거래일 (mrkcond:50 가설) | **~22 거래일** (next-key 추적) | **가설 13배 틀림** |
 | **smoke 재시도** (after fix) | 1년 = 12 page 가능 | ✅ total 6 / failed 0 / 25s / NXT 2 적재 | PASS |
-| Stage 2 mid (3년 KOSPI 100) | TBD | TBD | TBD |
-| Stage 3 full (3년 active 4078) | OHLCV 34분 + 페이지네이션 +α | TBD | TBD |
+| **Stage 2 mid (3년 KOSPI 100)** | dry-run 추정 2.6분 (page 4 가정) | ✅ **78 / 21 / 0 / 13m 8s** (avg 10.1s/stock — 17x OHLCV) | dry-run 5배 느림 (page ~32 실측) |
+| **Stage 3 full (3년 active 4078)** | mid × 52 = 9~12h | 🟡 **3922 / 616 / 166 / 9h 53m 34s** | KRX 0 fail / NXT 166 fail (별도 chunk) |
+| **NUMERIC(8,4) 4 컬럼** | OHLCV turnover_rate (max 3257.80) 패턴 | ✅ credit_rate / credit_balance_rate max **16.39** / foreign_rate / foreign_weight max **100.00** / gt_100·gt_1000 모두 0 | **마이그레이션 불필요** (cap 1% 이내) |
+| **컬럼 동일값 의심** (신규 발견) | (가설 없음) | 🔶 `credit_rate` ≡ `credit_balance_rate` / `foreign_rate` ≡ `foreign_weight` (min/max/p01/p99 모두 일치) | follow-up — `<>` 검증 chunk → 동일 시 Migration DROP (C-2γ 패턴) |
+| **since_date edge case (OHLCV F6 cross-check)** | OHLCV 002690/004440 같은 패턴 가능 | ✅ **0 rows** (since_date 도달 후 page/row fragment 모두 정확히 break) | daily_flow guard 가 OHLCV 보다 **정확** |
 | NUMERIC(8,4) 4 컬럼 | TBD | TBD | TBD |
 
-**신규 운영 발견 (1건) — chunk `<this commit>`**:
+**신규 운영 발견 (3건)**:
 
-- **`DAILY_MARKET_MAX_PAGES = 10` 부족** (smoke 첫 시도) — mrkcond.py:50 의 가설 "1 page ~300 거래일" 실측 ~22 거래일 (13배 틀림). 1년 백필 = 약 12 page 필요 → max_pages 도달 fail. fix: `MAX_PAGES = 40` (3년 ≈ 32 page + 안전 마진 8). smoke 재시도 PASS. mock 테스트 (`since_date_breaks_pagination` 등) 가 page row 수 가정을 검증 못 함 — **운영 호출에서만 발견 가능 패턴** (OHLCV `d60a9b3` 와 동일 mock 한계)
+1. **`DAILY_MARKET_MAX_PAGES = 10` 부족** (smoke 첫 시도, chunk `7c07fb7`) — mrkcond.py:50 가설 "1 page ~300 거래일" 실측 ~22 거래일 (13배 틀림). 1년 백필 = 약 12 page → max_pages 도달 fail. fix: `=40`. smoke + mid + full KRX 모두 PASS
+
+2. **NXT 166 종목 max_pages=40 도 부족** (full, MEDIUM, 별도 분석 chunk) — NXT 활성 626 중 166 fail (26.5%). sample 모두 NXT only KiwoomMaxPagesExceededError. 가설: NXT 응답이 KRX 보다 page row 수 더 적거나 cont-yn=Y 비정상 유지. NXT 출범 2025-03-04 이후 1년 2개월 데이터인데 max_pages=40 도달 = NXT 응답 패턴 차이
+
+3. **컬럼 동일값 의심** (NUMERIC SQL, LOW) — `credit_rate ≡ credit_balance_rate` / `foreign_rate ≡ foreign_weight` (min/max/p01/p99/rows 모두 일치). C-2γ Migration 008 의 D-E 중복 컬럼 DROP 패턴과 유사 → follow-up `<>` 검증 chunk → 동일 시 Migration DROP
+
+mock 테스트가 page row 수 / NXT 응답 패턴 같은 운영 edge case 를 못 잡는다는 한계 (OHLCV `12f0daf` HANDOFF) 재확인.
 
 **ka10086 (mrkcond) vs ka10081 (chart) 1 page row 수 차이**:
 
@@ -1782,11 +1791,13 @@ OHLCV 백필 (§ 26) 운영 실측 완료 후 **daily_flow (ka10086) 백필 CLI*
 
 **원인 가설**: ka10086 응답 22 필드 (신용 + 투자자별 + 외인) 의 row 가 base_dt 기준 약 1개월 단위로 잘림 (단위 지급은 키움 서버 측 로직). 첫 page 만 ~80 거래일 (4개월) 다른 패턴 — 추후 검증 (follow-up)
 
-**측정 절차 가이드** (2026-05-10 `7be3185`):
+**measurement chunk 산출** (2026-05-10~11):
 
-- runbook: `backfill-daily-flow-runbook.md` (12 §)
-- results 양식: `backfill-daily-flow-results.md` (13 §)
-- 본 § 27.5 갱신은 단계별 측정 진행 시 추가 (mid / full / NUMERIC 채움)
+- runbook: `backfill-daily-flow-runbook.md` (12 §, `7be3185`)
+- results: `backfill-daily-flow-results.md` (14 §, full 채움)
+- KRX 적재: 2,636,175 rows / DISTINCT 3921 stocks / 2023-05-11 ~ 2026-05-08
+- NXT 적재: 149,262 rows / DISTINCT 616 stocks / 2025-03-17 ~ 2026-05-08
+- 미해결: NXT 166 종목 fail / 컬럼 동일값 (별도 chunk)
 
 ### 27.6 운영 차단 fix 패턴 일관성 검증
 

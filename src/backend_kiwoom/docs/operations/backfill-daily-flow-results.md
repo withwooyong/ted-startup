@@ -1,23 +1,34 @@
 # 운영 실측 결과 — daily_flow (ka10086) 3년 백필
 
-> **상태**: 🔄 **부분 측정** (Stage 0 dry-run + Stage 1 smoke + MAX_PAGES fix 완료, mid~full 대기)
-> **측정자**: Ted (dry-run/smoke: Claude assist)
-> **측정일**: 2026-05-10 (Stage 0 dry-run / Stage 1 smoke + MAX_PAGES fix) / mid~full TBD
+> **상태**: ✅ **전체 측정 완료** (Stage 0~3 + MAX_PAGES fix + NUMERIC SQL + since_date cross-check)
+> **측정자**: Ted (Claude assist)
+> **측정일**: 2026-05-10 17:43 ~ 2026-05-11 05:50 KST
 > **참조**: `backfill-daily-flow-runbook.md` (절차) / `scripts/backfill_daily_flow.py` (CLI)
 > **운영 환경**: docker-compose 5433 / 운영 키움 (alias=prod) / NXT_COLLECTION_ENABLED=true
 
 ---
 
-## 0. 요약 (TL;DR — 부분 채움)
+## 0. 요약 (TL;DR)
 
-Stage 0 dry-run + Stage 1 smoke 완료. **smoke 첫 시도에서 신규 운영 차단 1건 발견 → 즉시 fix**:
+Stage 0~3 + NUMERIC SQL 측정 완료. 운영 차단 1건 즉시 fix + 신규 차단 1건 발견 (별도 chunk).
 
-- **`DAILY_MARKET_MAX_PAGES = 10` 부족** — 가설 "1 page ~300 거래일" 실측 ~22 거래일 (13배 틀림). 1년 백필 = 약 12 page 필요 → max_pages 도달 fail
-- **fix**: `MAX_PAGES = 10 → 40` (3년 ≈ 32 page + 안전 마진 8)
-- **smoke 재시도 PASS**: total 6 / failed 0 / 25s
-- 사전 적용 fix 패턴 검증: ✅ max-stocks / ✅ ETF guard / ⚠ since_date (logic 정상, max_pages 부족으로 도달 전 abort)
+| Stage | 결과 |
+|-------|------|
+| 0 dry-run | active 4373 / pages 4 / 추정 2h 25m |
+| 1 smoke 첫 시도 | ❌ KiwoomMaxPagesExceededError 8건 |
+| 1' fix | mrkcond:50 `MAX_PAGES = 10 → 40` (가설 13배 틀림) |
+| 1 smoke 재시도 | ✅ 6/2/0 / 25s |
+| 2 mid (KOSPI 100/3y) | ✅ 78/21/0 / 13m 8s (avg 10.1s/stock) |
+| **3 full (active 4078/3y)** | 🟡 **3922/616/166 / 9h 53m** — NXT 166 fail (4.07%) |
+| **5 NUMERIC 4 컬럼** | ✅ **마이그레이션 불필요** (모두 max < 100, cap 1% 이내) |
+| 8 since_date edge | ✅ 0 rows (OHLCV F6 보다 정확) |
 
-mid + full + NUMERIC SQL TBD.
+**핵심 결정**:
+- ✅ NUMERIC(8,4) 마이그레이션 불필요 — gt_100 0건 / gt_1000 0건
+- ✅ 3년 백필 시간 예산 ~ 9h 53m (KRX 거래시간 회피 가능)
+- 🚨 NXT 166 종목 max_pages 도달 fail (26.5% NXT 종목) — 별도 분석 chunk
+- 🔶 컬럼 동일값 가능성 (`credit_rate ≡ credit_balance_rate`, `foreign_rate ≡ foreign_weight`) — Migration DROP 후보 (C-2γ 패턴)
+- ✅ since_date guard daily_flow 가 OHLCV 보다 정확 (F6 edge case 0)
 
 ---
 
@@ -115,36 +126,75 @@ mid + full + NUMERIC SQL TBD.
 
 ---
 
-### 2.3 Stage 2 — Mid (KOSPI 100 / 3년)
+### 2.3 Stage 2 — Mid (KOSPI 100 / 3년) (2026-05-10 18:38~18:51 KST, ✅ PASS)
 
 | 항목 | 값 |
 |------|-----|
-| 명령어 | `--years 3 --max-stocks 100 --only-market-codes 0` |
-| total | TBD (raw 100 → ETF skip TBD → 호환 TBD) |
-| success_krx / success_nxt / failed | TBD / TBD / TBD |
-| elapsed | TBD |
-| avg/stock | TBD |
-| failure_ratio | TBD |
+| 명령어 | `--years 3 --max-stocks 100 --only-market-codes 0 --log-level INFO` |
+| total | **78** (raw 100 → ETF 22 skip → 호환 78 — OHLCV 와 동일) |
+| success_krx / success_nxt / failed | **78 / 21 / 0** (ratio 0%) |
+| elapsed | **13m 8s** |
+| avg/stock | **10.1s** |
+| failure_ratio | 0% |
 
-**dry-run 비교**: 추정 TBD → 실측 TBD → TBD x
+**OHLCV mid 비교**:
+| 항목 | OHLCV daily | daily_flow |
+|------|-------------|------------|
+| total / failed | 78 / 0 | 78 / 0 (동일) |
+| NXT 활성 | 21 / 78 (27%) | 21 / 78 (동일) |
+| elapsed | 44s | **13m 8s** (18배) |
+| avg/stock | 0.6s | **10.1s** (17배) |
+
+**해석**:
+- 1 stock 당 약 40 calls (10.1s / 0.25s) — KRX 32 page (3년) + NXT 약 8 page (1년 2개월)
+- mid avg 가 dry-run lower-bound (78 × 2 NXT × 4 page × 0.25s = 156s = 2.6분) 의 **5배**
+- 즉 dry-run 추정의 페이지네이션 가정 (4 page) 이 실측 ~32 page 와 8배 차이 (mrkcond:50 가설 13배 틀림과 일관)
+
+**dry-run 비교**: 추정 2.6분 → 실측 13.1분 → **5x 느림** (가설 page 4 vs 실측 ~32)
+
+**full 추정 갱신** (mid 실측 기반):
+- mid avg/stock 10.1s × 4078 stock = **약 11h 26m** (dry-run 2h 25m 의 4.7배)
+- since_date guard 로 신규 상장 종목 단축 가능 (page 적게) → **9~12h** 범위 추정
+- KRX 거래 시간 (09:00~15:30 KST) 회피 → 18:00 시작 시 익일 04:00~06:00 KST 완료 추정
 
 ---
 
-### 2.4 Stage 3 — Full (active 4078 호환 / 3년)
+### 2.4 Stage 3 — Full (active 4078 호환 / 3년) (2026-05-10 19:45 ~ 2026-05-11 05:39 KST, 🟡 PARTIAL — NXT 166 fail)
 
 | 항목 | 값 |
 |------|-----|
-| 명령어 | `--years 3 --alias prod` |
-| total | TBD |
-| success_krx / success_nxt / failed | TBD / TBD / TBD |
-| elapsed | TBD |
-| avg/stock | TBD |
-| failure_ratio | TBD |
-| resume 사용 여부 | TBD |
+| 명령어 | `--years 3 --alias prod --log-level INFO` (백그라운드 + tee) |
+| total | **4078** (active 4373 - ETF 295) |
+| success_krx / success_nxt / failed | **3922 / 616 / 166** (ratio 4.07%) |
+| DISTINCT KRX / NXT | 3921 / 616 (KRX 1 빈 응답 — OHLCV F8 일관) |
+| elapsed | **9h 53m 34s** |
+| avg/stock | 8.7s |
+| resume 사용 여부 | no |
 
-**상위 실패 원인 (top 5)**: TBD
+**KRX 적재**: 2,636,175 rows / DISTINCT 3921 (3년 = 750 거래일 × 평균 3.5 = 2,636K)
+**NXT 적재**: 149,262 rows / DISTINCT 616 (출범 2025-03-04 ~ 2026-05-08, ~14 개월)
 
-**dry-run 비교**: 추정 TBD → 실측 TBD → TBD x
+**상위 실패 원인** (모두 NXT KiwoomMaxPagesExceededError):
+| stock_code | exchange | error |
+|------------|----------|-------|
+| 010950 / 023530 / 030000 / 032640 / 120110 / 056190 / 078340 / 086450 / 122870 / 215000 | NXT | KiwoomMaxPagesExceededError |
+
+**KRX failed = 0** (max-stocks fix + ETF guard + since_date guard + MAX_PAGES=40 모두 작동)
+
+**dry-run 비교**: 추정 2h 25m → 실측 9h 53m → **4.1x 느림** (page 가설 4 vs 실측 평균 ~35)
+
+**OHLCV full 비교**:
+| 항목 | OHLCV daily | daily_flow |
+|------|-------------|------------|
+| total / failed | 4078 / **0** | 4078 / **166** (NXT only) |
+| KRX DISTINCT | 4077 | 3921 (-156, 빈 응답 또는 NXT-only 일부) |
+| NXT DISTINCT | 626 | 616 (-10) |
+| KRX rows | 2,732,031 | **2,636,175** (-95K, 3% 적음) |
+| NXT rows | 152,152 | **149,262** (-3K) |
+| elapsed | **34분** | **9h 53m** (17.4x) |
+| avg/stock | 0.5s | 8.7s (17.4x) |
+
+> KRX rows 3% 적은 이유: failed 166 NXT 종목 중 KRX 도 일부 fail 했을 가능성 + KRX 일부 거래정지 등.
 
 ---
 
@@ -200,65 +250,50 @@ mid + full + NUMERIC SQL TBD.
 - `foreign_rate` (외인 비율)
 - `foreign_weight` (외인 비중 — 0~100% 가정)
 
-### 5.1 credit_rate
+### 5.1~5.4 4 컬럼 일괄 측정 (2026-05-11 05:50 KST)
 
-| 항목 | 값 |
-|------|-----|
-| rows | TBD |
-| min | TBD |
-| max | TBD |
-| p01 | TBD |
-| p99 | TBD |
-| count(\|x\| > 100) | TBD |
-| count(\|x\| > 1000) | TBD |
+| col | rows | min | **max** | p01 | p99 | gt_100 | gt_1000 |
+|-----|------|-----|---------|-----|-----|--------|---------|
+| credit_rate | 2,785,437 | 0.00 | **16.39** | 0.00 | 6.89 | 0 | 0 |
+| credit_balance_rate | 2,785,437 | 0.00 | **16.39** | 0.00 | 6.89 | 0 | 0 |
+| foreign_rate | 2,785,437 | 0.00 | **100.00** | 0.00 | 52.52 | 0 | 0 |
+| foreign_weight | 2,785,437 | 0.00 | **100.00** | 0.00 | 52.52 | 0 | 0 |
 
-### 5.2 credit_balance_rate
+### 5.5 가설 vs 실측 — ✅ **마이그레이션 불필요**
 
-| 항목 | 값 |
-|------|-----|
-| rows | TBD |
-| min | TBD |
-| max | TBD |
-| p01 | TBD |
-| p99 | TBD |
-| count(\|x\| > 100) | TBD |
-| count(\|x\| > 1000) | TBD |
+- overflow (> NUMERIC(8,4) ±9999.9999): **0건** 모든 4 컬럼
+- max 100.00 = cap 의 1% (안전 마진 99x)
+- max 16.39 = cap 의 0.16% (안전 마진 600x)
+- 결정: **마이그레이션 불필요** (`change_rate` / `foreign_holding_ratio` / `credit_ratio` ADR § 18.4 상속 항목 모두 안전)
 
-### 5.3 foreign_rate
+### 5.6 신규 발견 — 컬럼 동일값 가능성 (follow-up)
 
-| 항목 | 값 |
-|------|-----|
-| rows | TBD |
-| min | TBD |
-| max | TBD |
-| p01 | TBD |
-| p99 | TBD |
-| count(\|x\| > 100) | TBD |
-| count(\|x\| > 1000) | TBD |
+`credit_rate` ≡ `credit_balance_rate`:
+- min/max/p01/p99 모두 동일 (0.00 / 16.39 / 0.00 / 6.89)
+- rows 동일 (2,785,437)
 
-### 5.4 foreign_weight
+`foreign_rate` ≡ `foreign_weight`:
+- min/max/p01/p99 모두 동일 (0.00 / 100.00 / 0.00 / 52.52)
+- rows 동일 (2,785,437)
 
-| 항목 | 값 |
-|------|-----|
-| rows | TBD |
-| min | TBD |
-| max | TBD |
-| p01 | TBD |
-| p99 | TBD |
-| count(\|x\| > 100) | TBD |
+**가설**: ka10086 응답의 두 필드가 동일값 (키움 서버 측 영구 동일) 또는 어댑터 매핑이 동일 필드를 두 컬럼에 채우는 버그.
 
-### 5.5 가설 vs 실측
+**ka10086 응답 raw 비교 필요**:
+```sql
+SELECT COUNT(*) FROM kiwoom.stock_daily_flow WHERE credit_rate <> credit_balance_rate;
+SELECT COUNT(*) FROM kiwoom.stock_daily_flow WHERE foreign_rate <> foreign_weight;
+```
 
-- overflow (> NUMERIC(8,4) ±9999.9999): TBD건
-- max 컬럼별 TBD = cap 의 TBD %
-- 마이그레이션 결정: TBD (gt_100 > 0 또는 gt_1000 > 0 시 NUMERIC 확장 chunk)
+C-2γ Migration 008 의 D-E 중복 컬럼 3개 DROP 패턴과 유사 → 추가 컬럼 DROP 가능성 검증 chunk.
 
-### 5.6 exchange 별 cross-check
+### 5.7 exchange 별 cross-check
 
-| exchange | rows | stocks | max foreign_weight | max foreign_rate | max credit_rate |
-|----------|------|--------|--------------------|--------------------|-----------------|
-| KRX | TBD | TBD | TBD | TBD | TBD |
-| NXT | TBD | TBD | TBD | TBD | TBD |
+| exchange | rows | stocks | max foreign_weight | max foreign_rate | max credit_rate | max credit_balance_rate |
+|----------|------|--------|--------------------|--------------------|-----------------|--------------------------|
+| KRX | 2,636,175 | 3921 | 100.00 | 100.00 | 16.39 | 16.39 |
+| NXT | 149,262 | 616 | 81.06 | 81.06 | 9.35 | 9.35 |
+
+NXT max 가 KRX max 보다 작음 — NXT 적재된 종목 (616) 의 분포가 외인/신용 적은 종목 위주로 추정.
 
 ---
 
@@ -276,53 +311,71 @@ mid + full + NUMERIC SQL TBD.
 
 ---
 
-## 8. since_date guard edge case cross-check (OHLCV F6 비교)
+## 8. since_date guard edge case cross-check (OHLCV F6 비교) — ✅ **edge case 0건**
 
 OHLCV 백필에서 발견된 edge case — since_date (3년 전) 보다 과거 row 적재 종목 (`002690` / `004440`).
 
-**daily_flow 에서의 결과**:
+**daily_flow 에서의 결과** (2026-05-11 SQL):
 
-| stock_code | stock_name | OHLCV 결과 (oldest_dt) | daily_flow 결과 (oldest_dt) |
-|------------|-----------|------------------------|------------------------------|
-| 002690 | 동일제강 | 2015-09-24 | TBD |
-| 004440 | 삼일씨엔에스 | 2016-03-30 | TBD |
+```sql
+WITH backfill_start AS (SELECT '2023-05-11'::date AS d)
+SELECT s.stock_code, s.stock_name, MIN(p.trading_date) AS oldest_dt
+FROM kiwoom.stock_daily_flow p
+JOIN kiwoom.stock s ON p.stock_id = s.id
+WHERE p.trading_date < (SELECT d FROM backfill_start)
+GROUP BY ... LIMIT 10;
+-- 결과: 0 rows
+```
 
-**추가 발견 종목**: TBD
+| stock_code | stock_name | OHLCV 결과 (oldest_dt) | daily_flow 결과 |
+|------------|-----------|------------------------|------------------|
+| 002690 | 동일제강 | 2015-09-24 | **(없음)** |
+| 004440 | 삼일씨엔에스 | 2016-03-30 | **(없음)** |
 
-**해석**: TBD (mrkcond `_page_reached_since_market` 로직이 chart.py 패턴 1:1 인지 검증)
+**해석**: daily_flow 의 mrkcond `_page_reached_since_market` 가 since_date 도달 시 정확히 break (page 단위 + row 단위 fragment 제거 모두 정상). OHLCV chart.py 의 F6 edge case (since_date 직전 page 의 마지막 fragment 가 row 단위로 통과되어 적재) 가 daily_flow 에서는 발생 안 함.
+
+**가설 — ka10086 vs ka10081 응답 정렬 차이**:
+- ka10086 응답 row 가 더 엄격하게 신→구 정렬 (since_date 도달 시 page 마지막 row 가 정확히 since_date 이하)
+- 또는 ka10086 의 base_dt 단위 page 분할이 since_date 와 정확히 align (1개월 단위)
+
+**결론**: daily_flow since_date guard 작동 OHLCV 보다 **정확함**. F6 edge case 별도 chunk 우선순위 ↓ (OHLCV 만 영향, 데이터 0.13% nuetral~plus).
 
 ---
 
 ## 9. 새로 발견된 위험 / 후속 chunk 후보
 
-(측정 후 채움 — OHLCV § 8 패턴)
-
 | # | 항목 | 심각도 | 근거 | 후속 chunk |
 |---|------|--------|------|-----------|
-| 1 | TBD | TBD | TBD | TBD |
+| 1 | **NXT 166 종목 KiwoomMaxPagesExceededError** | **MEDIUM** | NXT 활성 626 중 166 fail (26.5%) — sample 모두 NXT only. NXT 출범 2025-03-04 이후 데이터인데 max_pages=40 도달 = NXT 응답 패턴 차이 (cont-yn=Y 비정상 유지 또는 page row 수 더 적음) | 별도 분석 chunk — log 분석 + cont-yn / next-key 추적 / NXT-only since_date guard |
+| 2 | **컬럼 동일값 가능성** (`credit_rate ≡ credit_balance_rate` / `foreign_rate ≡ foreign_weight`) | LOW | min/max/p01/p99/rows 모두 동일. ka10086 응답 raw 또는 어댑터 매핑 검증 필요 | follow-up SQL `<>` 검증 chunk → 동일 시 Migration `<column>` DROP (C-2γ 패턴) |
+| 3 | **빈 응답 KRX 종목** (success_krx=3922 vs DISTINCT=3921) | LOW | OHLCV F8 와 동일 패턴. 1 종목 fetch 성공이지만 row 0 적재 | OHLCV F8 통합 분석 |
+| 4 | KRX 적재 -156 stocks (OHLCV 4077 vs daily_flow 3921) | LOW | failed 166 NXT 의 KRX 적재 영향 + 일부 거래정지 종목 | log 종목별 분석 (item 1 과 통합) |
 
 ---
 
 ## 10. 결정 사항
 
-(측정 후 채움)
-
 본 실측 결과로 확정된 결정:
 
-1. NUMERIC(8,4) 컬럼 4 — TBD (마이그레이션 필요/불필요)
-2. NXT 수집 prod 활성 검증 — TBD
-3. 3년 백필 시간 예산 — TBD분
-4. ETF/ETN 정책 (a) (사전 적용 가드) 검증 — TBD
+1. ✅ **NUMERIC(8,4) 컬럼 4 — 마이그레이션 불필요** (모두 max < 100 / cap 1% 이내)
+2. ✅ **NXT 수집 prod 활성 검증** — 616 종목 적재 (mid 21 와 비례 일관). 단 166 NXT 종목 max_pages 도달 fail = 별도 분석
+3. ✅ **3년 백필 시간 예산 ~ 9h 53m** — OHLCV 34분의 17.4배. KRX 거래시간 (09~15:30) 회피 시 18:00 시작 → 익일 04~07 KST 완료 가능
+4. ✅ **ETF/ETN 정책 (a) 검증** — `_KA10086_COMPATIBLE_RE` 295 종목 skip 정상
+5. ⚠ **MAX_PAGES=40 도 NXT 일부 부족** — 본 chunk 의 fix `=40` 가 KRX 는 충분하지만 NXT 일부 (~26.5%) 는 추가 분석 필요
+6. ✅ **since_date guard daily_flow 에서 OHLCV 보다 정확** — F6 edge case 0건
 
 ---
 
 ## 11. 다음 chunk 우선순위 갱신
 
-(측정 후 채움)
-
 | 순위 | chunk | 변경 사유 |
 |------|-------|----------|
-| 1 | TBD | TBD |
+| 1 | **NXT 166 종목 max_pages 분석 chunk** | 본 chunk 신규 발견 MEDIUM — log + cont-yn + next-key 추적. 운영 cron 영향 가능 (NXT sync 1년 cap 도 영향?) |
+| 2 | **컬럼 동일값 검증 chunk** (`credit_rate <> credit_balance_rate` / `foreign_rate <> foreign_weight`) | 동일 시 Migration DROP (C-2γ 패턴 일관). LOW 이지만 빠르게 검증 가능 |
+| 3 | scheduler_enabled 운영 cron 활성 + 1주 모니터 | 측정 #4 (일간 cron elapsed) 미수행 |
+| 4 | follow-up F6/F7/F8 일괄 분석 — daily_flow 빈 응답 1건 통합 | OHLCV + daily_flow 통합 |
+| 5 | refactor R2 (1R Defer 일괄) | 기존 유지 |
+| 6 | ka10094 (년봉, P2) | 기존 유지 |
 
 ---
 
@@ -342,10 +395,32 @@ ADR 갱신 항목:
 
 OHLCV 백필 (`d60a9b3`/`76b3a4a`/`c75ede6`) 에서 발견된 운영 차단 3건이 daily_flow 에서 처음부터 fix 패턴 사전 적용된 효과:
 
-| # | 운영 차단 | OHLCV 발견 단계 | daily_flow 효과 (실측) |
+| # | 운영 차단 | OHLCV 발견 단계 | daily_flow 실측 결과 |
 |---|----------|----------------|---------------------|
-| 1 | since_date guard 누락 → max_pages 도달 | smoke (1980 상장 종목) | TBD (smoke 단계에서 max_pages 초과 0 기대) |
-| 2 | `--max-stocks` CLI bug → active 전체 처리 | smoke | TBD (max-stocks 정상 작동 검증 — total = max_stocks 기대) |
-| 3 | ETF/ETN 호환성 → fullmatch 실패 | smoke | TBD (sample 5 로깅 — OHLCV 와 동일 ETF 비율 기대) |
+| 1 | since_date guard 누락 → max_pages 도달 | smoke (1980 상장 종목) | ⚠ logic 정상 작동 / **MAX_PAGES=10 부족** 으로 도달 전 abort → fix `=40` 후 KRX PASS / NXT 일부 fail (별도 분석) |
+| 2 | `--max-stocks` CLI bug → active 전체 처리 | smoke | ✅ **smoke**: raw 10 → 호환 6 / **mid**: raw 100 → 호환 78 / **full**: 4078 / 정상 작동 |
+| 3 | ETF/ETN 호환성 → fullmatch 실패 | smoke | ✅ smoke 4 skip / mid 22 skip / full **295 skip** — OHLCV 와 동일 비율 (4373 의 6.7%) |
 
-**결론**: TBD (3건 모두 사전 적용 검증 완료 / 부분 / 신규 운영 차단 발견)
+**결론**: 사전 적용 fix 패턴 부분 검증 — (2)/(3) 완전 PASS, (1) 부분적 (KRX OK / NXT 신규 차단). mock 테스트 한계 재확인 — page row 수 / NXT 응답 패턴 같은 운영 edge case 는 단계별 실측에서만 발견.
+
+**신규 발견 (본 chunk)**:
+- `MAX_PAGES = 10` 부족 (가설 13배 틀림) — fix `=40` 으로 해소
+- NXT 일부 종목 max_pages=40 도 부족 — 별도 분석 chunk
+
+---
+
+## 14. 측정 흐름 타임라인
+
+| 시각 (KST) | 단계 | 결과 |
+|----------|------|------|
+| 17:43 | Stage 0 dry-run | active 4373 / pages 4 / 추정 2h 25m |
+| 18:01 | Stage 1 smoke 첫 시도 | ❌ 8 fail (`KiwoomMaxPagesExceededError`) |
+| 18:24 | MAX_PAGES fix (`<this commit>`) | mrkcond:50 `10 → 40` |
+| 18:25 | Stage 1 smoke 재시도 | ✅ 6/2/0 / 25s |
+| 18:38 | Stage 2 mid 시작 | KOSPI 100 / 3년 |
+| 18:51 | Stage 2 mid 완료 | ✅ 78/21/0 / 13m 8s |
+| 19:45 | Stage 3 full 시작 | active 4078 / 3년 / 백그라운드 |
+| 익일 05:39 | Stage 3 full 완료 | 🟡 3922/616/166 / 9h 53m (NXT 166 fail) |
+| 05:50 | NUMERIC SQL 4 컬럼 | ✅ 모두 cap 1% 이내 / 마이그레이션 불필요 |
+| 05:50 | since_date edge case | ✅ 0 rows |
+| 05:50 | 컬럼 동일값 의심 | 🔶 `credit_rate ≡ credit_balance_rate` / `foreign_rate ≡ foreign_weight` |
