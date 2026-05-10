@@ -1720,9 +1720,11 @@ C-backfill 의 후속으로 **운영 실측 사전 준비물 일괄 정비** —
 
 ---
 
-## 27. daily_flow (ka10086) 백필 CLI (2026-05-10, ✅ 코드/테스트 완료, ⏳ 운영 실측 대기)
+## 27. daily_flow (ka10086) 백필 CLI (2026-05-10, ✅ 코드/테스트 + 실측 가이드 완료, ⏳ 사용자 수동 실측 대기)
 
 > 관련 plan doc: [`phase-c-backfill-daily-flow.md`](../plans/phase-c-backfill-daily-flow.md)
+> 운영 실측 runbook: [`backfill-daily-flow-runbook.md`](../../src/backend_kiwoom/docs/operations/backfill-daily-flow-runbook.md)
+> 운영 실측 결과 양식: [`backfill-daily-flow-results.md`](../../src/backend_kiwoom/docs/operations/backfill-daily-flow-results.md)
 
 ### 27.1 결정
 
@@ -1755,6 +1757,12 @@ OHLCV 백필 (§ 26) 운영 실측 완료 후 **daily_flow (ka10086) 백필 CLI*
 ### 27.5 실측 결과 (TBD — 사용자 수동 실측 후 채움)
 
 (OHLCV § 26.5 와 동일 형식. 측정 후 results.md + 본 § 채움)
+
+**측정 절차 가이드** (2026-05-10 추가, 코드 변경 0 chunk):
+
+- runbook: `backfill-daily-flow-runbook.md` (12 §) — § 1 사전 조건 / § 2 dry-run / § 3 smoke / § 4 mid / § 5 full / § 7 NUMERIC SQL (4 컬럼) / § 8 일간 cron / § 12 OHLCV 결과 cross-check
+- results 양식: `backfill-daily-flow-results.md` (13 §) — TBD 자리에 측정값 채움. § 13 운영 차단 fix 패턴 사전 적용 검증 자리 포함
+- 본 § 27.5 갱신은 results.md 채움 완료 후 핵심 결정만 표로 옮김 (raw 측정은 results.md 유지)
 
 ### 27.6 운영 차단 fix 패턴 일관성 검증
 

@@ -7,6 +7,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-10] docs(kiwoom): daily_flow 운영 실측 가이드 신규 — runbook + results doc (코드 0 변경)
+
+`scripts/backfill_daily_flow.py` (ka10086) 운영 실측을 위한 단계별 절차 + 결과 양식 신규. OHLCV § 26 (`backfill-measurement-runbook.md` / `backfill-measurement-results.md`) 패턴 1:1 복제 후 ka10086 차이만 반영. ADR § 27 헤더에 doc 참조 추가 + § 27.5 측정 자리 명시.
+
+### 신규 산출물
+
+| # | 파일 | 역할 |
+|---|------|------|
+| 1 | `src/backend_kiwoom/docs/operations/backfill-daily-flow-runbook.md` (12 §) | 사전 조건 / dry-run / smoke / mid / full / NUMERIC SQL 4 컬럼 / 일간 cron / 트러블슈팅 / 안전 장치 / OHLCV cross-check |
+| 2 | `src/backend_kiwoom/docs/operations/backfill-daily-flow-results.md` (13 §) | 측정 후 채울 양식 — 단계별 실측 / NUMERIC 4 컬럼 분포 / since_date edge case cross-check / 결정 / 후속 chunk |
+
+### OHLCV runbook 대비 차이 (ka10086 특화)
+
+- `--period` 분기 없음 (단일 endpoint) → § 6 (weekly/monthly) 생략
+- `--indc-mode {quantity,amount}` 옵션 추가 (디폴트 quantity — 시그널 단위 일관)
+- NUMERIC 측정 4 컬럼: `credit_rate` / `credit_balance_rate` / `foreign_rate` / `foreign_weight` (OHLCV 의 `turnover_rate` 와 별도 도메인)
+- resume 테이블: `kiwoom.stock_daily_flow` (KRX/NXT 단일 테이블 + exchange 컬럼)
+- § 12 OHLCV 백필 결과 cross-check 신규 — 4 가설 검증 자리 (페이지 빈도 / since_date edge / ETF skip 비율 / NUMERIC 분포)
+- § 13 (results.md) 운영 차단 fix 패턴 사전 적용 검증 — OHLCV 에서 발견된 3건이 daily_flow 에서 사전 적용된 효과 검증
+
+### Changed
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 27 헤더 — runbook + results doc 참조 추가, 상태 라벨 갱신 (코드/테스트 + 실측 가이드 완료)
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 27.5 — 측정 절차 가이드 자리 명시 (results.md 채움 후 핵심 결정 표 옮김)
+- `src/backend_kiwoom/STATUS.md` § 0 / § 3 / § 5 / § 6 — C-flow-실측 준비 chunk 추가, 다음 chunk = 사용자 수동 측정으로 갱신
+
+### 운영 검증
+
+- 코드 변경 0 — 1024 tests 그대로 (이전 chunk `23f601b` 동일)
+- ruff / mypy 영향 없음
+- 다음 단계: 사용자가 runbook § 1~5 따라 실측 → results.md 채움 → ADR § 27.5 갱신 chunk
+
+---
+
 ## [2026-05-10] feat(kiwoom): daily_flow (ka10086) 백필 CLI 신규 — OHLCV 운영 차단 fix 3건 사전 적용
 
 `scripts/backfill_daily_flow.py` 신규 + `IngestDailyFlowUseCase` 확장. OHLCV 백필 (§ 26) 운영 실측에서 발견된 차단 fix 3건 (since_date guard / `--max-stocks` 정상 적용 / ETF 호환 가드) 을 처음부터 패턴 그대로 내장 — mock 테스트가 못 잡는 운영 edge case 사전 방어.

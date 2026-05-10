@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-10 (daily_flow ka10086 백필 CLI 신규 — since_date / ETF 가드 / max-stocks 사전 패턴 일괄 적용)
+> **마지막 갱신**: 2026-05-10 (daily_flow 운영 실측 runbook + results doc 신규 — 코드 변경 0, 측정 가이드 정착)
 
 ---
 
@@ -12,10 +12,10 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **daily_flow (ka10086) 백필 CLI** (mrkcond since_date / ETF 가드 / `--max-stocks` 사전 적용 / `--indc-mode`) |
-| 다음 chunk | **daily_flow 운영 실측** (사용자 수동) → scheduler_enabled 운영 cron 활성 → ka10094 |
+| 마지막 완료 chunk | **daily_flow 운영 실측 가이드** (runbook + results doc 신규, 코드 변경 0) |
+| 다음 chunk | **daily_flow 운영 실측 측정** (사용자 수동 — runbook 따라 smoke→mid→full) → scheduler_enabled 운영 cron 활성 → ka10094 |
 | 25 Endpoint 진행 | **10 / 25 완료** (40%). CLI 도구 4건 (backfill_ohlcv + backfill_daily_flow + register_credential + sync_stock_master) |
-| 누적 chunk | 32 commits (Phase A: 8 / Phase B: 4 / Phase C: 14 + since_date 1 + max-stocks 1 + ETF guard 1 + measurement docs 1 + daily_flow 백필 1 / R1: 1 / 보안 PR 2) |
+| 누적 chunk | 33 commits (Phase A: 8 / Phase B: 4 / Phase C: 15 + since_date 1 + max-stocks 1 + ETF guard 1 + measurement docs 1 + daily_flow 백필 1 + daily_flow 실측 가이드 1 / R1: 1 / 보안 PR 2) |
 | 테스트 | **1024 cases** (993 → +31: mrkcond +2 / daily_flow_service +5 / backfill_daily_flow_cli +24) |
 | 운영 검증 | ✅ **full 3년 OHLCV 백필 34분 / 4078 호환 / 0 failed**. daily_flow 백필 ⏳ 사용자 실측 대기 |
 
@@ -105,6 +105,8 @@ P3 (선택):
 | **C-since_date fix** | smoke 첫 호출에서 발견된 max_pages 초과 운영 차단 fix — fetch_daily/weekly/monthly 에 since_date 옵션. dotenv autoload 누락 보완 | ✅ | 990 tests / KOSPI 1782 success / 8m 55s `d60a9b3` |
 | **C-운영실측 측정** | smoke (KOSPI 10/1y) + mid (KOSPI 100/3y) + full (active 4078/3y) 3 단계 + NUMERIC SQL + ADR § 26.5 / results.md 채움 | ✅ | full 34분 / 0 failed / 2.7M KRX rows + 152K NXT rows / turnover_rate max 3257.80 (cap 33%) |
 | **C-backfill-flow** | `scripts/backfill_daily_flow.py` (ka10086) — mrkcond since_date / ETF 가드 / `--indc-mode` / OHLCV 운영 차단 fix 3건 사전 적용 | ✅ | 1024 tests / +31 (mrkcond +2 / service +5 / CLI +24) — ADR § 27 / `phase-c-backfill-daily-flow.md` |
+| **C-flow-실측 준비** | daily_flow 운영 실측 runbook + results doc 신규 (코드 0 변경) — OHLCV § 26 패턴 1:1 + ka10086 차이 반영 (단일 endpoint / `--indc-mode` / NUMERIC 4 컬럼) | ✅ | runbook 12 § + results 13 § / ADR § 27.5 자리 명시 + § 27 헤더 doc 참조 추가 |
+| C-flow-실측 측정 | smoke (KOSPI 10/1y) + mid (KOSPI 100/3y) + full (active 4078/3y) + NUMERIC SQL 4 컬럼 + ADR § 27.5 / results.md 채움 | ⏳ | 사용자 수동 실행 |
 | C-4 (선택) | ka10094 (년봉) — P2 | ⏳ | `endpoint-09-ka10094.md` |
 
 ---
@@ -133,7 +135,7 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| 1 | **daily_flow 운영 실측** (사용자 수동) | OHLCV § 26.5 와 동일 흐름 (smoke → mid → full). `change_rate`/`foreign_holding_ratio`/`credit_ratio` NUMERIC 분포 측정 → ADR § 27.5 채움 | smoke 1s + mid 수십초 + full 추정 50~100분 |
+| 1 | **daily_flow 운영 실측 측정** (사용자 수동) | runbook (`backfill-daily-flow-runbook.md`) 따라 smoke → mid → full + NUMERIC 4 컬럼 (`credit_rate`/`credit_balance_rate`/`foreign_rate`/`foreign_weight`) SQL → results.md / ADR § 27.5 채움 | smoke 1s + mid 수십초 + full 추정 50~100분 |
 | 2 | **scheduler_enabled 운영 cron 활성** | 측정 #4 (일간 cron elapsed) 미수행. 1주 모니터 → ADR § 26.5 추가 | env 변경 + 1주 운영 모니터 |
 | 3 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 | 분석 + 정책 결정 |
 | 4 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
@@ -179,6 +181,7 @@ P3 (선택):
 - **C-ETF guard** — ka10081/82/83 호환 stock_code (`^[0-9]{6}$`) 사전 가드. ETF/ETN/우선주 (영문 포함 코드, 약 6.7%) UseCase 단계 skip + 가시성 로깅. smoke 통과 (3 fix 동시 작동 검증) `c75ede6`
 - **C-운영실측 measurement** — smoke + mid + full 3 단계 측정 + NUMERIC SQL + ADR § 26.5 / results.md 채움 (코드 0 변경). 4078 종목 / 34분 / 0 failed `12f0daf`
 - **C-backfill-flow** — `scripts/backfill_daily_flow.py` 신규 + mrkcond.py since_date + IngestDailyFlowUseCase ETF 가드 + only_stock_codes/skip_base_date_validation/since_date 확장. 1024 tests / +31 (ADR § 27 + plan doc 신규) `23f601b`
+- **C-flow-실측 준비** — daily_flow 운영 실측 runbook + results doc 신규 (`backfill-daily-flow-runbook.md` 12 § + `backfill-daily-flow-results.md` 13 §). OHLCV § 26 패턴 1:1 + ka10086 차이 (단일 endpoint / `--indc-mode` / NUMERIC 4 컬럼 / resume 테이블). ADR § 27 헤더에 doc 참조 + § 27.5 자리 명시. 코드 0 변경 / 1024 tests 그대로 `<this commit>`
 - **C-도커실환경** — backend_kiwoom 전용 docker-compose + runbook 실 환경 값 채움 (검증 완료) `243d4c7`
 - **C-admin-CLI** — register_credential.py + sync_stock_master.py + 11 테스트 (ka10099 진입 도구) `12e09c2`
 - **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `e9ab050`
