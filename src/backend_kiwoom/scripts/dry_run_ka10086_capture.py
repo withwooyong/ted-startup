@@ -181,7 +181,6 @@ async def _capture_one(
             "exchange": n.exchange.value,
             "indc_mode": n.indc_mode.value,
             "credit_rate": str(n.credit_rate) if n.credit_rate is not None else None,
-            "credit_balance_rate": str(n.credit_balance_rate) if n.credit_balance_rate is not None else None,
             "individual_net": n.individual_net,
             "institutional_net": n.institutional_net,
             "foreign_brokerage_net": n.foreign_brokerage_net,
@@ -189,10 +188,9 @@ async def _capture_one(
             "foreign_volume": n.foreign_volume,
             "foreign_rate": str(n.foreign_rate) if n.foreign_rate is not None else None,
             "foreign_holdings": n.foreign_holdings,
-            "foreign_weight": str(n.foreign_weight) if n.foreign_weight is not None else None,
             # C-2γ Migration 008 — D-E 중복 3 컬럼 (foreign/institutional/individual_net_purchase)
-            # 은 NormalizedDailyFlow 에서 제거. D 카테고리 (foreign_volume / institutional_net /
-            # individual_net) 가 동일값 (dry-run § 20.2 #1 cross-check 결과) 이므로 본 출력에서도 생략.
+            # 은 NormalizedDailyFlow 에서 제거. C-2δ Migration 013 — C/E 중복 2 컬럼
+            # (credit_balance_rate / foreign_weight) 도 동일하게 제거 (2.88M rows IS DISTINCT FROM=0).
         }
         for n in normalized
     ]

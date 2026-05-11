@@ -65,7 +65,6 @@ class StockDailyFlowRepository:
                 "exchange": r.exchange.value,
                 "indc_mode": r.indc_mode.value,
                 "credit_rate": r.credit_rate,
-                "credit_balance_rate": r.credit_balance_rate,
                 "individual_net": r.individual_net,
                 "institutional_net": r.institutional_net,
                 "foreign_brokerage_net": r.foreign_brokerage_net,
@@ -73,7 +72,6 @@ class StockDailyFlowRepository:
                 "foreign_volume": r.foreign_volume,
                 "foreign_rate": r.foreign_rate,
                 "foreign_holdings": r.foreign_holdings,
-                "foreign_weight": r.foreign_weight,
             }
             for r in valid_rows
         ]
@@ -86,7 +84,6 @@ class StockDailyFlowRepository:
         update_set: dict[str, Any] = {
             "indc_mode": insert_stmt.excluded.indc_mode,
             "credit_rate": insert_stmt.excluded.credit_rate,
-            "credit_balance_rate": insert_stmt.excluded.credit_balance_rate,
             "individual_net": insert_stmt.excluded.individual_net,
             "institutional_net": insert_stmt.excluded.institutional_net,
             "foreign_brokerage_net": insert_stmt.excluded.foreign_brokerage_net,
@@ -94,7 +91,6 @@ class StockDailyFlowRepository:
             "foreign_volume": insert_stmt.excluded.foreign_volume,
             "foreign_rate": insert_stmt.excluded.foreign_rate,
             "foreign_holdings": insert_stmt.excluded.foreign_holdings,
-            "foreign_weight": insert_stmt.excluded.foreign_weight,
             "fetched_at": func.now(),
             "updated_at": func.now(),
         }

@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-11 (failed 166 NXT resume PASS + 컬럼 동일값 확정 — Migration 013 DROP chunk 진입 가능)
+> **마지막 갱신**: 2026-05-11 (Migration 013 C-2δ 완료 — C/E 중복 2 컬럼 DROP / 1030 tests)
 
 ---
 
@@ -12,8 +12,8 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **failed 166 NXT resume + 컬럼 동일값 확정** (resume 0 fail / 21m 33s / `credit_diff=0` / `foreign_diff=0`) |
-| 다음 chunk | **Migration 013 — `credit_balance_rate` + `foreign_weight` DROP** (C-2γ 패턴) → scheduler_enabled 운영 cron 활성 → ka10094 |
+| 마지막 완료 chunk | **C-2δ Migration 013** — `credit_balance_rate` + `foreign_weight` DROP (10 → 8 도메인) / 1030 tests / ADR § 28 |
+| 다음 chunk | **scheduler_enabled 운영 cron 활성 + 1주 모니터** → follow-up F6/F7/F8 → ka10094 |
 | 25 Endpoint 진행 | **10 / 25 완료** (40%). CLI 도구 4건 |
 | 누적 chunk | 37 commits (... + flow-resume-eqcol-verify 1) |
 | 테스트 | **1024 cases** (993 → +31: mrkcond +2 / daily_flow_service +5 / backfill_daily_flow_cli +24) |
@@ -110,6 +110,7 @@ P3 (선택):
 | **C-flow-실측 측정** | Stage 0~3 + NUMERIC SQL 4 컬럼 + ADR § 27.5 결과 표 채움 | ✅ | full 9h 53m (3922/616/166 / NXT 166 fail) / NUMERIC 마이그레이션 불필요 / since_date edge 0 / 컬럼 동일값 의심 |
 | **C-flow-empty-fix** | NXT 빈 응답 sentinel 무한 루프 fix (mrkcond + chart daily/weekly/monthly 4 곳 `if not <list>: break`) | ✅ | 010950 3년 reproduce PASS (13s / 0 fail) / 1026 tests (+2: mrkcond +1, chart +1) `72dbe69` |
 | **C-flow-resume-eqcol** | failed 166 NXT resume 재시도 + 컬럼 동일값 검증 (`IS DISTINCT FROM` SQL) | ✅ | resume 166/10/0 / 21m 33s — 최종 DB KRX 4077 + NXT 626 (OHLCV 일치). 컬럼 동일값 확정 (2.88M rows / `credit_diff=0` / `foreign_diff=0`) — Migration 013 chunk 진입 |
+| **C-2δ** | Migration 013 — C/E 중복 2 컬럼 DROP (`credit_balance_rate` / `foreign_weight`). 10 → 8 도메인 | ✅ | 1R PASS (M-1/L-1 fix), **1030 tests** (+4) / ADR § 28 / Verification 가 잡은 2건: VARCHAR(32) revision id truncation + test_008 hard-coded 카운트 |
 | C-4 (선택) | ka10094 (년봉) — P2 | ⏳ | `endpoint-09-ka10094.md` |
 
 ---
@@ -127,7 +128,8 @@ P3 (선택):
 | ~~7~~ | ~~C-2α 상속 (foreign_holding_ratio / credit_ratio NUMERIC magnitude)~~ | ADR § 18.4 | ✅ 해소 — Stage 3 measurement: 4 컬럼 max < 100 / 마이그레이션 불필요 |
 | ~~14~~ | ~~`DAILY_MARKET_MAX_PAGES=10` 부족~~ | smoke 2026-05-10 | ✅ 해소 (`7c07fb7`) — fix `=40` |
 | ~~15~~ | ~~NXT 166 종목 max_pages=40 도 부족~~ | full 2026-05-11 | ✅ 해소 (`72dbe69`) — sentinel 무한 루프 mrkcond/chart 4 곳 fix + resume PASS |
-| ~~16~~ | ~~컬럼 동일값 의심~~ | NUMERIC SQL 2026-05-11 | ✅ 확정 (`<this commit>`) — 2,879,500 rows 100% 동일. Migration 013 DROP chunk 진입 |
+| ~~16~~ | ~~컬럼 동일값 의심~~ | NUMERIC SQL 2026-05-11 | ✅ 확정 (`2317528`) — 2,879,500 rows 100% 동일 |
+| ~~17~~ | ~~Migration 013 미진행~~ | resume 후 2026-05-11 | ✅ 해소 (`<this commit>`) — Migration 013 C-2δ / 10 → 8 도메인 / 1030 tests / ADR § 28 |
 | ~~8~~ | ~~CLI bug: `--max-stocks` 무시~~ | smoke 2026-05-10 | ✅ 해소 (`76b3a4a`) |
 | ~~9~~ | ~~ETF/ETN stock_code 호환성: 251 종목 ValueError~~ | smoke 2026-05-10 | ✅ 해소 (`c75ede6`) — UseCase 가드 (옵션 a) |
 | **10 (F6)** | since_date guard edge case — 2 종목 (002690, 004440) 만 since_date 보다 과거 적재 | full 2026-05-10 | LOW — 0.13% rows / 데이터 nuetral~plus. follow-up |
@@ -141,10 +143,8 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **Migration 013 — `credit_balance_rate` + `foreign_weight` DROP** | 컬럼 동일값 확정 (2.88M rows 100% 동일) → C-2γ Migration 008 패턴 응용. ORM 동기 + 어댑터 매핑 + 통합 테스트 | ~1일 |
-| 2 | scheduler_enabled 운영 cron 활성 + 1주 모니터 | OHLCV/daily_flow 통합 측정 | env + 1주 |
-| 2 | **scheduler_enabled 운영 cron 활성** | 측정 #4 (일간 cron elapsed) 미수행. 1주 모니터 → ADR § 26.5 추가 | env 변경 + 1주 운영 모니터 |
-| 3 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 | 분석 + 정책 결정 |
+| **1** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | 측정 #4 (일간 cron elapsed) 미수행. OHLCV + daily_flow 통합 1주 모니터 → ADR § 26.5 + § 28 추가 | env 변경 + 1주 운영 모니터 |
+| 2 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 | 분석 + 정책 결정 |
 | 4 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
 | 5 | refactor R2 (1R Defer 일괄 정리) | L-2 (NotImplementedError 핸들러) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 / E-2 / gap detection | refactor 5건 일괄 |
 | 6 | ka10094 (년봉, P2) | C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화 — 현재 NotImplementedError) | Migration 1 + ~200줄 |

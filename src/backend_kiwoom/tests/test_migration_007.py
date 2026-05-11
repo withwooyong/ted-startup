@@ -117,9 +117,9 @@ async def test_columns_types(engine: AsyncEngine) -> None:
     assert rows["indc_mode"][0] == "character"
     assert rows["indc_mode"][1] == 1
 
-    # BIGINT 6개 (투자자별 4 + 외인 BIGINT 2 — foreign_rate / foreign_weight 는 NUMERIC)
-    # C-2γ Migration 008: D-E 중복 3 컬럼 (individual_net_purchase / institutional_net_purchase /
-    # foreign_net_purchase) DROP. conftest 가 head 까지 적용하므로 008 적용 후 상태 검증.
+    # BIGINT 6개 (투자자별 4 + 외인 BIGINT 2 — foreign_rate 는 NUMERIC, foreign_weight 는 C-2δ DROP)
+    # C-2γ Migration 008: D-E 중복 3 컬럼 DROP. C-2δ Migration 013: C/E 중복 2 컬럼 DROP.
+    # conftest 가 head 까지 적용하므로 013 적용 후 상태 검증.
     bigint_cols = [
         "individual_net",
         "institutional_net",
@@ -135,8 +135,12 @@ async def test_columns_types(engine: AsyncEngine) -> None:
     for dropped in ("individual_net_purchase", "institutional_net_purchase", "foreign_net_purchase"):
         assert dropped not in rows, f"{dropped} 가 008 적용 후에도 남아 있음"
 
-    # NUMERIC(8,4) 4개 (신용 2 + 외인비/외인비중 = 4)
-    numeric_cols = ["credit_rate", "credit_balance_rate", "foreign_rate", "foreign_weight"]
+    # C-2δ — DROP 대상 2 컬럼은 head 적용 후 부재해야 함
+    for dropped in ("credit_balance_rate", "foreign_weight"):
+        assert dropped not in rows, f"{dropped} 가 013 적용 후에도 남아 있음"
+
+    # NUMERIC(8,4) 2개 (잔존 신용 1 + 외인비 1 — credit_balance_rate / foreign_weight 는 C-2δ DROP)
+    numeric_cols = ["credit_rate", "foreign_rate"]
     for col in numeric_cols:
         assert rows[col][0] == "numeric"
         assert rows[col][2] == 8 and rows[col][3] == 4, f"{col} NUMERIC(8,4) 부재"

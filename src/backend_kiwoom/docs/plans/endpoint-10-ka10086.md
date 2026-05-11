@@ -995,4 +995,155 @@ ALTER TABLE kiwoom.stock_daily_flow
 
 ---
 
+## 13. Phase C-2δ — Migration 013 (C/E 중복 컬럼 2개 DROP)
+
+> **추가일**: 2026-05-11 (daily_flow 운영 실측 + 컬럼 동일값 확정 직후, `backfill-daily-flow-results.md` § 5.6)
+> **선행 조건**: C-2α (`cddd268`) + C-2β (`e442416`) + C-2γ (Migration 008) + daily_flow 백필 종료 (`2317528`) 완료
+> **분류**: refactor (스키마 단순화 + 백엔드/테스트/응답 DTO 동시 정리). 외부 동작 변화 = **응답 DTO 에서 2 필드 제거** (breaking — 그러나 운영 미가동, 영향 없음)
+
+### 13.1 배경 (운영 실측 + IS DISTINCT FROM 검증)
+
+daily_flow 풀 백필 완료 후 (총 2,879,500 rows / KRX 2,727,337 + NXT 152,163) `IS DISTINCT FROM` SQL 검증 결과:
+
+| C 페어 | E 페어 | DROP 대상 컬럼 | 차이 row 수 |
+|--------|--------|---------------|-------------|
+| `credit_rate` ≡ `credit_balance_rate` | — | `credit_balance_rate` | **0건** |
+| — | `foreign_rate` ≡ `foreign_weight` | `foreign_weight` | **0건** |
+
+검증 SQL (results § 5.6):
+
+```sql
+SELECT
+    COUNT(*) FILTER (WHERE credit_rate IS DISTINCT FROM credit_balance_rate) AS credit_diff,
+    COUNT(*) FILTER (WHERE foreign_rate IS DISTINCT FROM foreign_weight)    AS foreign_diff
+FROM kiwoom.stock_daily_flow;
+-- credit_diff=0 / foreign_diff=0 (NULL 포함 IS DISTINCT FROM)
+```
+
+> `<>` 가 아닌 `IS DISTINCT FROM` 사용 — NULL 비교 false 회피로 NULL row 도 정확 비교. NUMERIC magnitude / 분포 (results § 5.1 ~ 5.4) 도 페어 간 완전 일치 (min/max/p01/p99).
+
+**결론**: stock_daily_flow 10 도메인 컬럼 중 2 컬럼 (C 신용 1 + E 외인 1) 이 데이터 중복. 스토리지 ~20% 낭비 + ORM/Repository/DTO 3중 mapping 불필요. 10 → **8 도메인 컬럼** (메타 5 포함 총 13).
+
+> 참고: ka10086 응답이 `crd_rt` ≡ `crd_remn_rt` / `for_rt` ≡ `for_wght` 두 raw 필드를 동일값으로 채움 (vendor 측 분기). 어댑터 `to_normalized` 가 두 컬럼에 각각 적재했기에 DB 도 동일값. C-2γ (D-E 중복 3컬럼) 와 동일 패턴 — vendor 응답 자체에 중복 raw 필드.
+
+### 13.2 결정 (ADR-0001 § 28 신규)
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | C/E 중복 컬럼 2개 (`credit_balance_rate` / `foreign_weight`) | **Migration 013 — DROP** (사용자 승인) |
+| 2 | downgrade 정책 | **데이터 가드 + 컬럼 ADD (NULL)** — 007/008 와 동일 패턴. 데이터 손실 차단 우선 |
+| 3 | 응답 DTO breaking | **수용** — 운영 미가동, downstream 0. C-2β 커밋(`e442416`) 이후 외부 호출 없음 |
+| 4 | NXT row mirror 정책 (§ 20.2 #2) 영향 | 해당 없음 — 본 DROP 은 KRX/NXT 둘 다 동일하게 raw 동일값 (mirror 무관) |
+| 5 | runbook SQL 검증 § 갱신 | `backfill-daily-flow-runbook.md` 의 NUMERIC SQL § (4컬럼) + IS DISTINCT FROM SQL § (페어) → 2컬럼/페어 제거 inline 주석 |
+| 6 | 명세 doc 동기화 | § 3.4 (필드 매핑) / § 5.1 (스키마 SQL) / § 5.2 (ORM) / § 5.3 (Repository) / § 9 (예시) 갱신 — Migration 007/008 그대로 두고 § 13 이 정답 |
+
+### 13.3 영향 범위 (5 코드 + 4 테스트 + 운영 doc 1)
+
+**코드 (5 files)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `migrations/versions/013_drop_daily_flow_dup_2.py` (신규) | UPGRADE: `DROP COLUMN IF EXISTS` × 2. DOWNGRADE: 데이터 가드 + `ADD COLUMN` × 2 (NULL) |
+| 2 | `app/adapter/out/persistence/models/stock_daily_flow.py` | `credit_balance_rate` / `foreign_weight` `Mapped[Decimal \| None]` 2 필드 제거. `__table_args__`/`Index` 영향 없음 |
+| 3 | `app/adapter/out/persistence/repositories/stock_daily_flow.py` | `_payload` 2 매핑 + `excluded` 2 매핑 제거 (총 4줄) |
+| 4 | `app/adapter/out/kiwoom/_records.py` | `NormalizedDailyFlow` 2 필드 + `to_normalized` 2 매핑 제거. `DailyMarketRow` raw 필드 (`crd_remn_rt` / `for_wght`) 는 vendor 응답 유지를 위해 그대로 (C-2γ 와 동일 정책) |
+| 5 | `app/adapter/web/routers/daily_flow.py` | `DailyFlowRowOut` 2 필드 + 주석 갱신 (10→8 영속 + fetched_at) |
+
+**테스트 (4 갱신 + 1 신규)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `tests/test_migration_013.py` (신규) | (a) 008 적용 후 10 도메인 컬럼 확인 (b) 013 적용 후 8 도메인 컬럼 + 2 컬럼 부재 확인 (c) downgrade 가드 — 데이터 있을 시 RAISE (d) downgrade — 데이터 0건 시 컬럼 복원 |
+| 2 | `tests/test_migration_007.py` | `test_columns_types` NUMERIC(8,4) 4개 → **2개** (`credit_rate` / `foreign_rate` 만 잔존). 008 갱신 후 BIGINT 6개는 그대로. 다른 검증 (테이블/UNIQUE/FK/인덱스/server_default/cascade/멱등) 은 그대로 |
+| 3 | `tests/test_stock_daily_flow_repository.py` | `credit_balance_rate` / `foreign_weight` kwarg + assertion 제거 (2 곳 추정) |
+| 4 | `tests/test_daily_flow_router.py` | 응답 fixture 2 필드 제거 (1 곳) + JSON snapshot assertion 갱신 |
+| 5 | `tests/test_kiwoom_mrkcond_client.py` | `NormalizedDailyFlow` assertion 의 2 필드 제거 (1 곳). raw `crd_remn_rt` / `for_wght` parse 검증 cases (있다면) 는 유지 — vendor 응답 모델 검증 |
+
+**운영 doc (1)** — 코드 변경은 아니지만 검증 SQL § 갱신 필수:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `docs/operations/backfill-daily-flow-runbook.md` | NUMERIC SQL § (4컬럼) → 2컬럼. IS DISTINCT FROM SQL § → 검증 완료 inline 주석 ("Migration 013 후엔 컬럼 부재로 실행 불가") |
+
+**문서 (3)**:
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 28 추가 (C-2δ 결과)
+- `docs/plans/endpoint-10-ka10086.md` 본 doc § 3.4 / § 5 영향 범위만 inline 주석 (`-- C-2δ 후 DROP`) — full rewrite 지양
+- `CHANGELOG.md` / `HANDOFF.md` / `STATUS.md` 갱신
+
+### 13.4 Migration 013 SQL 초안
+
+```sql
+-- UPGRADE
+ALTER TABLE kiwoom.stock_daily_flow
+    DROP COLUMN IF EXISTS credit_balance_rate,
+    DROP COLUMN IF EXISTS foreign_weight;
+
+-- DOWNGRADE (007/008 와 동일한 데이터 가드 패턴)
+DO $$
+DECLARE v_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM kiwoom.stock_daily_flow;
+    IF v_count > 0 THEN
+        RAISE EXCEPTION 'stock_daily_flow 데이터(%건) 가 있어 downgrade 차단. NULL 복원이라 의미 보존 불가능 — 수동 백업 후 재시도.', v_count;
+    END IF;
+END $$;
+
+ALTER TABLE kiwoom.stock_daily_flow
+    ADD COLUMN foreign_weight NUMERIC(8, 4),
+    ADD COLUMN credit_balance_rate NUMERIC(8, 4);
+```
+
+> 컬럼 순서는 downgrade 시 007 와 다르게 마지막에 추가됨 — `__table_args__` / 명시 SELECT 패턴이라 동작 무관, 데이터 0 가드라 row hydrate 위험 없음.
+
+### 13.5 적대적 이중 리뷰 — 사전 self-check (ted-run 진입 전)
+
+| # | 위험 | 완화 |
+|---|------|------|
+| H-1 | C-2β 응답 DTO 가 외부 downstream 에 노출됐다면 breaking | 운영 미가동 — `master` 외 deploy 0. HANDOFF / scheduler_enabled=false 확인 |
+| H-2 | downgrade 시 NULL 컬럼 복원 → 과거 백업 restore 불일치 | 데이터 가드로 빈 테이블만 허용. 운영 데이터 있을 시 RAISE |
+| H-3 | 운영 DB (현재 2.88M rows) 에서 UPGRADE 시 DROP COLUMN 락 시간 | PostgreSQL 의 `DROP COLUMN` 은 메타데이터만 변경 (logical delete) → AccessExclusiveLock 짧음. 운영 미가동이라 실질 영향 0. 향후 운영 cron 활성 전이라면 즉시 가능 |
+| H-4 | NUMERIC magnitude 가드 (2b-L3) — DROP 후 분포 추적 불가 | 잔존 페어 (`credit_rate` / `foreign_rate`) 가 동일 분포 (results § 5.1) → 가드 누락 없음. 향후 단위 변경 detection 은 잔존 컬럼으로 수행 |
+| H-5 | `scripts/backfill_daily_flow.py` / `scripts/dry_run_ka10086_capture.py` 가 컬럼명 사용 | dry_run capture 가 raw 응답 dump 라 컬럼명 무관. backfill 은 Repository 경유 (직접 컬럼 SQL 없음) → 영향 없음. 검증 필요: grep |
+| H-6 | upsert payload 가 2 필드 제거 후 idempotent 인가 | UNIQUE (stock_id, trading_date, exchange) 그대로. payload 필드 줄어들면 ON CONFLICT 에서 더 적은 컬럼 갱신 — 의미 동일 |
+| H-7 | runbook SQL § 의 동일값 검증 SQL 이 DROP 후 실행 불가 | runbook § 에 inline 주석 추가 ("Migration 013 후 비활성 — 검증 완료") — 실행 자체는 컬럼 없음 ERROR. 신규 endpoint 도입 시 동일 검증 SQL 패턴 재사용 가능 |
+| H-8 | Migration 007 test 가 008 후 BIGINT 6 + NUMERIC 4 hard-coded | conftest 가 `upgrade head` 까지 적용 → 008 갱신과 동일 패턴으로 013 적용 후 BIGINT 6 + **NUMERIC 2** 로 정정. 008 test 가 별도로 컬럼 DROP/DOWNGRADE 시나리오 검증. 013 test 가 별도로 본 chunk 검증 |
+
+### 13.6 DoD (C-2δ)
+
+**코드**:
+- [ ] `migrations/versions/013_drop_daily_flow_dup_2.py`
+- [ ] `app/adapter/out/persistence/models/stock_daily_flow.py` 2 컬럼 제거
+- [ ] `app/adapter/out/persistence/repositories/stock_daily_flow.py` payload + excluded 4줄 제거
+- [ ] `app/adapter/out/kiwoom/_records.py` `NormalizedDailyFlow` 2 필드 + `to_normalized` 2 매핑 제거
+- [ ] `app/adapter/web/routers/daily_flow.py` `DailyFlowRowOut` 2 필드 제거
+
+**테스트** (목표: 1026 → ~1028 cases / coverage 유지 ≥ 93%):
+- [ ] `tests/test_migration_013.py` 신규 — 4 cases (UPGRADE 컬럼 셋 / DOWNGRADE 가드 / DOWNGRADE 컬럼 복원 / 멱등)
+- [ ] `tests/test_migration_007.py` `test_columns_types` 정정 — NUMERIC 4→2 (013 적용 후 head 검증)
+- [ ] `tests/test_stock_daily_flow_repository.py` 갱신
+- [ ] `tests/test_daily_flow_router.py` 갱신
+- [ ] `tests/test_kiwoom_mrkcond_client.py` 갱신
+- [ ] `ruff check` + `mypy --strict` PASS
+
+**이중 리뷰**:
+- [ ] 1R PASS (Reviewer A: 스키마/마이그레이션 — DROP 락 + downgrade 가드 / Reviewer B: 응답 DTO breaking + NUMERIC 가드 잔존 검증)
+
+**운영 doc**:
+- [ ] `docs/operations/backfill-daily-flow-runbook.md` NUMERIC SQL § + IS DISTINCT FROM SQL § inline 주석
+
+**문서**:
+- [ ] ADR-0001 § 28 추가 (C-2δ 결과)
+- [ ] STATUS.md § 5 후보 → § 6 완료 이동 (chunk 명 + 커밋 해시)
+- [ ] CHANGELOG: `refactor(kiwoom): Phase C-2δ — Migration 013 (C/E 중복 2 컬럼 DROP, 10→8 도메인)`
+- [ ] HANDOFF.md 갱신
+
+### 13.7 다음 chunk (C-2δ 이후)
+
+1. **scheduler_enabled 운영 cron 활성 + 1주 모니터** — 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow 통합 (MEDIUM)
+2. **follow-up F6/F7/F8 + daily_flow 빈 응답 1건 통합** (LOW)
+3. **refactor R2 (1R Defer 일괄 정리)** (LOW)
+4. **ka10094 (년봉, P2)** — C-3 패턴 응용
+
+---
+
 _Phase C 의 마지막 endpoint. ka10081 (가격) + 본 endpoint (수급) 의 짝꿍이 백테스팅의 base. 이중 부호 + 외인순매수 단위가 운영 first call 의 가장 큰 검증 포인트._

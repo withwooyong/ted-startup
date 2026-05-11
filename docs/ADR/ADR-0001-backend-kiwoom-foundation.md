@@ -1814,4 +1814,74 @@ mock 테스트가 운영 edge case 를 재현 못 하는 한계 (`12f0daf` HANDO
 
 - 사용자 수동 실측 (smoke → mid → full) 후 § 27.5 채움 (OHLCV § 26.5 와 동일 흐름)
 - 측정 #3 NUMERIC overflow 발생 → 별도 Migration chunk
+
+## 28. C-2δ — Migration 013 (C/E 중복 컬럼 2개 DROP) (2026-05-11, ✅ 완료)
+
+설계 doc: `src/backend_kiwoom/docs/plans/endpoint-10-ka10086.md` § 13.
+
+### 28.1 결정
+
+daily_flow 풀 백필 완료 (`2317528`) 후 컬럼 동일값 의심 (§ 27.5) 확정 → C-2γ Migration 008 의 D-E 중복 3 컬럼 DROP 패턴 1:1 응용. `credit_balance_rate` (C 페어) + `foreign_weight` (E 페어) 2 컬럼 DROP. 10 → 8 도메인 컬럼.
+
+### 28.2 검증 근거 (IS DISTINCT FROM 2.88M rows)
+
+resume 완료 후 (총 2,879,500 rows / KRX 4,077 종목 / NXT 626 종목) `IS DISTINCT FROM` SQL:
+
+```sql
+SELECT
+    COUNT(*) FILTER (WHERE credit_rate IS DISTINCT FROM credit_balance_rate) AS credit_diff,
+    COUNT(*) FILTER (WHERE foreign_rate IS DISTINCT FROM foreign_weight)    AS foreign_diff
+FROM kiwoom.stock_daily_flow;
+```
+
+| 페어 | 차이 row 수 |
+|------|------------|
+| `credit_rate <> credit_balance_rate` | **0건** |
+| `foreign_rate <> foreign_weight` | **0건** |
+
+`<>` 가 아닌 `IS DISTINCT FROM` 사용 — NULL 비교 false 회피로 NULL row 도 정확 비교. NUMERIC magnitude / 분포 (results § 5.1~5.4) 도 페어 간 완전 일치 (min/max/p01/p99).
+
+### 28.3 변경 범위 (6 코드 + 4 테스트 + 1 운영 doc)
+
+코드:
+1. `migrations/versions/013_drop_daily_flow_dup_2.py` (신규, revision id 25 chars — VARCHAR(32) 한도)
+2. `app/adapter/out/persistence/models/stock_daily_flow.py` (Mapped 2 제거 / 도메인 10→8)
+3. `app/adapter/out/persistence/repositories/stock_daily_flow.py` (payload + excluded 4줄 제거)
+4. `app/adapter/out/kiwoom/_records.py` (NormalizedDailyFlow 2 필드 + to_normalized 2 매핑 제거. raw DailyMarketRow.crd_remn_rt/for_wght 는 vendor 응답 모델로 유지)
+5. `app/adapter/web/routers/daily_flow.py` (DailyFlowRowOut 2 필드 제거 — 응답 DTO breaking, 운영 미가동이라 영향 0)
+6. `scripts/dry_run_ka10086_capture.py` (2 line 제거 — plan doc § 13.5 H-5 self-check)
+
+테스트:
+1. `tests/test_migration_013.py` (신규 4 cases — 008 패턴 1:1: UPGRADE 부재 / 잔존 8 도메인 / DOWNGRADE 가드 RAISE / 라운드트립)
+2. `tests/test_migration_007.py` (NUMERIC 4→2 + DROP 부재 단언 추가)
+3. `tests/test_migration_008.py` (`expected_remaining` 10→8 + 라운드트립 head 컬럼 카운트 18→16, **plan doc § 13.3 미명시 — testcontainers 가 발견**)
+4. `tests/test_stock_daily_flow_repository.py` + `test_daily_flow_router.py` + `test_kiwoom_mrkcond_client.py` (stale kwarg/assertion 제거 + 부재 단언 추가)
+
+운영 doc:
+- `docs/operations/backfill-daily-flow-runbook.md` NUMERIC SQL § + IS DISTINCT FROM SQL § inline 주석 (Migration 013 후 비활성)
+
+### 28.4 검증 (Verification Loop)
+
+| 게이트 | 결과 |
+|-------|------|
+| ruff check | ✅ All checks passed |
+| mypy --strict | ✅ Success: no issues found in 5 source files |
+| pytest (full) | ✅ **1030 passed** in 23.31s (1026 → +4 from test_migration_013) |
+| coverage | 95% (유지) |
+
+### 28.5 Verification 가 잡은 2건 (정적 분석 외)
+
+1. **VARCHAR(32) revision id truncation** — `013_drop_daily_flow_dup_columns_2` (33 chars) → testcontainers conftest setup 시점 `psycopg2.errors.StringDataRightTruncation` → `013_drop_daily_flow_dup_2` (25 chars) 로 단축. 008 패턴 (`008_drop_daily_flow_dup_columns` 31 chars) 답습 시 위험. 향후 chunk 메모.
+2. **`test_migration_008.py` hard-coded 카운트** — H-8 (test_007) 패턴이 test_008 의 `expected_remaining` set + `len(cols_after_upgrade) == 18` 에도 동일 적용 필요. plan doc § 13.3 누락 — testcontainers 가 자동 발견.
+
+### 28.6 응답 DTO breaking 수용
+
+DailyFlowRowOut 2 필드 (`credit_balance_rate` / `foreign_weight`) 제거. 운영 미가동 + master 외 deploy 0 — downstream 영향 0. 향후 scheduler_enabled 활성 전 시점이라 breaking 안전. 응답 부재 단언 (`assert "credit_balance_rate" not in body[0]`) router test 에 추가하여 회귀 방어.
+
+### 28.7 다음 chunk 후보
+
+1. **scheduler_enabled 운영 cron 활성 + 1주 모니터** — 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow 통합 (MEDIUM)
+2. **follow-up F6/F7/F8 + daily_flow 빈 응답 1건 통합** (LOW)
+3. **refactor R2 (1R Defer 일괄 정리)** (LOW)
+4. **ka10094 (년봉, P2)** — C-3 패턴 응용
 - 모든 가설 적중 → **scheduler_enabled 운영 cron 활성** 으로 진행 (HANDOFF Pending #2)

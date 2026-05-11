@@ -1,16 +1,20 @@
-"""StockDailyFlow ORM — ka10086 일별 수급 (C-2α + C-2γ).
+"""StockDailyFlow ORM — ka10086 일별 수급 (C-2α + C-2γ + C-2δ).
 
-설계: endpoint-10-ka10086.md § 5.2 + § 12 (C-2γ Migration 008).
+설계: endpoint-10-ka10086.md § 5.2 + § 12 (C-2γ Migration 008) + § 13 (C-2δ Migration 013).
 
 UNIQUE: (stock_id, trading_date, exchange) — 같은 종목/일자/거래소 1행 (KRX/NXT 분리).
 FK: stock_id → kiwoom.stock(id) ON DELETE CASCADE.
 
-10 도메인 컬럼 (신용 2 + 투자자별 4 + 외인 4) + 메타 (exchange / indc_mode + 3 타임스탬프).
+8 도메인 컬럼 (신용 1 + 투자자별 4 + 외인 3) + 메타 (exchange / indc_mode + 3 타임스탬프).
 OHLCV 8 필드는 ka10081 stock_price_krx/nxt 가 정답 — 본 ORM 에 미적재.
 
 C-2γ (Migration 008): D-E 중복 3 컬럼 (individual_net_purchase / institutional_net_purchase /
 foreign_net_purchase) DROP. dry-run § 20.2 #1 — D 카테고리 (individual_net / institutional_net /
 foreign_volume) 와 100% 동일값 확인.
+
+C-2δ (Migration 013): C/E 중복 2 컬럼 (credit_balance_rate / foreign_weight) DROP.
+운영 실측 § 5.6 — 2,879,500 rows IS DISTINCT FROM 검증으로 `credit_rate ≡ credit_balance_rate`
+및 `foreign_rate ≡ foreign_weight` 확정.
 """
 
 from __future__ import annotations
@@ -62,9 +66,8 @@ class StockDailyFlow(Base):
     exchange: Mapped[str] = mapped_column(String(4), nullable=False)
     indc_mode: Mapped[str] = mapped_column(CHAR(1), nullable=False)
 
-    # C. 신용
+    # C. 신용 (C-2δ — credit_balance_rate DROP, credit_rate 와 동일값이라 의미 없음)
     credit_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
-    credit_balance_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
 
     # D. 투자자별 net (단위 indc_mode 따름)
     individual_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -72,11 +75,10 @@ class StockDailyFlow(Base):
     foreign_brokerage_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     program_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
-    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP, D 카테고리와 중복이라 의미 없음)
+    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP / C-2δ — foreign_weight DROP, foreign_rate 와 동일값)
     foreign_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     foreign_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     foreign_holdings: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    foreign_weight: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
 
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

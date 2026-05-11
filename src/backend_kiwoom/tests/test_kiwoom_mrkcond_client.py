@@ -288,9 +288,8 @@ def test_to_normalized_full_field_mapping() -> None:
     assert normalized.indc_mode is DailyMarketDisplayMode.QUANTITY
     assert normalized.trading_date == date(2024, 11, 25)
 
-    # 신용
+    # 신용 (C-2δ — credit_balance_rate 영속화 안 함, credit_rate 와 동일값)
     assert normalized.credit_rate == Decimal("0.50")
-    assert normalized.credit_balance_rate == Decimal("0.30")
 
     # 투자자별 — 가설 B 적용
     assert normalized.individual_net == -714  # "--714" → -714
@@ -298,16 +297,15 @@ def test_to_normalized_full_field_mapping() -> None:
     assert normalized.foreign_brokerage_net == 0
     assert normalized.program_net == 0
 
-    # 외인
+    # 외인 (C-2δ — foreign_weight 영속화 안 함, foreign_rate 와 동일값)
     assert normalized.foreign_volume == -266783  # "--266783" → -266783
     assert normalized.foreign_rate == Decimal("12.34")
     assert normalized.foreign_holdings == 1234567
-    assert normalized.foreign_weight == Decimal("50.10")
 
     # C-2γ — D-E 중복 3 필드 제거: foreign_net_purchase / institutional_net_purchase /
     # individual_net_purchase 는 NormalizedDailyFlow 에서 더 이상 존재하지 않음.
-    # (운영 dry-run § 20.2 #1 — D 카테고리 (foreign_volume / institutional_net /
-    # individual_net) 와 100% 동일값으로 확인)
+    # C-2δ — C/E 중복 2 필드 제거: credit_balance_rate / foreign_weight 도 동일하게 제거
+    # (운영 실측 § 5.6 — 2.88M rows IS DISTINCT FROM 검증으로 100% 동일값 확정).
     # dataclasses.fields() 사용 — 클래스 정의 수준에서 필드 부재를 단언 (오타 방어).
     from dataclasses import fields
 
@@ -315,6 +313,8 @@ def test_to_normalized_full_field_mapping() -> None:
     assert "foreign_net_purchase" not in field_names
     assert "institutional_net_purchase" not in field_names
     assert "individual_net_purchase" not in field_names
+    assert "credit_balance_rate" not in field_names
+    assert "foreign_weight" not in field_names
 
 
 def test_to_normalized_empty_date_yields_date_min() -> None:

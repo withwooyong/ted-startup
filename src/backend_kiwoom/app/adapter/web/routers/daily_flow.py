@@ -106,26 +106,24 @@ class DailyFlowSyncRequestIn(BaseModel):
 
 
 class DailyFlowRowOut(BaseModel):
-    """stock_daily_flow row 응답 — 시계열 GET 결과 (10 영속 필드, C-2γ 후)."""
+    """stock_daily_flow row 응답 — 시계열 GET 결과 (8 영속 필드, C-2γ + C-2δ 후)."""
 
     model_config = ConfigDict(frozen=True, from_attributes=True)
 
     trading_date: date
     exchange: str
     indc_mode: str
-    # C. 신용
+    # C. 신용 (C-2δ — credit_balance_rate DROP, credit_rate 와 동일값)
     credit_rate: Decimal | None = None
-    credit_balance_rate: Decimal | None = None
     # D. 투자자별 net
     individual_net: int | None = None
     institutional_net: int | None = None
     foreign_brokerage_net: int | None = None
     program_net: int | None = None
-    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP, D 카테고리와 중복)
+    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP / C-2δ — foreign_weight DROP)
     foreign_volume: int | None = None
     foreign_rate: Decimal | None = None
     foreign_holdings: int | None = None
-    foreign_weight: Decimal | None = None
     # ORM NOT NULL + server_default=now() — 항상 값 존재 (R1 L-2)
     fetched_at: datetime
 

@@ -240,6 +240,11 @@ uv run python scripts/backfill_daily_flow.py \
 
 백필 완료 후 SQL 쿼리로 NUMERIC(8,4) 4 컬럼의 실 분포 측정. ADR § 27.4 의 가설 검증.
 
+> **C-2δ Migration 013 후 (2026-05-11)**: `credit_balance_rate` / `foreign_weight` 2 컬럼은
+> DROP 되어 본 § 의 해당 SQL 은 실행 불가 (column not found). 잔존 페어 (`credit_rate` /
+> `foreign_rate`) 가 동일 분포라 측정 가치 보존됨. 동일값 검증은 ADR § 28.2 IS DISTINCT
+> FROM SQL (2.88M rows / `credit_diff=0` / `foreign_diff=0`) 으로 완료.
+
 ```sql
 -- credit_rate (신용 비율) — NUMERIC(8,4) = max ±9999.9999, 가정 0~100
 SELECT

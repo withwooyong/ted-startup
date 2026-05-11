@@ -4,7 +4,7 @@
 
 - DailyMarketRow: 응답 row Pydantic (22 필드, OHLCV 8 + 신용 2 + 투자자별 4 + 외인 7 + date 1)
 - DailyMarketResponse: 페이지 응답 wrapper
-- NormalizedDailyFlow: Repository 가 보는 영속화 형태 (OHLCV 8 무시 + 13 도메인 + 메타)
+- NormalizedDailyFlow: Repository 가 보는 영속화 형태 (OHLCV 8 무시 + 8 도메인 + 메타, C-2γ + C-2δ 후)
 - _strip_double_sign_int: Excel R56 의 `--714` 같은 이중 부호 처리 (가설 B)
 
 이 모듈은 `chart.py` (ka10081) / `stkinfo.py` (ka10001/99/100) 와 동급의 record 모듈.
@@ -118,6 +118,9 @@ class DailyMarketRow(BaseModel):
         C-2γ — `for_netprps` / `orgn_netprps` / `ind_netprps` raw 필드는 D 카테고리
         (`for_qty` / `orgn` / `ind`) 와 100% 동일값 (dry-run § 20.2 #1) 이라 영속화
         하지 않음. raw 필드 자체는 vendor 응답에 존재하므로 DailyMarketRow 에는 유지.
+
+        C-2δ — `crd_remn_rt` ≡ `crd_rt` / `for_wght` ≡ `for_rt` 가 2.88M rows 100% 동일
+        (운영 실측 § 5.6) 이라 영속화하지 않음. raw 필드는 DailyMarketRow 에 유지.
         """
         return NormalizedDailyFlow(
             stock_id=stock_id,
@@ -125,7 +128,6 @@ class DailyMarketRow(BaseModel):
             exchange=exchange,
             indc_mode=indc_mode,
             credit_rate=_to_decimal(self.crd_rt),
-            credit_balance_rate=_to_decimal(self.crd_remn_rt),
             individual_net=_strip_double_sign_int(self.ind),
             institutional_net=_strip_double_sign_int(self.orgn),
             foreign_brokerage_net=_strip_double_sign_int(self.frgn),
@@ -133,7 +135,6 @@ class DailyMarketRow(BaseModel):
             foreign_volume=_strip_double_sign_int(self.for_qty),
             foreign_rate=_to_decimal(self.for_rt),
             foreign_holdings=_to_int(self.for_poss),
-            foreign_weight=_to_decimal(self.for_wght),
         )
 
 
@@ -160,19 +161,17 @@ class NormalizedDailyFlow:
     trading_date: date
     exchange: ExchangeType
     indc_mode: DailyMarketDisplayMode
-    # C. 신용
+    # C. 신용 (C-2δ — credit_balance_rate DROP, credit_rate 와 동일값)
     credit_rate: Decimal | None
-    credit_balance_rate: Decimal | None
     # D. 투자자별 net
     individual_net: int | None
     institutional_net: int | None
     foreign_brokerage_net: int | None
     program_net: int | None
-    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP, D 카테고리와 중복)
+    # E. 외인 (C-2γ — 순매수 3 컬럼 DROP / C-2δ — foreign_weight DROP, foreign_rate 와 동일값)
     foreign_volume: int | None
     foreign_rate: Decimal | None
     foreign_holdings: int | None
-    foreign_weight: Decimal | None
 
 
 __all__ = [

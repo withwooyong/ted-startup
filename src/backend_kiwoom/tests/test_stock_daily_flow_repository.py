@@ -75,7 +75,6 @@ def _flow(
         exchange=exchange,
         indc_mode=DailyMarketDisplayMode.QUANTITY,
         credit_rate=credit_rate,
-        credit_balance_rate=Decimal("0.30"),
         individual_net=individual_net,
         institutional_net=693,
         foreign_brokerage_net=0,
@@ -83,7 +82,6 @@ def _flow(
         foreign_volume=-266783,
         foreign_rate=Decimal("12.34"),
         foreign_holdings=1234567,
-        foreign_weight=Decimal("50.10"),
     )
 
 
@@ -293,7 +291,6 @@ async def test_upsert_many_explicit_update_set_drift_guard(session: AsyncSession
         exchange=ExchangeType.KRX,
         indc_mode=DailyMarketDisplayMode.QUANTITY,
         credit_rate=Decimal("1.11"),
-        credit_balance_rate=Decimal("2.22"),
         individual_net=-999,
         institutional_net=999,
         foreign_brokerage_net=999,
@@ -301,7 +298,6 @@ async def test_upsert_many_explicit_update_set_drift_guard(session: AsyncSession
         foreign_volume=999,
         foreign_rate=Decimal("3.33"),
         foreign_holdings=999,
-        foreign_weight=Decimal("4.44"),
     )
     await repo.upsert_many([new_row])
     await session.commit()
@@ -314,4 +310,4 @@ async def test_upsert_many_explicit_update_set_drift_guard(session: AsyncSession
     assert r.individual_net == -999
     assert r.credit_rate == Decimal("1.1100")
     assert r.foreign_holdings == 999
-    assert r.foreign_weight == Decimal("4.4400")
+    assert r.foreign_rate == Decimal("3.3300")

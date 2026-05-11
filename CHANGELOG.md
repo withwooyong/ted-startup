@@ -7,6 +7,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] refactor(kiwoom): Phase C-2δ — Migration 013 (C/E 중복 2 컬럼 DROP, 10→8 도메인)
+
+운영 실측 § 5.6 IS DISTINCT FROM 검증 (2.88M rows / `credit_diff=0` / `foreign_diff=0`) 으로 확정된 C/E 중복 2 컬럼 (`credit_balance_rate` / `foreign_weight`) DROP. C-2γ Migration 008 (D-E 중복 3 컬럼 DROP) 패턴 1:1 응용. /ted-run 풀 파이프라인 (TDD → 구현 → 1R PASS → Verification Loop → ADR/STATUS/HANDOFF/CHANGELOG).
+
+### 1. 변경 범위 (6 코드 + 4 테스트 + 1 운영 doc + 4 doc)
+
+**코드**:
+- `migrations/versions/013_drop_daily_flow_dup_2.py` (신규) — UPGRADE DROP × 2 / DOWNGRADE 데이터 가드 + ADD NUMERIC(8,4) × 2
+- `app/adapter/out/persistence/models/stock_daily_flow.py` — Mapped 2 제거 (10 → 8 도메인)
+- `app/adapter/out/persistence/repositories/stock_daily_flow.py` — `_payload` + `excluded` 4줄 제거
+- `app/adapter/out/kiwoom/_records.py` — `NormalizedDailyFlow` 2 필드 + `to_normalized` 2 매핑 제거 (raw DailyMarketRow.crd_remn_rt/for_wght 는 vendor 응답 유지)
+- `app/adapter/web/routers/daily_flow.py` — `DailyFlowRowOut` 2 필드 제거 (응답 DTO breaking, 운영 미가동)
+- `scripts/dry_run_ka10086_capture.py` — 2 line 제거 (plan doc § 13.5 H-5)
+
+**테스트** (1026 → **1030**, +4 cases):
+- `tests/test_migration_013.py` (신규 4 cases) — 008 패턴 1:1
+- `tests/test_migration_007.py` — NUMERIC 4→2 + DROP 부재 단언
+- `tests/test_migration_008.py` — `expected_remaining` 10→8 + 라운드트립 카운트 18→16 (Verification 가 발견, plan doc § 13.3 미명시)
+- `test_stock_daily_flow_repository.py` / `test_daily_flow_router.py` / `test_kiwoom_mrkcond_client.py` — stale kwarg/assertion 제거 + 부재 단언 추가
+
+**운영 doc**:
+- `docs/operations/backfill-daily-flow-runbook.md` § 7 NUMERIC SQL inline 주석 (Migration 013 후 비활성)
+
+**문서**:
+- ADR § 28 (C-2δ 결과) — 28.1~28.7
+- plan doc § 13 (사전 작성된 chunk § — 영향 범위 / self-check H-1~H-8 / DoD)
+- STATUS.md / HANDOFF.md
+
+### 2. Verification Loop 가 잡은 2건
+
+정적 분석 (ruff/mypy) 으로 못 잡고 testcontainers 통합 test 가 발견:
+
+1. **VARCHAR(32) revision id truncation** — `013_drop_daily_flow_dup_columns_2` 33 chars > `alembic_version.version_num` VARCHAR(32) → `psycopg2.errors.StringDataRightTruncation`. `013_drop_daily_flow_dup_2` (25 chars) 로 단축. 008 (`008_drop_daily_flow_dup_columns` 31 chars) 답습 + `_2` 접미사 위험. 향후 chunk 메모.
+2. **`test_migration_008.py` hard-coded 카운트** — `expected_remaining` set 에 `credit_balance_rate`/`foreign_weight` 잔존 + `len(cols_after_upgrade) == 18` 가 013 적용 후 head 상태 미반영. H-8 (test_007 NUMERIC 4 hard-code) 패턴이 동일 적용 필요했으나 plan doc § 13.3 영향 범위 누락 — testcontainers 가 자동 발견.
+
+### 3. 결정
+
+- **응답 DTO breaking 수용** — 운영 미가동 + master 외 deploy 0 / scheduler_enabled=false 라 downstream 영향 0
+- **raw DailyMarketRow 필드 유지** — vendor 응답 모델은 그대로 보존 (C-2γ 와 동일 정책)
+- **NXT row mirror 정책 영향 없음** — KRX/NXT 둘 다 동일 raw 동일값
+- **운영 검증 SQL § inline 주석** — Migration 013 후 컬럼 부재로 실행 불가 (검증 완료 명시)
+
+### 4. 다음 chunk 후보
+
+1. **scheduler_enabled 운영 cron 활성 + 1주 모니터** (MEDIUM) — 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow 통합
+2. follow-up F6/F7/F8 + daily_flow 빈 응답 1건 통합 (LOW)
+3. refactor R2 (LOW)
+4. ka10094 (P2)
+
+---
+
 ## [2026-05-11] docs(kiwoom): failed 166 NXT resume PASS + 컬럼 동일값 확정 — Migration 013 DROP chunk 진입
 
 `72dbe69` (NXT sentinel break fix) 후 failed 166 NXT 종목 `--only-stock-codes` 명시 resume + 컬럼 동일값 SQL 검증. **코드 변경 0** — 측정 + 검증 결과 documentation.

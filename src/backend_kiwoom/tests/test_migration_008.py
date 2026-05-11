@@ -51,7 +51,11 @@ async def test_dropped_columns_absent_after_upgrade(engine: AsyncEngine) -> None
 
 @pytest.mark.asyncio
 async def test_remaining_d_category_columns_intact(engine: AsyncEngine) -> None:
-    """D 카테고리 6 컬럼 + 외인 비율/보유/비중은 그대로 유지 (008 은 E 카테고리 3개만 DROP)."""
+    """008 + 013 적용 후 유지되어야 할 8 도메인 컬럼 (C-2γ 후 10 - C-2δ 2 = 8).
+
+    conftest 가 head 까지 적용하므로 013 (C-2δ) 까지 적용된 상태에서 검증.
+    `credit_balance_rate` / `foreign_weight` 는 C-2δ Migration 013 에서 추가 DROP.
+    """
     async with engine.connect() as conn:
 
         def _list_columns(sync_conn):  # type: ignore[no-untyped-def]
@@ -61,19 +65,17 @@ async def test_remaining_d_category_columns_intact(engine: AsyncEngine) -> None:
         cols = await conn.run_sync(_list_columns)
 
     expected_remaining = {
-        # C. 신용
+        # C. 신용 (C-2δ — credit_balance_rate DROP)
         "credit_rate",
-        "credit_balance_rate",
         # D. 투자자별 net
         "individual_net",
         "institutional_net",
         "foreign_brokerage_net",
         "program_net",
-        # 외인 비율/보유/비중/거래량 (D-E 중복 아님)
+        # 외인 (C-2δ — foreign_weight DROP)
         "foreign_volume",
         "foreign_rate",
         "foreign_holdings",
-        "foreign_weight",
     }
     missing = expected_remaining - cols
     assert not missing, f"008 후 유지되어야 할 컬럼 누락: {missing}"
@@ -165,9 +167,9 @@ def test_migration_008_downgrade_then_upgrade_restores_columns(database_url: str
         assert DROPPED_COLUMNS.isdisjoint(cols_after_upgrade), (
             f"008 재적용 후에도 DROP 대상 잔존: {DROPPED_COLUMNS & cols_after_upgrade}"
         )
-        # head = 10 도메인 + 5 키/메타 + 3 timestamp = 18
-        assert len(cols_after_upgrade) == 18, (
-            f"head 상태 컬럼 수 18 기대, 실제 {len(cols_after_upgrade)}: {sorted(cols_after_upgrade)}"
+        # head = 8 도메인 (C-2γ 후 10 - C-2δ 2) + 5 키/메타 + 3 timestamp = 16
+        assert len(cols_after_upgrade) == 16, (
+            f"head 상태 컬럼 수 16 기대, 실제 {len(cols_after_upgrade)}: {sorted(cols_after_upgrade)}"
         )
     finally:
         sync_engine.dispose()
