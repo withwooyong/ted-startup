@@ -337,11 +337,11 @@ class StockFundamentalScheduler:
 
 
 class OhlcvDailyScheduler:
-    """일간 OHLCV sync cron job 1개를 관리하는 단순 wrapper (C-1β).
+    """일간 OHLCV sync cron job 1개를 관리하는 단순 wrapper (C-1β / ADR § 35).
 
-    StockFundamentalScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST mon-fri 18:30
-    (ADR § 17 결정 — fundamental cron 18:00 의 30분 후. fundamental 갱신 완료 후 OHLCV 시계열
-    적재 시점에 stock master 최신화 보장).
+    StockFundamentalScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST mon-fri 06:00
+    (ADR § 35 결정 — NXT 거래시간 17:00~20:00 마감 후 + 정산 마진 → 다음 영업일 새벽).
+    `fire_ohlcv_daily_sync` 가 `base_date=previous_kst_business_day(today)` 명시 전달.
 
     enabled=False 시 start no-op.
     """
@@ -386,8 +386,8 @@ class OhlcvDailyScheduler:
             fire_ohlcv_daily_sync,
             trigger=CronTrigger(
                 day_of_week="mon-fri",
-                hour=18,
-                minute=30,
+                hour=6,
+                minute=0,
                 timezone=KST,
             ),
             id=OHLCV_DAILY_SYNC_JOB_ID,
@@ -402,7 +402,7 @@ class OhlcvDailyScheduler:
         self._scheduler.start()
         self._started = True
         logger.info(
-            "ohlcv daily scheduler 시작 — job=%s alias=%s cron=mon-fri 18:30 KST",
+            "ohlcv daily scheduler 시작 — job=%s alias=%s cron=mon-fri 06:00 KST",
             OHLCV_DAILY_SYNC_JOB_ID,
             self._alias,
         )
@@ -421,11 +421,12 @@ class OhlcvDailyScheduler:
 
 
 class DailyFlowScheduler:
-    """일간 daily flow (ka10086) sync cron job 1개를 관리하는 단순 wrapper (C-2β).
+    """일간 daily flow (ka10086) sync cron job 1개를 관리하는 단순 wrapper (C-2β / ADR § 35).
 
-    OhlcvDailyScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST mon-fri 19:00
-    (ADR § 18 결정 — ohlcv cron 18:30 의 30분 후. ohlcv 적재 완료 후 수급 데이터 적재
-    시점에 stock master / OHLCV 가 모두 최신화 보장).
+    OhlcvDailyScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST mon-fri 06:30
+    (ADR § 35 결정 — NXT 마감 후 + ohlcv cron 06:00 의 30분 후. ohlcv 적재 완료 후 수급
+    데이터 적재 시점에 stock master / OHLCV 모두 최신화 보장).
+    `fire_daily_flow_sync` 가 `base_date=previous_kst_business_day(today)` 명시 전달.
 
     enabled=False 시 start no-op.
     """
@@ -470,8 +471,8 @@ class DailyFlowScheduler:
             fire_daily_flow_sync,
             trigger=CronTrigger(
                 day_of_week="mon-fri",
-                hour=19,
-                minute=0,
+                hour=6,
+                minute=30,
                 timezone=KST,
             ),
             id=DAILY_FLOW_SYNC_JOB_ID,
@@ -486,7 +487,7 @@ class DailyFlowScheduler:
         self._scheduler.start()
         self._started = True
         logger.info(
-            "daily flow scheduler 시작 — job=%s alias=%s cron=mon-fri 19:00 KST",
+            "daily flow scheduler 시작 — job=%s alias=%s cron=mon-fri 06:30 KST",
             DAILY_FLOW_SYNC_JOB_ID,
             self._alias,
         )
@@ -505,10 +506,11 @@ class DailyFlowScheduler:
 
 
 class WeeklyOhlcvScheduler:
-    """주봉 OHLCV sync cron job 1개를 관리하는 단순 wrapper (C-3β).
+    """주봉 OHLCV sync cron job 1개를 관리하는 단순 wrapper (C-3β / ADR § 35).
 
-    OhlcvDailyScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST **금 19:30**
-    (H-7 결정 — daily_flow cron 19:00 의 30분 후. mon-fri 19:00 daily_flow 와 충돌 방지).
+    OhlcvDailyScheduler 와 동일 패턴 — 별도 AsyncIOScheduler. cron: KST **sat 07:00**
+    (ADR § 35 결정 — 금요일 NXT 마감 후 + 다음날 새벽. daily/flow 종료 후 1시간 stagger).
+    `fire_weekly_ohlcv_sync` 가 `base_date=previous_kst_business_day(today)` 명시 전달 (sat → fri).
 
     enabled=False 시 start no-op.
     """
@@ -552,9 +554,9 @@ class WeeklyOhlcvScheduler:
         self._scheduler.add_job(
             fire_weekly_ohlcv_sync,
             trigger=CronTrigger(
-                day_of_week="fri",
-                hour=19,
-                minute=30,
+                day_of_week="sat",
+                hour=7,
+                minute=0,
                 timezone=KST,
             ),
             id=WEEKLY_OHLCV_SYNC_JOB_ID,
@@ -569,7 +571,7 @@ class WeeklyOhlcvScheduler:
         self._scheduler.start()
         self._started = True
         logger.info(
-            "weekly ohlcv scheduler 시작 — job=%s alias=%s cron=fri 19:30 KST",
+            "weekly ohlcv scheduler 시작 — job=%s alias=%s cron=sat 07:00 KST",
             WEEKLY_OHLCV_SYNC_JOB_ID,
             self._alias,
         )

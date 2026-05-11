@@ -1,19 +1,20 @@
-"""OhlcvDailyScheduler + fire_ohlcv_daily_sync 콜백 (C-1β).
+"""OhlcvDailyScheduler + fire_ohlcv_daily_sync 콜백 (C-1β / ADR § 35).
 
-설계: endpoint-06-ka10081.md § 7.2 + ADR § 17.x (cron 18:30 결정 — fundamental 18:00 의 30분 후).
+설계: endpoint-06-ka10081.md § 7.2 + ADR § 17.x (초기 18:30) + ADR § 35 (cron shift to 06:00).
 
 검증 (StockFundamentalScheduler 패턴 일관 — async event loop 필수):
 - enabled=False → start no-op
-- enabled=True → job 1개 등록 (mon-fri 18:30 KST)
+- enabled=True → job 1개 등록 (mon-fri 06:00 KST)
 - start 멱등성
 - shutdown 멱등성
 - cron field 검증
 
-fire_ohlcv_daily_sync 콜백 (2a-M3 회귀):
+fire_ohlcv_daily_sync 콜백 (2a-M3 회귀 + ADR § 35 base_date 명시 전달):
 - 정상 완료 logger.info
 - 예외 swallow (cron 연속성)
 - 실패율 > 10% logger.error 알람
 - 부분 실패 (failed > 0 + ratio <= 10%) logger.warning
+- execute() 가 base_date=previous_kst_business_day(today) 로 호출
 """
 
 from __future__ import annotations
@@ -53,15 +54,17 @@ _dummy_factory: IngestDailyOhlcvUseCaseFactory = _dummy  # type: ignore[assignme
 
 
 class _StubUseCase:
-    """IngestDailyOhlcvUseCase stub — execute 호출 카운트 + 결과 / 예외 제어."""
+    """IngestDailyOhlcvUseCase stub — execute 호출 카운트 + 결과 / 예외 제어 + 호출 kwargs 캡처."""
 
     def __init__(self, result: OhlcvSyncResult, *, raise_exc: Exception | None = None) -> None:
         self._result = result
         self._raise_exc = raise_exc
         self.call_count = 0
+        self.last_kwargs: dict[str, Any] = {}
 
-    async def execute(self, **_: Any) -> OhlcvSyncResult:
+    async def execute(self, **kwargs: Any) -> OhlcvSyncResult:
         self.call_count += 1
+        self.last_kwargs = kwargs
         if self._raise_exc is not None:
             raise self._raise_exc
         return self._result
@@ -245,15 +248,39 @@ async def test_scheduler_shutdown_safe_when_not_started() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_job_uses_18_30_kst_mon_fri_cron() -> None:
+async def test_scheduler_job_uses_06_00_kst_mon_fri_cron() -> None:
+    """ADR § 35 — NXT 마감 후 다음 영업일 새벽 06:00."""
     sched = OhlcvDailyScheduler(factory=_dummy_factory, alias="prod-main", enabled=True)
     try:
         sched.start()
         job = sched.get_job(OHLCV_DAILY_SYNC_JOB_ID)
         assert job is not None
         fields_by_name = {f.name: f for f in job.trigger.fields}
-        assert str(fields_by_name["hour"]) == "18"
-        assert str(fields_by_name["minute"]) == "30"
+        assert str(fields_by_name["hour"]) == "6"
+        assert str(fields_by_name["minute"]) == "0"
         assert str(fields_by_name["day_of_week"]) == "mon-fri"
     finally:
         sched.shutdown(wait=False)
+
+
+@pytest.mark.asyncio
+async def test_fire_ohlcv_daily_sync_passes_previous_business_day_as_base_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR § 35 — fire_*_job 이 execute(base_date=직전 영업일) 명시 전달."""
+    from app.batch import ohlcv_daily_job
+
+    # date.today() 를 Tue 2026-05-12 로 고정 → 직전 영업일 = Mon 2026-05-11
+    class _FixedDate(date):
+        @classmethod
+        def today(cls) -> date:
+            return date(2026, 5, 12)
+
+    monkeypatch.setattr(ohlcv_daily_job, "date", _FixedDate)
+
+    use_case = _StubUseCase(_ok_result())
+    factory = _make_factory(use_case)
+    await ohlcv_daily_job.fire_ohlcv_daily_sync(factory=factory, alias="prod-main")
+
+    assert use_case.call_count == 1
+    assert use_case.last_kwargs.get("base_date") == date(2026, 5, 11)

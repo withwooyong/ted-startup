@@ -1,21 +1,23 @@
-"""주봉 OHLCV sync 콜백 — APScheduler 가 트리거 (C-3β).
+"""주봉 OHLCV sync 콜백 — APScheduler 가 트리거 (C-3β / ADR § 35).
 
-설계: phase-c-3-weekly-monthly-ohlcv.md § 3.2 + endpoint-07-ka10082.md § 7.
+설계: phase-c-3-weekly-monthly-ohlcv.md § 3.2 + endpoint-07-ka10082.md § 7 + ADR § 35 (cron shift).
 
 책임 (ohlcv_daily_job 패턴 일관):
-- IngestPeriodicOhlcvUseCaseFactory 호출 → execute(period=WEEKLY)
+- IngestPeriodicOhlcvUseCaseFactory 호출 → execute(period=WEEKLY, base_date=직전 영업일)
 - 결과 logger.info / 실패율 알람
 - 모든 예외 swallow — 다음 cron tick 정상 동작 보장
 
-호출자: WeeklyOhlcvScheduler 의 등록된 cron job (금 KST 19:30 — H-7 daily_flow 19:00 후 30분).
+호출자: WeeklyOhlcvScheduler 의 등록된 cron job (KST sat 07:00 — ADR § 35 NXT 마감 후, daily/flow 종료 후).
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from app.adapter.web._deps import IngestPeriodicOhlcvUseCaseFactory
 from app.application.constants import Period
+from app.batch.business_day import previous_kst_business_day
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +36,14 @@ async def fire_weekly_ohlcv_sync(
     Parameters:
         factory: lifespan 에서 set 된 IngestPeriodicOhlcvUseCaseFactory
         alias: 사용할 키움 자격증명 alias (settings.scheduler_weekly_ohlcv_sync_alias)
+
+    ADR § 35 — base_date = 직전 KST 영업일 (sat 발화 시 직전 fri). 주봉 마지막 거래일 일치.
     """
-    logger.info("ohlcv weekly sync cron 시작 — alias=%s", alias)
+    base_date = previous_kst_business_day(date.today())
+    logger.info("ohlcv weekly sync cron 시작 — alias=%s base_date=%s", alias, base_date)
     try:
         async with factory(alias) as use_case:
-            result = await use_case.execute(period=Period.WEEKLY)
+            result = await use_case.execute(period=Period.WEEKLY, base_date=base_date)
     except Exception:  # noqa: BLE001 — cron 콜백은 모든 예외 swallow
         logger.exception("ohlcv weekly sync 콜백 예외 — alias=%s", alias)
         return

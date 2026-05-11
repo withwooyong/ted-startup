@@ -7,6 +7,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] fix(kiwoom): cron 시간 NXT 마감 후 새벽으로 이동 + base_date 명시 전달 (ADR § 35)
+
+사용자 발견 (2026-05-11) — "NXT 20시 마감 후 연동" 도메인 사실. DB 실측 5-11 NXT 74 rows (정상 630 의 12%) 정황 증거 — 21:00 백필도 키움 NXT EOD 정산 batch 미완료.
+
+### 1. cron 시간 변경 (3 곳)
+
+| Scheduler | Before | After |
+|-----------|--------|-------|
+| OhlcvDaily | mon-fri 18:30 | **mon-fri 06:00** |
+| DailyFlow | mon-fri 19:00 | **mon-fri 06:30** (OHLCV 30분 stagger 유지) |
+| Weekly | fri 19:30 | **sat 07:00** (daily/flow 종료 후 1h stagger) |
+
+master/fundamental/sector/monthly/yearly 무변 — NXT 무관 또는 거래 없는 시점.
+
+### 2. base_date 명시 전달
+
+`UseCase.execute()` default `base_date = date.today()` 가 06:00 cron (장 시작 09:00 전) 과 충돌 — `fire_*_job` 에서 `base_date=previous_kst_business_day(date.today())` 명시 전달. UseCase default 그대로 (router manual sync 의도 분리).
+
+### 3. 신규 helper
+
+`app/batch/business_day.py` — `previous_kst_business_day(today)`:
+- Monday → today - 3d (last Friday, 주말 skip)
+- Tue~Fri → today - 1d
+- Saturday → today - 1d (Friday, Weekly cron sat 발화)
+- Sunday → today - 2d (안전망)
+
+공휴일 무시 — 키움 API 빈 응답 → success 0 / UPSERT idempotent / `72dbe69` sentinel fix 자연 처리.
+
+### 4. 테스트 (1046 → 1059, +13)
+
+- 신규 `tests/test_business_day.py` — 7 parametrize (요일 경계) + 3 추가 (monday 3일 skip / saturday→friday / pure function) = **10건**
+- `tests/test_ohlcv_daily_scheduler.py` cron 단언 갱신 + 신규 `test_fire_ohlcv_daily_sync_passes_previous_business_day_as_base_date` (+1)
+- `tests/test_daily_flow_scheduler.py` 동일 패턴 (+1)
+- `tests/test_weekly_monthly_ohlcv_scheduler.py` 동일 패턴 + 충돌 단언 갱신 (+1)
+
+### 5. 5-11 NXT 보완 (본 chunk 와 별개)
+
+사용자 수동 실행 — `backfill_ohlcv.py --start-date 2026-05-11 --end-date 2026-05-11 --alias prod` (--resume 미사용).
+
+### 6. Verification
+
+- ruff All checks passed / mypy --strict Success / pytest 1059 PASS / 29.84s
+
+### 7. 파일
+
+신규: `app/batch/business_day.py` / `tests/test_business_day.py` / `src/backend_kiwoom/docs/plans/phase-c-cron-shift-to-morning.md`
+갱신: `app/scheduler.py` / `app/batch/{ohlcv_daily,daily_flow,weekly_ohlcv}_job.py` / 3 scheduler test / `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 35 / `src/backend_kiwoom/STATUS.md` / `HANDOFF.md`
+
+---
+
 ## [2026-05-11] feat(kiwoom): 영숫자 종목 OHLCV 3 period 백필 — Phase C 데이터 측면 종결 (ADR § 34)
 
 § 33 chart 가드 완화 (`STK_CD_CHART_PATTERN`) 머지 후 historical 3년 백필. plan doc `phase-c-alphanumeric-backfill.md` § 3 Stage 1/2/3 전 단계 완료. **코드 변경 0 — DB 데이터만 적재**.

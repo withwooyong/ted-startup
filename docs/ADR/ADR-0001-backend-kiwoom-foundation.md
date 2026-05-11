@@ -2321,3 +2321,99 @@ ORDER BY 1, 2;
 2. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉. 대용량 파티션 결정 선행
 3. **Phase E/F/G** — 공매도/대차/순위/투자자별 wave
 4. KOSCOM cross-check 수동 — 가설 B 최종 확정 (수동 1~2건)
+
+---
+
+## 35. Phase C — cron 시간 NXT 마감 후 새벽 이동 + base_date 명시 전달 (2026-05-12, ✅ 완료)
+
+### 35.1 결정
+
+사용자 발견 (2026-05-11) — "20시에 NXT 거래가 종료되는데 그 시간 이후로 연동해야". DB 실측 (2026-05-11 NXT 74 rows / 정상 630 의 12%) 가 정황 증거 — 21:00 백필 시점도 키움 NXT EOD 정산 batch 미완료. NXT 마감 + 정산 마진 = 다음 영업일 새벽 안전.
+
+운영 본격 진입 (scheduler 활성) 직전 P0 fix — Phase C 운영 안전성 결함 해소. plan doc `phase-c-cron-shift-to-morning.md`.
+
+### 35.2 cron 시간 변경 매핑
+
+| Scheduler | Before (KST) | After (KST) | 이유 |
+|-----------|--------------|-------------|------|
+| OhlcvDailyScheduler | mon-fri 18:30 | **mon-fri 06:00** | NXT 17~20시 거래 중 → 마감 + 정산 마진 |
+| DailyFlowScheduler | mon-fri 19:00 | **mon-fri 06:30** | 동일 + OHLCV 30분 stagger 유지 (ADR § 18 의존성) |
+| WeeklyOhlcvScheduler | fri 19:30 | **sat 07:00** | 금 NXT 마감 + daily/flow 종료 후 1시간 stagger |
+| StockMaster | mon-fri 17:30 | (무변) | lookup endpoint — NXT 무관 |
+| StockFundamental | mon-fri 18:00 | (무변) | lookup endpoint — NXT 무관 |
+| Sector | sun 03:00 | (무변) | 거래 없는 시점 |
+| Monthly | 매월 1일 03:00 | (무변) | 거래 없는 새벽 |
+| Yearly | 매년 1월 5일 03:00 | (무변) | 거래 없는 새벽 |
+
+### 35.3 base_date 명시 전달 (코드 변경 면 확장)
+
+`OhlcvDailyUseCase.execute()` default `base_date = date.today()` (line 142). 06:00 cron 으로 옮기면 `today = 화요일`, 화요일 06:00 시점에 화요일 데이터 fetch → **장 시작 (09:00) 전이라 빈 응답**. 
+
+해결: `fire_*_job` 함수에서 `base_date=previous_kst_business_day(date.today())` 명시 전달. UseCase default 는 그대로 (`today()`) — router manual sync 의도 (오늘 데이터 fetch) 와 분리 유지.
+
+신규 helper `app/batch/business_day.py`:
+
+```python
+def previous_kst_business_day(today: date) -> date:
+    weekday = today.weekday()  # Mon=0, Tue=1, ..., Sat=5, Sun=6
+    if weekday == 0:  # Monday
+        return today - timedelta(days=3)  # last Friday
+    if weekday == 6:  # Sunday (안전망)
+        return today - timedelta(days=2)
+    return today - timedelta(days=1)
+```
+
+요일 분기: Mon→Fri (3일 전, 주말 skip) / Tue~Fri→전일 / Sat→Fri (Weekly cron sat 발화) / Sun→Fri (안전망).
+
+공휴일은 무시 — mon-fri 안의 공휴일은 키움 API 빈 응답 → success 0 / UPSERT idempotent / sentinel 빈 row fix (`72dbe69`) 자연 처리.
+
+### 35.4 변경 면
+
+| 파일 | 변경 |
+|------|------|
+| `app/batch/business_day.py` | **신규** — `previous_kst_business_day(today: date) -> date` |
+| `app/batch/ohlcv_daily_job.py` | `execute()` → `execute(base_date=previous_kst_business_day(date.today()))` + import + docstring |
+| `app/batch/daily_flow_job.py` | 동일 |
+| `app/batch/weekly_ohlcv_job.py` | 동일 (period=WEEKLY 인자와 함께) |
+| `app/scheduler.py` | OhlcvDaily/DailyFlow/Weekly 3 cron 시간 + 3 docstring + 3 logger.info 메시지 |
+
+### 35.5 테스트 변경 (1046 → 1059, +13)
+
+| 파일 | 변경 |
+|------|------|
+| `tests/test_business_day.py` | **신규 10건** — 7 parametrize (요일 경계) + 3 추가 (monday 3일 skip / saturday→friday / pure function) |
+| `tests/test_ohlcv_daily_scheduler.py` | cron 시간 단언 18→06 갱신 + **신규 1건** `test_fire_ohlcv_daily_sync_passes_previous_business_day_as_base_date` |
+| `tests/test_daily_flow_scheduler.py` | cron 시간 단언 19→06:30 + **신규 1건** 동일 패턴 |
+| `tests/test_weekly_monthly_ohlcv_scheduler.py` | cron 시간 단언 fri 19:30→sat 07:00 + 충돌 단언 갱신 + **신규 1건** sat→fri base_date |
+
+`_StubUseCase` 의 execute() 가 `**kwargs` 받아 `last_kwargs` 캡처하도록 갱신 — base_date 전달 검증.
+
+### 35.6 검증
+
+- ruff All checks passed / ruff format unchanged
+- mypy --strict Success (4 source files in batch)
+- pytest **1059 passed** (1046 → +13) / 29.84s
+- testcontainers 자동 발견 회귀 0건
+
+### 35.7 외부 동작 영향 (scheduler 활성 시)
+
+- **현재 운영 시점 (mon-fri)**: 다음 영업일 새벽 06:00/06:30 적재. 당일 데이터 = 다음 영업일 오전에 가용. **지연 약 12~14 시간** (전 cron 18:30 → 19:00 대비)
+- **Weekly**: sat 07:00 — 주말 새벽. 토요일 사용자 분석은 이날 자정 이후 안전
+- **base_date** 일자: 전 영업일. router manual sync (오늘 데이터 fetch) 와 cron (어제 데이터 fetch) 의도 분리 — 명확
+
+### 35.8 5-11 NXT 74 rows 보완 (본 chunk 와 별개)
+
+plan doc § 7 명시. 사용자 수동:
+
+```bash
+cd src/backend_kiwoom
+uv run python scripts/backfill_ohlcv.py --period daily --start-date 2026-05-11 --end-date 2026-05-11 --alias prod
+```
+
+`--resume` 미사용 — gap detection 이 KRX 만 본다 (`d43d956` `_RESUME_TABLE_BY_PERIOD`). 4373 종목 모두 5-11 호출 → KRX UPSERT idempotent / NXT 미적재 보완.
+
+### 35.9 다음 chunk
+
+1. **5-11 NXT 보완 백필** (사용자 수동) — § 35.8 명령
+2. **scheduler_enabled 활성 + 1주 모니터** (STATUS § 5 #1) — 본 chunk 의 직접 동기. env 변경 + 1주
+3. Phase D 진입 — ka10080 분봉 / ka20006 업종일봉
