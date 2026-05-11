@@ -7,6 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] docs(kiwoom): chart 영숫자 stk_cd 가드 완화 — Chunk 1 dry-run (옵션 c-A, ADR § 32)
+
+§ 31.6 #1 "ETF/ETN OHLCV 별도 endpoint (옵션 c)" 의 사용자 분기 — **옵션 A (우선주/특수 종목 가드 완화)** 채택. 2단계 진행의 Chunk 1 = 운영 dry-run (코드 0줄).
+
+### 1. dry-run 결과 (12 호출)
+
+대형그룹사 우선주 3건 (`03473K` SK우 / `02826K` 삼성물산우B / `00499K` 롯데지주우) × KRX/NXT × ka10081/ka10086.
+
+- **KRX**: 6/6 호출 `return_code=0` + 충분한 row (ka10081 600 / ka10086 20). `KiwoomMaxPagesExceededError` 는 `--max-pages=1` cap 효과 — wire-level SUCCESS
+- **NXT**: 6/6 호출 empty (ka10081 sentinel 빈 row 1 / ka10086 row 0). 우선주 NXT 미상장 확정
+
+### 2. 핵심 발견
+
+- **KRX chart endpoint 가 `^[0-9A-Z]{6}$` 수용** — `STK_CD_LOOKUP_PATTERN = ^[0-9]{6}$` 의 보수적 재사용은 ka10100 R22 Excel ASCII 제약에서 유래. chart 는 더 관대
+- **영숫자 stk_cd = 우선주** — listed_date 보유 영숫자 active 10건 모두 `*우`/`*우B` 패턴 (`*K` suffix)
+- **NXT 우선주 미지원** — 기존 `nxt_enable=False` 가 자연 차단. Chunk 2 의 NXT 처리 변경 0
+
+### 3. 산출물
+
+- `src/backend_kiwoom/docs/plans/phase-c-chart-alphanumeric-guard.md` (Chunk 1/2 plan, ~410줄)
+- `src/backend_kiwoom/scripts/dry_run_chart_alphanumeric.py` (`build_stk_cd` 우회, 단건 캡처, verdict 분류, ~310줄). 변수명 fallback (`KIWOOM_API_KEY` ↔ `KIWOOM_APPKEY` legacy)
+- `src/backend_kiwoom/docs/operations/dry-run-chart-alphanumeric-results.md` (결과 표 + verdict 재해석 + 결정)
+- `src/backend_kiwoom/captures/dry-run-alphanumeric-20260511.json` (raw 응답 + 분석)
+- ADR § 32 신규 / STATUS § 5 #1 갱신 + § 6 누적
+
+### 4. Chunk 2 진입 결정
+
+- Chunk 2 진행 ✅ — `STK_CD_CHART_PATTERN = ^[0-9A-Z]{6}$` 신규 + chart 계열 11곳 가드 교체
+- Chunk 2 범위 변경 0 — plan doc § 4 그대로
+- 위험 H-1 (chart 영숫자 수용) / H-4 (NXT 우선주) 둘 다 해소
+
+---
+
 ## [2026-05-11] docs(kiwoom): follow-up F6/F7/F8 + daily_flow 빈 응답 통합 분석 (4건 모두 NO-FIX, ADR § 31)
 
 STATUS § 4 의 LOW 4건 일괄 분석 + 정책 결정. **코드 변경 0줄** (분석 + 문서 chunk).

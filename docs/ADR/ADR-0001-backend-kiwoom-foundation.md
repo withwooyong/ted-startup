@@ -2078,4 +2078,61 @@ ORDER BY s.stock_code;
 2. Phase D — ka10080 분봉 / ka20006 업종일봉 (대용량 파티션 결정 선행)
 3. Phase E/F/G wave (공매도/대차/순위/투자자별)
 4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터 — 사용자 결정 (모든 작업 완료 후)
+
+
+## 32. Phase C — chart 영숫자 stk_cd 가드 완화 — Chunk 1 dry-run (옵션 c-A, 2026-05-11)
+
+### 32.1 결정
+
+§ 31.6 #1 "ETF/ETN OHLCV 별도 endpoint (옵션 c)" 의 사용자 분기 — **옵션 A (우선주/특수 종목 가드 완화)** 채택. ETF 시장 (`market_code=8`) 신규 수집은 `master.md` § 0.3 결정 ("ETF/ELW/금현물 제외") 유지. plan doc `phase-c-chart-alphanumeric-guard.md` 신규.
+
+본 chunk = 2단계 진행의 **Chunk 1 — 운영 dry-run**. 키움 chart 계열 (ka10081 + ka10086) 이 영숫자 6자리 stk_cd (`*K` suffix 우선주) 를 wire-level 에서 수용하는지 단건 검증. 코드 변경 0줄 — 임시 스크립트 + 결과 doc.
+
+### 32.2 dry-run 결과 (12 호출)
+
+대형그룹사 우선주 3건 (`03473K` SK우 / `02826K` 삼성물산우B / `00499K` 롯데지주우) 대상 KRX + NXT × ka10081 + ka10086.
+
+| 거래소 | api_id | 결과 (3종 동일) | 해석 |
+|--------|--------|----------------|------|
+| **KRX** | ka10081 | rc=0 / rows=600 / `KiwoomMaxPagesExceededError` (max-pages=1 cap) | ✅ **wire-level SUCCESS** — 600 row = 일봉 ~2~3년치. cont-yn=Y 응답 = 더 받을 데이터 있음 |
+| **KRX** | ka10086 | rc=0 / rows=20 / `KiwoomMaxPagesExceededError` | ✅ **wire-level SUCCESS** — 20 row = 일별수급 1 page |
+| **NXT** | ka10081 | rc=0 / rows=1 (모든 필드 빈 문자열 sentinel) | ⚠️ NXT 우선주 미지원 — sentinel 빈 row |
+| **NXT** | ka10086 | rc=0 / rows=0 | ⚠️ NXT 우선주 미지원 — 정상 empty |
+
+**KRX 6/6 = 100% SUCCESS** (영숫자 stk_cd 수용 확정). **NXT 6/6 = 100% empty** (예상 — 우선주 NXT 미상장).
+
+### 32.3 핵심 발견
+
+1. **영숫자 stk_cd = 우선주** — listed_date 보유 영숫자 active 종목 10건 모두 `*우` / `*우B` 패턴 (`*K` suffix 가 우선주 식별자). ETF 신규 상장 (`0000D0` TIGER 등, listed_date NULL/최근) 와는 별개 패턴
+2. **KRX chart endpoint 가 `^[0-9A-Z]{6}$` 수용** — `STK_CD_LOOKUP_PATTERN = ^[0-9]{6}$` 의 보수적 재사용은 ka10100 R22 Excel 명시 ASCII 제약에서 유래. chart 는 더 관대
+3. **NXT 우선주 거래 미지원** — 기존 `stock.nxt_enable=False` 정책이 자연 차단. Chunk 2 의 NXT 처리 변경 0
+4. **NXT sentinel 빈 row 1개** — 키움이 NXT 미상장 종목에 대해 1 빈 row 반환 (mrkcond/chart sentinel 가드 `72dbe69` 의 `if not <list>: break` 통과 가능성). 운영 영향 0 (우선주 NXT 호출 자체 차단되므로) — follow-up 후보
+
+### 32.4 Chunk 2 진입 결정
+
+| 항목 | 결정 |
+|------|------|
+| Chunk 2 진행 | ✅ **진행** — plan doc § 4 그대로 |
+| Chunk 2 범위 변경 | ❌ 없음 — NXT 미지원은 기존 `nxt_enable=False` 가 자연 처리 |
+| Chunk 2 위험 H-1 (chart 영숫자 수용 가정) | ✅ **해소** — wire-level SUCCESS 확정 |
+| Chunk 2 위험 H-4 (NXT 우선주) | ✅ **해소** — 미지원 확정. NXT 호출 자체 차단됨 |
+| 신규 follow-up | NXT sentinel 빈 row detection 보강 (`if not <list> or all(not row.<key> for row in <list>): break`) — LOW priority |
+
+### 32.5 산출물
+
+- `src/backend_kiwoom/docs/plans/phase-c-chart-alphanumeric-guard.md` 신규 (Chunk 1/2 plan)
+- `src/backend_kiwoom/scripts/dry_run_chart_alphanumeric.py` 신규 (`build_stk_cd` 우회, 단건 캡처, verdict 분류). 변수명 fallback (`KIWOOM_API_KEY` → `KIWOOM_APPKEY` legacy)
+- `src/backend_kiwoom/docs/operations/dry-run-chart-alphanumeric-results.md` 신규 (결과 표 + verdict 재해석 + 결정)
+- `src/backend_kiwoom/captures/dry-run-alphanumeric-20260511.json` 신규 (raw 응답 + 분석)
+- STATUS § 5 #1 — Chunk 1 결과 한 줄 갱신, Chunk 2 후보 명시
+- CHANGELOG prepend
+- **코드 변경 0줄** (chunk 1 은 dry-run + 문서 only)
+- **테스트 변화 없음** (1037 유지)
+
+### 32.6 다음 chunk 후보
+
+1. **Chunk 2** — `STK_CD_CHART_PATTERN = ^[0-9A-Z]{6}$` 신규 + chart 계열 11곳 가드 교체 (plan doc § 4)
+2. Phase D — ka10080 분봉 / ka20006 업종일봉
+3. Phase E/F/G wave
+4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터
 5. KOSCOM cross-check 수동 — 가설 B 최종 확정
