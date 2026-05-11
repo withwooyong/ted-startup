@@ -7,6 +7,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] feat(kiwoom): 영숫자 종목 OHLCV 3 period 백필 — Phase C 데이터 측면 종결 (ADR § 34)
+
+§ 33 chart 가드 완화 (`STK_CD_CHART_PATTERN`) 머지 후 historical 3년 백필. plan doc `phase-c-alphanumeric-backfill.md` § 3 Stage 1/2/3 전 단계 완료. **코드 변경 0 — DB 데이터만 적재**.
+
+### 1. Stage 1 (dry-run) — 영숫자 295 / 대상 1108/4373/4373
+
+- 영숫자 active = 295 (KOSPI 249 + KOSDAQ 44 + 기타 2 / 우선주 `*K` 20 + ETF/회사채액티브 등 275)
+- daily 백필 대상 1108 (영숫자 295 + 비영숫자 gap 813 — full backfill `12f0daf` 후 신규상장/거래정지 해제) / weekly·monthly 영업일 ∅ 첫 적재 → 4373 전체
+- dry-run estimated 91m 20s (rate_limit 0.25s × 21,924 calls)
+
+### 2. Stage 2 (실 백필) — 3 period 0 failure / 47m 33s (추정 52%)
+
+| period | total | success_krx | success_nxt | failed | elapsed |
+|--------|-------|-------------|-------------|--------|---------|
+| daily | 1108 | 1108 | 75 | 0 | 5m 48s |
+| weekly | 4373 | 4373 | 630 | 0 | 20m 55s |
+| monthly | 4373 | 4373 | 630 | 0 | 20m 50s |
+
+### 3. Stage 3 (검증) — 영숫자 75,149 rows / anomaly 0건
+
+- daily 영숫자 58,909 / weekly 12,983 / monthly 3,257 = **75,149 rows** (영숫자 295 모두 distinct loaded)
+- NUMERIC(8,4) magnitude max 3049~3445 (cap 9999.9999 < 35%) — 안전 / 마이그레이션 불필요
+- F6 (since_date edge) / F7 (turnover_rate 음수) / F8 (SPAC 0-row) anomaly **모두 0건** — 영숫자 종목군 데이터 일관성 양호
+
+### 4. 사전 추정 정정
+
+- plan doc § 1.3 "+200K rows" → 실측 **75K (37%)**. 영숫자 종목 평균 row 가 비영숫자의 30% (ETF/회사채 최근 상장 / SPAC / 거래 zero 일자)
+- ADR § 33.6 #1 운영 cron "+10분" → 실측 295 × 0.3s = **~1.5분** (이전 추정의 15%)
+
+### 5. Phase C 종결
+
+본 chunk 가 Phase C 의 **데이터 측면 마지막 chunk**. 모든 chart endpoint (ka10081/82/83/94/86) 가 영숫자 종목 포함 historical 3년 적재 완성. 다음: scheduler 활성 / Phase D 진입 / Phase E~G wave.
+
+### 6. 파일
+
+- 신규: `src/backend_kiwoom/docs/plans/phase-c-alphanumeric-backfill.md`
+- 갱신: `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 34 / `src/backend_kiwoom/STATUS.md` / `HANDOFF.md` / `CHANGELOG.md`
+
+---
+
 ## [2026-05-11] feat(kiwoom): chart stk_cd 영숫자 가드 완화 Chunk 2 — STK_CD_CHART_PATTERN 신규 (옵션 c-A, ADR § 33)
 
 § 32 Chunk 1 dry-run (KRX 6/6 SUCCESS) 결과를 근거로 가드 분리 구현. plan doc `phase-c-chart-alphanumeric-guard.md` § 4 범위 그대로.

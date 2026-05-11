@@ -2206,3 +2206,118 @@ ORDER BY s.stock_code;
 3. Phase E/F/G wave
 4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터
 5. KOSCOM cross-check 수동 — 가설 B 최종 확정
+
+---
+
+## 34. Phase C — 영숫자 (우선주/ETF) 종목 OHLCV 3 period 백필 (2026-05-11, ✅ 완료)
+
+### 34.1 결정
+
+§ 33 Chunk 2 가드 완화 (`STK_CD_CHART_PATTERN`) 머지 후 chart endpoint 가 영숫자 stk_cd 수용. cron 자연 수집은 daily 1일치만 가져와 3년 historical 적재 불가 → backfill CLI 별도 chunk. plan doc `phase-c-alphanumeric-backfill.md`. 사용자 결정 (2026-05-11) — Stage 1 dry-run 후 scope 확장 인지 + 옵션 A (3 period 그대로 진행) 동의.
+
+본 chunk 가 Phase C 의 **데이터 측면 마지막 chunk** — 종결 후 scheduler 활성 / Phase D 진입 가능.
+
+### 34.2 Stage 1 — dry-run 결과 (✅ 완료)
+
+**영숫자 active 종목 카운트** (2026-05-11 query):
+
+| 항목 | 값 |
+|------|-----|
+| 영숫자 active (`stock_code ~ '[A-Z]'` AND `is_active=true`) | **295** |
+| 우선주 `^[0-9]{5}K$` suffix | **20** (예: 005935 삼성전자우) |
+| ETF/ETN/회사채 액티브 등 (영숫자 - 우선주) | **275** (TIGER/KODEX/PLUS/RISE/HK/1Q 등) |
+| total active | 4373 (full backfill `12f0daf` 시점 4078 → +295 = 4373 — 영숫자만큼 마스터 신규 적재) |
+
+**market_code 분포** (영숫자):
+
+| market_code | n | 의미 |
+|-------------|---|------|
+| 0 | 249 | KOSPI (ETF 다수) |
+| 10 | 44 | KOSDAQ |
+| 50 | 1 | KONEX |
+| 6 | 1 | (기타) |
+
+> **plan doc § 1 정정**: "우선주/특수" 추정은 ETF dominant 로 정정. 우선주는 20 (6.8%) 에 불과 — 영숫자 295 의 대부분은 ETF/ETN 계열. 단 Chunk 1 dry-run (§ 32) 의 6 종목은 우선주 (`005935`/`00088K` 등) sample 이라 SUCCESS 결과의 일반화 위험은 낮음 — ETF 도 chart endpoint 호출 가능성 높음 (`market_code=0` = KOSPI 등록 ETF). Stage 2 실측이 확정.
+
+**dry-run 3 period 추정** (rate_limit `0.25s/call`, ±50% margin):
+
+| period | 영업일 calendar (DB) | 백필 대상 stocks | exchanges | pages/call | total calls | est. time |
+|--------|---------------------|------------------|-----------|------------|-------------|-----------|
+| daily | 727 (적재 완료) | **1108** (영숫자 295 + 비영숫자 gap 813) | 2 (KRX+NXT) | 2 | 4432 | 18m 28s |
+| weekly | ∅ (첫 적재) | **4373** (전체) | 2 | 1 | 8746 | 36m 26s |
+| monthly | ∅ (첫 적재) | **4373** (전체) | 2 | 1 | 8746 | 36m 26s |
+| **합계** | — | — | — | — | **21,924** | **~91m 20s** |
+
+> **gap detection 부수 발견** — daily 의 비영숫자 gap 813 종목 = full backfill (`12f0daf`) 후 신규 상장/거래정지 해제/데이터 누락 종목들. R2 의 영업일 calendar 차집합 (compute_resume_remaining_codes, `d43d956`) 이 자연 식별. weekly/monthly 는 첫 적재라 영업일 calendar ∅ → 전체 candidate 진행.
+
+### 34.3 Stage 2 — 실 백필 3 period 결과 (✅ 완료, 2026-05-11)
+
+| period | total | success_krx | success_nxt | failed | elapsed | est. (dry-run) | actual / est. |
+|--------|-------|-------------|-------------|--------|---------|----------------|---------------|
+| daily | 1108 | 1108 | 75 | **0** | 5m 48s | 18m 28s | 31% |
+| weekly | 4373 | 4373 | 630 | **0** | 20m 55s | 36m 26s | 58% |
+| monthly | 4373 | 4373 | 630 | **0** | 20m 50s | 36m 26s | 57% |
+| **합계** | — | — | — | **0** | **47m 33s** | 91m 20s | **52%** |
+
+> **추정 대비 52% 단축** — Stage 1 dry-run 의 ±50% margin 가정 (rate_limit 0.25s 직렬) 보다 실측은 더 빠름. avg/stock = 0.3s/stock 균일 (3 period 동일) — KRX 응답 latency 자체가 rate_limit 보다 짧고 multi-page 호출이 daily 만 발생 (weekly/monthly 는 1 page). 0 failure 모두 — chart 가드 완화 (§ 33) 가 운영에서도 검증.
+
+**NXT success 분포**:
+- daily NXT 75 — 비영숫자 gap 813 중 `nxt_enable=True` 종목 75. 영숫자 295 의 NXT 0 (모두 `nxt_enable=False` 자연 차단)
+- weekly/monthly NXT 630 — 4078 전체 active 의 NXT enabled 비율 (~14%) × 4373 active. 첫 적재라 전체 NXT 시도
+
+### 34.4 Verification SQL — DB 적재 검증 (✅ 완료, 2026-05-11)
+
+```sql
+SELECT 'daily_krx' AS table_, CASE WHEN s.stock_code ~ '[A-Z]' THEN 'alphanumeric' ELSE 'numeric' END AS code_kind, count(*) AS rows
+FROM kiwoom.stock_price_krx p JOIN kiwoom.stock s ON s.id = p.stock_id
+WHERE p.trading_date >= DATE '2023-05-12' GROUP BY 1, 2
+UNION ALL
+SELECT 'weekly_krx', CASE WHEN s.stock_code ~ '[A-Z]' THEN 'alphanumeric' ELSE 'numeric' END, count(*)
+FROM kiwoom.stock_price_weekly_krx p JOIN kiwoom.stock s ON s.id = p.stock_id
+WHERE p.trading_date >= DATE '2023-05-12' GROUP BY 1, 2
+UNION ALL
+SELECT 'monthly_krx', CASE WHEN s.stock_code ~ '[A-Z]' THEN 'alphanumeric' ELSE 'numeric' END, count(*)
+FROM kiwoom.stock_price_monthly_krx p JOIN kiwoom.stock s ON s.id = p.stock_id
+WHERE p.trading_date >= DATE '2023-05-12' GROUP BY 1, 2
+ORDER BY 1, 2;
+```
+
+| table | numeric rows | alphanumeric rows | 영숫자 비율 | 영숫자 avg/stock |
+|-------|--------------|-------------------|-------------|------------------|
+| daily_krx | 2,725,952 | **58,909** | 2.12% | 199.7 (vs numeric 668.5) |
+| weekly_krx | 589,459 | **12,983** | 2.16% | 44.0 (vs 144.5) |
+| monthly_krx | 135,964 | **3,257** | 2.34% | 11.0 (vs 33.3) |
+| **합계** | 3,451,375 | **75,149** | 2.13% | — |
+
+> **plan doc § 1.3 정정**: "+200K rows" 추정 over-estimate — 실제 **75,149 rows (37%)**. 이유: 영숫자 295 의 평균 row 가 비영숫자의 30% 수준 (ETF/회사채액티브 등은 상장일이 최근 3년 미만 / 거래 zero 일자 다수 / SPAC 종목 일부 포함). 단 **모두 적어도 1 row 적재** (`distinct stock_code = 295` 검증) — `452980` SPAC 같은 0-row sentinel 종목 0건.
+
+### 34.5 anomaly 분석 (✅ 완료, 2026-05-11)
+
+| 항목 | 검증 SQL | 결과 | 결정 |
+|------|---------|------|------|
+| **NUMERIC(8,4) overflow** | `SELECT max/min(turnover_rate) WHERE stock_code ~ '[A-Z]'` | daily max 3049.40 / weekly max 3341.27 / monthly max 3445.97 (cap 9999.9999 — 34% 미만) | ✅ 안전. full backfill (`12f0daf`) max 3257.80 와 유사 magnitude. 마이그레이션 불필요 |
+| **turnover_rate 음수 (F7 anomaly)** | `SELECT min(turnover_rate)` | daily/weekly min 0.0000 / monthly min 0.0100 | ✅ 음수 0건. F7 (-57.32) anomaly 영숫자 종목에는 없음 |
+| **sentinel 빈 응답 (F8 / SPAC 패턴)** | `SELECT stock_code FROM stock WHERE stock_code ~ '[A-Z]' AND id NOT IN (SELECT stock_id FROM stock_price_krx ...)` | **0 종목** (영숫자 295 모두 적어도 1 row 적재) | ✅ SPAC 같은 신규 상장 detection 0건 |
+| **failed (KiwoomBusinessError)** | summary `failed` 컬럼 | 3 period 모두 0 | ✅ 0 failure |
+| **since_date edge case (F6 패턴)** | summary `success_krx` vs distinct stocks | success_krx = distinct stocks | ✅ 1980s 상장 종목 page break 잔존 row anomaly 영숫자에는 없음 (영숫자 종목 자체가 대부분 최근 상장 ETF) |
+
+> § 31 의 F6/F7/F8 + daily_flow 빈 응답 4건 anomaly 가 영숫자 종목에는 **0건** — 영숫자 종목군 (ETF/우선주) 의 데이터 일관성이 비영숫자 (KOSPI/KOSDAQ 일반 종목) 보다 오히려 양호.
+
+### 34.6 follow-up
+
+| # | 항목 | 출처 | 결정 |
+|---|------|------|------|
+| 1 | **운영 cron elapsed +N분 정정** | § 33.6 #1 "OHLCV daily cron 34분 → ~44분 추정 (+10분)" | 실측 daily 1108 종목 5m 48s = avg 0.31s/stock → **영숫자 295 만 추가 시 cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정 +10분의 15%). § 33.6 #1 정정 |
+| 2 | weekly/monthly cron 첫 자동 실행 | scheduler 활성 후 | 본 chunk 의 weekly/monthly 가 첫 적재. scheduler 활성 시 cron (금 19:30 / 1일 03:00) 이 자연스럽게 incremental 모드 작동 — gap detection 가 영업일 calendar 비어있지 않음 인지 → 정상 작동 |
+| 3 | yearly OHLCV (ka10094) 영숫자 백필 | plan doc § 2 Out of Scope | 1년 1 row 가치 낮음. cron 자연 수집에 위임 (매년 1월 5일 03:00) |
+| 4 | 영숫자 daily_flow (ka10086) 백필 | plan doc § 2 Out of Scope | 본 chunk 와 별개. cron 자연 수집 또는 별도 chunk 사용자 결정 |
+| ~~5~~ | NXT 우선주 sentinel 빈 row | § 32.3 + § 33.6 #2 | LOW — 운영 영향 0. 본 chunk 에서도 영숫자 295 의 NXT enable 모두 false → 호출 자체 없음. detection 재확인 |
+
+### 34.7 Phase C 종결 의미
+
+본 chunk 종료 시 Phase C 의 모든 chart endpoint (ka10081/82/83/94 + ka10086) 가 영숫자 종목 포함 3년 historical 적재 완성. STATUS § 5 #1 해소. 다음 chunk 후보:
+
+1. **scheduler_enabled 일괄 활성 + 1주 모니터** — env 변경 1건. 측정 #13 (일간 cron elapsed) + #19 (영숫자 +10분 추정) 첫 영업일 정량화
+2. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉. 대용량 파티션 결정 선행
+3. **Phase E/F/G** — 공매도/대차/순위/투자자별 wave
+4. KOSCOM cross-check 수동 — 가설 B 최종 확정 (수동 1~2건)

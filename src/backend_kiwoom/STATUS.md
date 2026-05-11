@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-11 (chart 영숫자 stk_cd 가드 완화 — **Chunk 2 구현 완료** / STK_CD_CHART_PATTERN 신규 / 11곳 가드 교체 / 1037→1046 tests / coverage 91% / ADR § 33)
+> **마지막 갱신**: 2026-05-11 (영숫자 종목 OHLCV 3 period 백필 완료 — Phase C 데이터 측면 종결 / 0 failure / 47m 33s / 영숫자 75,149 rows 적재 / anomaly 0건 / ADR § 34)
 
 ---
 
@@ -11,13 +11,13 @@
 
 | 항목 | 값 |
 |------|-----|
-| 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **chart 영숫자 stk_cd 가드 완화 — Chunk 2 구현** — STK_CD_CHART_PATTERN (`^[0-9A-Z]{6}$`) 신규 + chart 계열 11곳 가드 교체 + UseCase 가드 의미 반전 (skip→keep) / lookup 계열 5곳 무변 / 1046 tests / coverage 91% / ADR § 33 |
-| 다음 chunk | **영숫자 295 종목 백필** → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
-| 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 + **영숫자 호환성 확장** (우선주/특수 종목 포함) |
-| 누적 chunk | 40 commits (Chunk 1 dry-run `a14bb10` + Chunk 2 구현) |
-| 테스트 | **1046 cases** (1037 → +9 — Chunk 2: 신규 5 보호/통과 단언 + 갱신 의미 반전 4) / coverage 91% |
-| 운영 검증 | ✅ **full 3년 OHLCV 백필 34분 / 4078 호환 / 0 failed**. daily_flow 백필 ⏳ 사용자 실측 대기 |
+| 진행 Phase | **Phase C** (OHLCV + 일별 수급 + 영숫자 백필 — 데이터 측면 **종결**, scheduler 활성만 남음) |
+| 마지막 완료 chunk | **영숫자 종목 OHLCV 3 period 백필** — daily 1108 / weekly 4373 / monthly 4373 = 0 failure / 47m 33s / 영숫자 75,149 rows 적재 (295 stocks distinct) / anomaly 0건 (NUMERIC max < 35% cap / F6/F7/F8 영숫자 영향 0) / ADR § 34 |
+| 다음 chunk | **scheduler_enabled 활성 + 1주 모니터** → Phase D/E/F/G |
+| 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 + **영숫자 호환성 확장** + **영숫자 historical 적재 완성** |
+| 누적 chunk | 41 commits (영숫자 백필 chunk 추가) |
+| 테스트 | 1046 cases / coverage 91% (본 chunk 코드 변경 0 — 테스트 변경 없음) |
+| 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. daily_flow 백필 ⏳ 사용자 실측 대기 |
 
 ---
 
@@ -27,7 +27,7 @@
 |-------|------|------|------------|---------------|
 | **A — 기반 인프라** | Settings/Cipher/structlog/Migration 001/Auth/KiwoomClient/Scheduler | ✅ **완료** | A1 / 보안PR / A2-α/β / A3-α/β/γ + F1 (8) | au10001, au10002, ka10101 |
 | **B — 종목 마스터** | stock + nxt_enable / 단건 조회 / 펀더멘털 | ✅ **완료** | B-α / B-β / B-γ-1 / B-γ-2 (4) | ka10099, ka10100, ka10001 |
-| **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 | 🔄 **진행중 (95%)** | C-1α/β / C-2α/β/γ / R1 / C-3α/β / C-backfill / C-운영실측 준비 (11) | ka10081 ✅, ka10086 ✅, ka10082 ✅, ka10083 ✅, C-backfill ✅, 운영 실측 준비 ✅ / 측정 ⏳, ka10094 ⏳, daily_flow 백필 ⏳ |
+| **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 + 영숫자 호환성 | ✅ **종결 (데이터 측면 100%)** | C-1α/β / C-2α/β/γ/δ / R1/R2 / C-3α/β / C-backfill / C-4 / chart 영숫자 Chunk 1/2 / 영숫자 백필 (16) | 모두 ✅ / scheduler 활성만 남음 |
 | **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | ⏳ 대기 | — | ka10079, ka10080, ka20006 |
 | **E — 시그널 보강** | 공매도 / 대차거래 | ⏳ 대기 | — | ka10014, ka10068, ka20068 |
 | **F — 순위** | 등락률/거래량/거래대금 5종 통합 | ⏳ 대기 | — | ka10027, ka10030, ka10031, ka10032, ka10023 |
@@ -138,7 +138,7 @@ P3 (선택):
 | ~~12 (F8)~~ | ~~full backfill 1 종목 빈 응답 (OHLCV 4078 fetch / 4077 적재)~~ | full 2026-05-10 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록) / 신규 상장 직후 / sentinel 가드 정상 / **NO-FIX** |
 | ~~daily_flow 빈 응답 1 종목~~ | ~~success_krx 3922 vs DISTINCT KRX 3921~~ | full 2026-05-11 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (F8 동일 종목) / **NO-FIX** |
 | **13** | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 | scheduler_enabled 활성화 chunk |
-| **19** | 영숫자 295 종목 추가로 cron elapsed +10분 추정 | ADR § 33.6 | scheduler_enabled 활성화 chunk + 첫 영업일 모니터 |
+| ~~19~~ | ~~영숫자 295 종목 추가로 cron elapsed +10분 추정~~ | ADR § 33.6 → § 34.6 | ✅ **정정** — 영숫자 백필 실측 1108 종목 5m 48s = 0.31s/stock → **cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정의 15%) |
 | **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
 
 ---
@@ -147,12 +147,12 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **영숫자 295 종목 백필** | Chunk 2 (ADR § 33) 머지 후 chart 가드 영숫자 허용. cron 자연 수집 또는 `backfill_ohlcv.py --resume` 별도 chunk. ~295 종목 × 3년 = 추가 ~200K rows | 사용자 결정 — 수동 또는 별도 chunk |
-| 2 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
-| 3 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
-| 4 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
-| **최종** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | **사용자 결정 (2026-05-11): 모든 작업 완료 후 활성**. 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow + 통합 1주 모니터 → ADR § 26.5 + § 28 + § 29 + § 30 후속 측정 | env 변경 + 1주 |
-| ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration + ALTER COLUMN |
+| **1** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | Phase C 데이터 측면 종결 — 본격 운영 진입. env 변경 1건. 측정 #13 (일간 cron elapsed) + § 26.5 + § 28 + § 29 + § 30 + § 34 후속 측정 | env 변경 + 1주 모니터 |
+| 2 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
+| 3 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
+| 4 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
+| 5 | 영숫자 daily_flow (ka10086) 백필 | 본 chunk 의 OHLCV 와 별개. cron 자연 수집 가능 | 사용자 결정 |
+| ~~※~~ | ~~(실측 결과 의존) NUMERIC 마이그레이션~~ | ✅ 해소 — § 34.5 영숫자 max < 35% cap 확인. 마이그레이션 불필요 | — |
 
 ---
 
@@ -204,7 +204,8 @@ P3 (선택):
 - **R2-docs sync** — R2 후 backfill runbook 의 resume 동작 설명 현행화 (3 곳) `d6357da`
 - **follow-up 분석** — F6/F7/F8 + daily_flow 빈 응답 1건 통합 분석 (4건 모두 NO-FIX / `452980` 신한제11호스팩 식별) `e8d9d38`
 - **chart 영숫자 stk_cd Chunk 1 dry-run** — KRX chart endpoint (ka10081/86) 영숫자 6자리 stk_cd 수용 확정 (rc=0 / 600+20 rows). NXT 우선주 미지원 확정 (sentinel empty). plan doc 신규 + dry-run CLI 신규 + 결과 doc 신규 / ADR § 32 / 코드 0줄 `a14bb10`
-- **chart 영숫자 stk_cd Chunk 2 구현** — `STK_CD_CHART_PATTERN = ^[0-9A-Z]{6}$` 신규 + `_validate_stk_cd_for_chart` 함수 + chart 계열 11곳 가드 교체 (build_stk_cd / 5 router 7 path / 3 UseCase). lookup 계열 5곳 무변 (ka10100/ka10001). 6 회귀 테스트 의미 반전 + 신규 5 보호/통과 단언 / 1046 tests / coverage 91% / ADR § 33 `<this commit>`
+- **chart 영숫자 stk_cd Chunk 2 구현** — `STK_CD_CHART_PATTERN = ^[0-9A-Z]{6}$` 신규 + `_validate_stk_cd_for_chart` 함수 + chart 계열 11곳 가드 교체 (build_stk_cd / 5 router 7 path / 3 UseCase). lookup 계열 5곳 무변 (ka10100/ka10001). 6 회귀 테스트 의미 반전 + 신규 5 보호/통과 단언 / 1046 tests / coverage 91% / ADR § 33 `ef7d598`
+- **영숫자 OHLCV 3 period 백필** — daily 1108 (영숫자 295 + 비영숫자 gap 813) / weekly 4373 / monthly 4373 (영업일 calendar ∅ 첫 적재) = 0 failure / 47m 33s / 영숫자 75,149 rows 적재 / anomaly 0건 (NUMERIC max < 35% cap, F6/F7/F8 영숫자 영향 0). 운영 cron +N분 추정 정정 (10 → 1.5). 코드 변경 0. plan doc 신규 + ADR § 34 / `<this commit>`
 
 ---
 
