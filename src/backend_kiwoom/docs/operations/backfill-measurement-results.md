@@ -136,7 +136,7 @@
 | 항목 | 값 |
 |------|-----|
 | rows | 2,732,031 |
-| min_pct | -57.32 (음수 anomaly — follow-up F7) |
+| min_pct | -57.32 (음수 anomaly — F7 분석 완료 ADR § 31: 키움 raw 보존 NO-FIX) |
 | max_pct | **3,257.80** |
 | avg_pct | 1.67 |
 | p01 | 0.00 |
@@ -147,7 +147,7 @@
 **가설 vs 실측**:
 - overflow (> NUMERIC(8,4) ±9999.9999): **0건**
 - max 3,257.80 = cap 의 33% — 안전 마진 충분
-- 음수 -57.32 anomaly: 키움 데이터 특성 (수정주가 조정 또는 표기 오류 추정) — follow-up
+- 음수 -57.32 anomaly: 키움 데이터 특성 (수정주가 조정 추정). F7 분석 완료 (ADR § 31) — 키움 raw 그대로 보존 (정직성). 분석 시 0/NaN/MAX(0,x) 처리는 분석 layer 책임
 
 **대응 결정**: 마이그레이션 불필요. `change_rate` 등은 daily_flow 측정 후 결정.
 
@@ -174,9 +174,9 @@
 | # | 항목 | 심각도 | 근거 | 후속 chunk |
 |---|------|--------|------|-----------|
 | 1 | ETF/ETN OHLCV 자체 sync | LOW | 본 chunk 가드는 skip 만. ETF 백테스팅 가치 (옵션 c) | 신규 endpoint chunk |
-| 2 | `since_date` guard edge case (F6) | LOW | 4078 중 2 종목 (`002690`, `004440`) 만 since_date 보다 과거 적재. 0.13% 영향 | follow-up F6 |
-| 3 | turnover_rate 음수 anomaly (F7) | LOW | min -57.32 — 회전율은 보통 양수. 키움 데이터 특성 검증 | follow-up F7 |
-| 4 | 1 종목 빈 응답 (4078 fetch / 4077 적재) | LOW | full backfill 결과 1 종목 row 0 | follow-up F8 |
+| ~~2~~ | ~~`since_date` guard edge case (F6)~~ | LOW | ~~4078 중 2 종목 (`002690`, `004440`) / 0.13%~~ | ✅ 분석 완료 (ADR § 31, `e8d9d38`) — **NO-FIX** (1980s 상장 page 단위 break row 잔존 / 데이터 가치 ≥ 비용) |
+| ~~3~~ | ~~turnover_rate 음수 anomaly (F7)~~ | LOW | ~~min -57.32 — 회전율 음수~~ | ✅ 분석 완료 (ADR § 31, `e8d9d38`) — **NO-FIX** (키움 raw 보존 정직성 / 0.0009% / 분석 layer 책임) |
+| ~~4~~ | ~~1 종목 빈 응답 (4078 fetch / 4077 적재)~~ | LOW | ~~full backfill 결과 1 종목 row 0~~ | ✅ 식별 + 분석 완료 (ADR § 31, `e8d9d38`) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록, 신규 상장 직후) / sentinel 가드 정상 / **NO-FIX** |
 | 5 | 일간 cron 실측 미완 | MEDIUM | 운영 cron 시간 예산 미정 | scheduler_enabled 활성화 chunk |
 
 ---
@@ -196,12 +196,12 @@
 
 | 순위 | chunk | 변경 사유 |
 |------|-------|----------|
-| 1 | daily_flow (ka10086) 백필 CLI | `change_rate` / `foreign_holding_ratio` / `credit_ratio` NUMERIC 분포 측정 (본 chunk 에서 측정 못 함). OHLCV 와 구조 다름 |
-| 2 | scheduler_enabled 운영 cron 활성 + 1주 모니터 | 측정 #4 (일간 cron elapsed) 미완. 운영 검증 |
-| 3 | follow-up F6/F7/F8 일괄 분석 | since_date edge case + turnover_rate 음수 + 빈 응답 1 종목 |
-| 4 | ETF/ETN OHLCV 별도 endpoint (옵션 c) | 백테스팅 데이터 가치 확보 |
-| 5 | refactor R2 (1R Defer 일괄) | 기존 유지 |
-| 6 | ka10094 (년봉, P2) | 기존 유지 |
+| ~~1~~ | ~~daily_flow (ka10086) 백필 CLI~~ | ✅ 완료 (`23f601b`, `4e75dd3`) — NUMERIC 4 컬럼 마이그레이션 불필요 / KRX 4077 / NXT 626 |
+| ~~3~~ | ~~follow-up F6/F7/F8 일괄 분석~~ | ✅ 완료 (`e8d9d38`, ADR § 31) — 4건 NO-FIX / 452980 식별 |
+| ~~5~~ | ~~refactor R2 (1R Defer 일괄)~~ | ✅ 완료 (`d43d956`, ADR § 30) — 5건 / 1037 tests / coverage 81.15% |
+| ~~6~~ | ~~ka10094 (년봉, P2)~~ | ✅ 완료 (`b75334c`, ADR § 29) — Migration 014 / 11/25 endpoint |
+| 1 | ETF/ETN OHLCV 별도 endpoint (옵션 c) | 백테스팅 데이터 가치 확보 |
+| 2 | scheduler_enabled 운영 cron 활성 + 1주 모니터 | 측정 #4 (일간 cron elapsed) 미완. **사용자 결정: 모든 작업 완료 후** |
 
 ---
 

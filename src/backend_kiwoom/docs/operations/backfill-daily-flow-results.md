@@ -384,7 +384,7 @@ GROUP BY ... LIMIT 10;
 |---|------|--------|------|-----------|
 | 1 | ~~**NXT 166 종목 KiwoomMaxPagesExceededError**~~ | ~~MEDIUM~~ | ✅ **해소** chunk `72dbe69` — sentinel 빈 응답 break / resume 0 fail |
 | 2 | ~~**컬럼 동일값 가능성**~~ | ~~LOW~~ | ✅ **확정** chunk `<resume-commit>` — 2,879,500 rows 모두 동일 (`credit_diff=0`, `foreign_diff=0`). Migration 013 DROP chunk 진행 |
-| 3 | **빈 응답 KRX 종목** (success_krx=3922 vs DISTINCT=3921) | LOW | OHLCV F8 와 동일 패턴. 1 종목 fetch 성공이지만 row 0 적재 | OHLCV F8 통합 분석 |
+| ~~3~~ | ~~**빈 응답 KRX 종목**~~ | LOW | ~~success_krx=3922 vs DISTINCT=3921~~ | ✅ 식별 + 분석 완료 (ADR § 31, `e8d9d38`) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록, OHLCV F8 와 **동일 종목**) / sentinel 가드 정상 / **NO-FIX** |
 | 4 | KRX 적재 -156 stocks (OHLCV 4077 vs daily_flow 3921) | LOW | failed 166 NXT 의 KRX 적재 영향 + 일부 거래정지 종목 | log 종목별 분석 (item 1 과 통합) |
 
 ---
@@ -407,12 +407,13 @@ GROUP BY ... LIMIT 10;
 | 순위 | chunk | 변경 사유 |
 |------|-------|----------|
 | ~~1~~ | ~~NXT 166 종목 max_pages 분석~~ | ✅ 해소 (`72dbe69` + resume) |
-| ~~2~~ | ~~컬럼 동일값 검증~~ | ✅ 확정 (`<resume-commit>` — 동일 / Migration 013 DROP chunk) |
-| **1** | **Migration 013 — `credit_balance_rate` + `foreign_weight` DROP** | 컬럼 동일값 확정 → C-2γ Migration 008 패턴 응용. ORM + 어댑터 매핑 + 통합 테스트 |
-| 2 | scheduler_enabled 운영 cron 활성 + 1주 모니터 | 측정 #4 (일간 cron elapsed) 미수행 |
-| 4 | follow-up F6/F7/F8 일괄 분석 — daily_flow 빈 응답 1건 통합 | OHLCV + daily_flow 통합 |
-| 5 | refactor R2 (1R Defer 일괄) | 기존 유지 |
-| 6 | ka10094 (년봉, P2) | 기존 유지 |
+| ~~2~~ | ~~컬럼 동일값 검증~~ | ✅ 확정 (`2317528` — 동일 / Migration 013 DROP chunk) |
+| ~~3~~ | ~~Migration 013 — `credit_balance_rate` + `foreign_weight` DROP~~ | ✅ 완료 (`8dd5727`, ADR § 28) — 10 → 8 도메인 |
+| ~~4~~ | ~~follow-up F6/F7/F8 일괄 분석 — daily_flow 빈 응답 1건 통합~~ | ✅ 완료 (`e8d9d38`, ADR § 31) — 4건 NO-FIX / 452980 식별 |
+| ~~5~~ | ~~refactor R2 (1R Defer 일괄)~~ | ✅ 완료 (`d43d956`, ADR § 30) — 1037 tests / coverage 81.15% |
+| ~~6~~ | ~~ka10094 (년봉, P2)~~ | ✅ 완료 (`b75334c`, ADR § 29) — Migration 014 / 11/25 endpoint |
+| **1** | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 295 종목 / 6.7% 백테스팅 가치 |
+| 2 | scheduler_enabled 운영 cron 활성 + 1주 모니터 | 측정 #4 (일간 cron elapsed) 미수행. **사용자 결정: 모든 작업 완료 후** |
 
 ---
 
