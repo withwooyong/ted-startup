@@ -7,6 +7,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] ops(kiwoom): scheduler_enabled 활성 + 1주 모니터 (ADR § 36)
+
+Phase C 의 마지막 chunk — 운영 본격 진입. § 35 cron 시간 fix 후 8 cron scheduler 의 default disabled 상태 해소.
+
+### 1. .env.prod 9 env 추가 (commit 외부 — .gitignore)
+
+- `KIWOOM_SCHEDULER_ENABLED=true`
+- 8 alias 모두 `prod` (DB 등록 자격증명) — sector / stock_master / fundamental / ohlcv_daily / daily_flow / weekly / monthly / yearly
+
+### 2. lifespan fail-fast 가드 통과
+
+`app/main.py:126-144` — 8 alias 비어있지 않은지 검증. env 9건 추가로 통과.
+
+### 3. 첫 발화 시점 (앱 재시작 후, KST)
+
+- StockMaster 17:30 / Fundamental 18:00 (2026-05-12 화 — 앱 재시작 시점 의존)
+- OhlcvDaily 06:00 / DailyFlow 06:30 (2026-05-13 수)
+- Weekly sat 07:00 (2026-05-16)
+- Sector sun 03:00 (2026-05-17)
+- Monthly 매월 1일 03:00 (2026-06-01)
+
+base_date = `previous_kst_business_day(today)` 자동 전달 (§ 35).
+
+### 4. 1주 후 측정은 별도 chunk
+
+사용자 결정 — 본 chunk 는 활성 + 모니터링 가이드 + ADR § 36 placeholder. 2026-05-19 mon 이후 사용자 요청 시 측정 chunk:
+- 일간 cron elapsed 정량화 (§ 26.5 / § 34.6 정정)
+- NXT 정상 적재 (5-13~5-19 trading_date 별 row 검증)
+- failed / 알람 / 부작용 정리
+
+### 5. 코드 변경 0
+
+본 chunk 는 .env.prod (commit 외부) + plan doc + 4 문서 (ADR/STATUS/HANDOFF/CHANGELOG) 만. 테스트 변경 없음 — 1059 tests 그대로.
+
+### 6. 파일
+
+신규: `src/backend_kiwoom/docs/plans/phase-c-scheduler-enable.md`
+갱신: `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 36 / `src/backend_kiwoom/STATUS.md` / `HANDOFF.md`
+
+---
+
 ## [2026-05-12] fix(kiwoom): cron 시간 NXT 마감 후 새벽으로 이동 + base_date 명시 전달 (ADR § 35)
 
 사용자 발견 (2026-05-11) — "NXT 20시 마감 후 연동" 도메인 사실. DB 실측 5-11 NXT 74 rows (정상 630 의 12%) 정황 증거 — 21:00 백필도 키움 NXT EOD 정산 batch 미완료.

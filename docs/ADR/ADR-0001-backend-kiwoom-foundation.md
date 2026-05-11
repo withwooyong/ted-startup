@@ -2417,3 +2417,119 @@ uv run python scripts/backfill_ohlcv.py --period daily --start-date 2026-05-11 -
 1. **5-11 NXT 보완 백필** (사용자 수동) — § 35.8 명령
 2. **scheduler_enabled 활성 + 1주 모니터** (STATUS § 5 #1) — 본 chunk 의 직접 동기. env 변경 + 1주
 3. Phase D 진입 — ka10080 분봉 / ka20006 업종일봉
+
+---
+
+## 36. Phase C — scheduler_enabled 활성 + 1주 모니터 (2026-05-12, ✅ 활성 / ⏳ 측정 1주 후)
+
+### 36.1 결정
+
+§ 35 cron 시간 fix 후 운영 본격 진입의 마지막 chunk. 8 cron scheduler (sector / stock_master / fundamental / ohlcv_daily / daily_flow / weekly / monthly / yearly) 의 default disabled 상태 해소. plan doc `phase-c-scheduler-enable.md`.
+
+**sub-chunk 분리** — 본 chunk = 활성 + 가이드 + 결과 placeholder. **1주 후 측정 결과는 별도 chunk** (사용자 결정 2026-05-12).
+
+### 36.2 환경 변경 (.env.prod / commit 외부 — .gitignore)
+
+| Env | Value |
+|-----|-------|
+| `KIWOOM_SCHEDULER_ENABLED` | `true` |
+| `KIWOOM_SCHEDULER_SECTOR_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_STOCK_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_FUNDAMENTAL_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_OHLCV_DAILY_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_DAILY_FLOW_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_WEEKLY_OHLCV_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_MONTHLY_OHLCV_SYNC_ALIAS` | `prod` |
+| `KIWOOM_SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS` | `prod` |
+
+DB 등록 alias = `prod` 1건 (운영 자격증명) → 8 cron alias 모두 동일 매핑.
+
+### 36.3 lifespan fail-fast 가드 통과 검증
+
+`app/main.py:126-144` — `scheduler_enabled=True` 시 8 alias 비어있지 않은지 검증. 본 chunk 의 env 9건 모두 추가 → 통과.
+
+### 36.4 첫 발화 시점 (KST, 앱 재시작 후)
+
+| Scheduler | cron | 첫 발화 |
+|-----------|------|---------|
+| StockMaster | mon-fri 17:30 | 2026-05-12 (오늘 화) 17:30 — 앱 재시작 시점 의존 |
+| StockFundamental | mon-fri 18:00 | 동일 18:00 |
+| OhlcvDaily | mon-fri 06:00 | **2026-05-13 (수) 06:00** ← 가장 중요 |
+| DailyFlow | mon-fri 06:30 | 2026-05-13 (수) 06:30 |
+| Weekly | sat 07:00 | 2026-05-16 (토) 07:00 |
+| Sector | sun 03:00 | 2026-05-17 (일) 03:00 |
+| Monthly | 매월 1일 03:00 | 2026-06-01 (월) 03:00 |
+| Yearly | 매년 1월 5일 03:00 | 2027-01-05 (화) 03:00 |
+
+base_date = `previous_kst_business_day(today)` → 5-13 06:00 cron 시 base_date = 5-12 mon (오늘) 데이터 fetch.
+
+### 36.5 1주 후 측정 결과 (⏳ 별도 chunk 에서 채움)
+
+목표 측정 시점: **2026-05-19 (mon) 이후**
+
+#### 36.5.1 일간 cron elapsed (placeholder)
+
+| Scheduler | 추정 elapsed | 실측 (1주 후) | 비고 |
+|-----------|-------------|-------------|------|
+| OhlcvDaily | ~35분 (full backfill 34분 + 영숫자 +1.5분) | TBD | § 26.5 / § 34.6 #1 정정 |
+| DailyFlow | ~10시간 (full backfill 9h 53m) | TBD | § 27.5 |
+| Weekly | ~21분 (영숫자 백필 20m 55s) | TBD | § 34.3 |
+| Sector | ~수 분 | TBD | 단순 sync |
+| StockMaster | ~수 분 | TBD | A3-γ |
+| Fundamental | ~수 분 | TBD | B-γ-2 |
+
+#### 36.5.2 NXT 정상 적재 검증 SQL (placeholder)
+
+```sql
+-- 5-13 mon 첫 발화 이후 7 영업일 NXT 적재 row 분포
+SELECT trading_date, count(*) AS n
+FROM kiwoom.stock_price_nxt
+WHERE trading_date >= DATE '2026-05-13'
+GROUP BY trading_date ORDER BY trading_date;
+```
+
+| trading_date | n | 정상 (~630) 여부 |
+|--------------|---|-----------------|
+| 2026-05-13 (수) | TBD | TBD |
+| 2026-05-14 (목) | TBD | TBD |
+| 2026-05-15 (금) | TBD | TBD |
+| 2026-05-18 (월) | TBD | TBD |
+| 2026-05-19 (화) | TBD | TBD |
+
+> § 35 가 정정한 NXT 정산 마진 (10시간) 검증 — 모든 영업일 ~630 균일이면 § 35 결정 성공. 5-11 같은 12% anomaly 재발 없어야.
+
+#### 36.5.3 failed / 알람 발생
+
+- logger.error (실패율 > 10%) 발생 수: TBD
+- logger.warning (failed > 0 + ratio <= 10%) 발생 수: TBD
+- 가장 흔한 error_class: TBD
+
+#### 36.5.4 의도하지 않은 부작용
+
+- 운영 cron 시점이 정규 사용자 시간 (오전 9시 이전) 과 겹쳐 사용자 분석 차질: TBD
+- KRX rate limit (429) 누적: TBD
+- DB I/O 부하: TBD
+
+### 36.6 모니터링 가이드 (사용자 수행)
+
+- logger 콘솔 watch — `"sync cron 시작"` / `"sync 완료"` / `"실패율 과다"` / `"콜백 예외"` 키워드
+- 매 영업일 06:00 / 06:30 cron 발화 후 stdout 확인 — total/krx/nxt/failed 4개 카운트
+- alarm threshold: logger.error 발생 즉시 oncall 통지
+
+### 36.7 알려진 follow-up
+
+| # | 항목 | 출처 | 결정 시점 |
+|---|------|------|-----------|
+| 1 | 5-11 NXT 74 rows 보완 | § 35.8 | 사용자 수동 — 본 chunk 와 별개 |
+| 2 | 공휴일 calendar 도입 | § 35.3 | 별도 chunk 가능 — 본 chunk 후 1주 모니터에서 빈 응답 패턴 관찰 후 |
+| 3 | NXT scheduler 분리 (KRX + NXT 시간 다른 운영) | § 35.2 (옵션 C 미채택) | 운영 데이터 축적 후 별도 결정 |
+
+### 36.8 다음 chunk
+
+1. **(별도 chunk) 1주 후 § 36.5 측정 결과 채움** — 2026-05-19 (mon) 이후 사용자 요청 시
+2. **5-11 NXT 보완 백필** — 사용자 수동 (§ 35.8)
+3. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉
+
+### 36.9 Phase C 완료 선언 (조건부)
+
+본 chunk + 1주 후 측정 chunk 종료 시 Phase C 100% 완료. 25 endpoint 중 11개 적재 + 8 cron 정상 운영 + historical 3년 완성. 다음 wave = Phase D (분봉/업종일봉).
