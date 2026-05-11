@@ -213,48 +213,6 @@ def test_summary_to_exit_code_partial_failure() -> None:
     assert summary_to_exit_code(result) == 1
 
 
-# ---------- 6. resume — DB max(trading_date) ----------
-
-
-@pytest.mark.asyncio
-async def test_should_skip_resume_when_max_date_ge_end() -> None:
-    """resume + max(trading_date) >= end_date → skip."""
-    from scripts.backfill_ohlcv import should_skip_resume
-
-    skip = should_skip_resume(
-        max_trading_date=date(2025, 9, 8),
-        end_date=date(2025, 9, 8),
-    )
-    assert skip is True
-
-    skip = should_skip_resume(
-        max_trading_date=date(2025, 9, 9),
-        end_date=date(2025, 9, 8),
-    )
-    assert skip is True
-
-
-@pytest.mark.asyncio
-async def test_should_not_skip_resume_when_max_date_lt_end() -> None:
-    """resume + max(trading_date) < end_date → 진행."""
-    from scripts.backfill_ohlcv import should_skip_resume
-
-    skip = should_skip_resume(
-        max_trading_date=date(2025, 8, 1),
-        end_date=date(2025, 9, 8),
-    )
-    assert skip is False
-
-
-@pytest.mark.asyncio
-async def test_should_not_skip_resume_when_no_data() -> None:
-    """resume + max(trading_date) None (적재 0) → 진행."""
-    from scripts.backfill_ohlcv import should_skip_resume
-
-    skip = should_skip_resume(max_trading_date=None, end_date=date(2025, 9, 8))
-    assert skip is False
-
-
 # ---------- 7. dry_run 출력 ----------
 
 
@@ -293,21 +251,14 @@ async def test_main_returns_2_when_invalid_args() -> None:
     assert exc_info.value.code == 2
 
 
-# ---------- 9. resume — DB 통합 ----------
-
-
-@pytest.mark.asyncio
-async def test_compute_resume_remaining_codes_filters_already_loaded() -> None:
-    """compute_resume_remaining_codes — 적재 완료 종목 skip + 미완료만 반환."""
-    from collections.abc import AsyncIterator
-    from contextlib import asynccontextmanager
-
-    # 별도 fixture 로 하기보다 inline — engine fixture 활용
-    @asynccontextmanager
-    async def _no_op() -> AsyncIterator[None]:
-        yield None
-
-    # engine fixture 직접 import 어렵 — pytest fixture 통해 호출되도록 별도 함수로 위임
+# ---------- 9. resume — gap detection (R2 신규) ----------
+#
+# 시나리오: 영업일 calendar = SELECT DISTINCT trading_date FROM <KRX 영속화 테이블>
+# (전체 종목 union) — 시장 전체에서 거래된 일자 = 영업일. candidate 의 trading_date set
+# 와 영업일 set 의 차집합이 ≥ 1 이면 진행 (gap 있음). = 0 이면 skip (완전 적재).
+#
+# R1 의 should_skip_resume(max_trading_date, end_date) 는 폐기 — 부분 적재 (gap) 종목을
+# 잘못 skip 함. 본 R2 는 일자별 검사로 정확도 향상.
 
 
 @pytest.mark.asyncio
@@ -324,6 +275,7 @@ async def test_compute_resume_remaining_codes_empty_returns_empty(
         remaining = await compute_resume_remaining_codes(
             session,
             period="daily",
+            start_date=date(2025, 9, 1),
             end_date=date(2025, 9, 8),
             candidate_codes=[],
         )
@@ -331,10 +283,13 @@ async def test_compute_resume_remaining_codes_empty_returns_empty(
 
 
 @pytest.mark.asyncio
-async def test_compute_resume_remaining_codes_no_data_returns_all(
+async def test_compute_resume_remaining_codes_no_business_days_includes_all(
     engine: Any,
 ) -> None:
-    """적재 0 → 모든 후보 진행 대상."""
+    """영업일 set = ∅ (DB 0 rows in 범위) → 모든 candidate 진행 (가드 H-8).
+
+    첫 적재 시나리오 — 영업일 calendar 가 비면 차집합 검사가 무의미 → 진행 fallback.
+    """
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -350,17 +305,135 @@ async def test_compute_resume_remaining_codes_no_data_returns_all(
                 "ON CONFLICT DO NOTHING"
             )
         )
-    async with factory() as session:
-        remaining = await compute_resume_remaining_codes(
-            session,
-            period="daily",
-            end_date=date(2025, 9, 8),
-            candidate_codes=["TST701", "TST702"],
-        )
-        assert sorted(remaining) == ["TST701", "TST702"]
-    # cleanup
+    try:
+        async with factory() as session:
+            remaining = await compute_resume_remaining_codes(
+                session,
+                period="daily",
+                start_date=date(2025, 9, 1),
+                end_date=date(2025, 9, 8),
+                candidate_codes=["TST701", "TST702"],
+            )
+            assert sorted(remaining) == ["TST701", "TST702"]
+    finally:
+        async with factory() as session, session.begin():
+            await session.execute(
+                text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TST701', 'TST702')")
+            )
+
+
+@pytest.mark.asyncio
+async def test_compute_resume_remaining_codes_skips_fully_loaded(
+    engine: Any,
+) -> None:
+    """영업일 set = 종목 trading_dates set → skip (완전 적재)."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from scripts.backfill_ohlcv import compute_resume_remaining_codes
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    business_days = [date(2025, 9, 1), date(2025, 9, 2), date(2025, 9, 3)]
     async with factory() as session, session.begin():
-        await session.execute(text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TST701', 'TST702')"))
+        await session.execute(
+            text(
+                "INSERT INTO kiwoom.stock (id, stock_code, stock_name, market_code) "
+                "VALUES (9701, 'TST801', 'a', '0'), (9702, 'TST802', 'b', '0') "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        # 두 종목 모두 영업일 3일 모두 적재 — 영업일 calendar = {9/1, 9/2, 9/3} 형성
+        for code_id in (9701, 9702):
+            for d in business_days:
+                await session.execute(
+                    text(
+                        "INSERT INTO kiwoom.stock_price_krx (stock_id, trading_date, adjusted, fetched_at) "
+                        "VALUES (:sid, :td, false, now()) ON CONFLICT DO NOTHING"
+                    ).bindparams(sid=code_id, td=d)
+                )
+    try:
+        async with factory() as session:
+            remaining = await compute_resume_remaining_codes(
+                session,
+                period="daily",
+                start_date=date(2025, 9, 1),
+                end_date=date(2025, 9, 3),
+                candidate_codes=["TST801", "TST802"],
+            )
+            assert remaining == []
+    finally:
+        async with factory() as session, session.begin():
+            await session.execute(
+                text("DELETE FROM kiwoom.stock_price_krx WHERE stock_id IN (9701, 9702)")
+            )
+            await session.execute(
+                text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TST801', 'TST802')")
+            )
+
+
+@pytest.mark.asyncio
+async def test_compute_resume_remaining_codes_includes_partial_loaded_with_gap(
+    engine: Any,
+) -> None:
+    """부분 적재 (gap ≥ 1) 종목은 진행 — R2 gap detection 핵심.
+
+    시나리오: 영업일 set = {9/1, 9/2, 9/3} (시장 전체 union).
+    종목 A = {9/1, 9/2, 9/3} (완전 적재) → skip
+    종목 B = {9/1, 9/3} (9/2 missing — gap) → 진행
+    종목 C = ∅ (적재 0) → 진행
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from scripts.backfill_ohlcv import compute_resume_remaining_codes
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    async with factory() as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO kiwoom.stock (id, stock_code, stock_name, market_code) "
+                "VALUES (9801, 'TSTA01', 'a', '0'), "
+                "(9802, 'TSTB01', 'b', '0'), "
+                "(9803, 'TSTC01', 'c', '0') "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        # 종목 A — 3일 모두 적재 (영업일 calendar 형성에도 기여)
+        for d in (date(2025, 9, 1), date(2025, 9, 2), date(2025, 9, 3)):
+            await session.execute(
+                text(
+                    "INSERT INTO kiwoom.stock_price_krx (stock_id, trading_date, adjusted, fetched_at) "
+                    "VALUES (9801, :td, false, now()) ON CONFLICT DO NOTHING"
+                ).bindparams(td=d)
+            )
+        # 종목 B — 9/1, 9/3 만 (9/2 gap)
+        for d in (date(2025, 9, 1), date(2025, 9, 3)):
+            await session.execute(
+                text(
+                    "INSERT INTO kiwoom.stock_price_krx (stock_id, trading_date, adjusted, fetched_at) "
+                    "VALUES (9802, :td, false, now()) ON CONFLICT DO NOTHING"
+                ).bindparams(td=d)
+            )
+        # 종목 C — 적재 0
+    try:
+        async with factory() as session:
+            remaining = await compute_resume_remaining_codes(
+                session,
+                period="daily",
+                start_date=date(2025, 9, 1),
+                end_date=date(2025, 9, 3),
+                candidate_codes=["TSTA01", "TSTB01", "TSTC01"],
+            )
+            # A 는 완전 적재 → skip / B 는 gap → 진행 / C 는 적재 0 → 진행
+            assert sorted(remaining) == ["TSTB01", "TSTC01"]
+    finally:
+        async with factory() as session, session.begin():
+            await session.execute(
+                text("DELETE FROM kiwoom.stock_price_krx WHERE stock_id IN (9801, 9802, 9803)")
+            )
+            await session.execute(
+                text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TSTA01', 'TSTB01', 'TSTC01')")
+            )
 
 
 # ---------- 10. --max-stocks limit (운영 발견 fix) ----------

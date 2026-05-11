@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-11 (Phase C-4 완료 — ka10094 년봉 / Migration 014 / 1035 tests / 11/25 endpoint)
+> **마지막 갱신**: 2026-05-11 (Phase C-R2 완료 — 1R Defer 5건 일괄 정리 / 1037 tests / coverage 81.15%)
 
 ---
 
@@ -12,11 +12,11 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **C-4 — ka10094 년봉 (Migration 014, KRX only NXT skip)** / 1035 tests / ADR § 29 / Phase C chart 종결 |
-| 다음 chunk | **refactor R2** → follow-up F6/F7/F8 → ETF/ETN OHLCV → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
-| 25 Endpoint 진행 | **10 / 25 완료** (40%). CLI 도구 4건 |
-| 누적 chunk | 37 commits (... + flow-resume-eqcol-verify 1) |
-| 테스트 | **1024 cases** (993 → +31: mrkcond +2 / daily_flow_service +5 / backfill_daily_flow_cli +24) |
+| 마지막 완료 chunk | **R2 — 1R Defer 5건 일괄 정리 (L-2 / E-1 / M-3 / E-2 / gap detection)** / 1037 tests / ADR § 30 / coverage 81.15% |
+| 다음 chunk | **follow-up F6/F7/F8** → ETF/ETN OHLCV → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
+| 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 |
+| 누적 chunk | 38 commits (R2 1) |
+| 테스트 | **1037 cases** (1035 → +5 E-1 신규 / +6 gap 신규 / -6 should_skip_resume 폐기 / -3 placeholder 통합 / +2 dispatch yearly = net +4 ※ 통계 1035→1037) |
 | 운영 검증 | ✅ **full 3년 OHLCV 백필 34분 / 4078 호환 / 0 failed**. daily_flow 백필 ⏳ 사용자 실측 대기 |
 
 ---
@@ -111,6 +111,7 @@ P3 (선택):
 | **C-flow-resume-eqcol** | failed 166 NXT resume 재시도 + 컬럼 동일값 검증 (`IS DISTINCT FROM` SQL) | ✅ | resume 166/10/0 / 21m 33s — 최종 DB KRX 4077 + NXT 626 (OHLCV 일치). 컬럼 동일값 확정 (2.88M rows / `credit_diff=0` / `foreign_diff=0`) — Migration 013 chunk 진입 |
 | **C-2δ** | Migration 013 — C/E 중복 2 컬럼 DROP (`credit_balance_rate` / `foreign_weight`). 10 → 8 도메인 | ✅ | 1R PASS (M-1/L-1 fix), **1030 tests** (+4) / ADR § 28 / Verification 가 잡은 2건: VARCHAR(32) revision id truncation + test_008 hard-coded 카운트 |
 | **C-4** | Migration 014 + ka10094 년봉 인프라 + 자동화. KRX only (NXT skip yearly_nxt_disabled). 응답 7 필드 + 매년 1월 5일 03:00 cron. Phase C chart 카테고리 종결 (10/25 → 11/25) | ✅ | **1035 tests** (+5) / ADR § 29 / Verification 가 잡은 5건: revision id 22 chars 사전 안전 / mypy invariant list / helper signature union / stale C-3α 가드 6건 / env alias 누락 2건 |
+| **R2** | 1R Defer 5건 일괄 정리 — L-2 stale docstring 5곳 (C-4 가 YEARLY 활성 → 핸들러 추가 dead branch 라 폐기) / E-1 sync_ohlcv_daily KiwoomError 5종 핸들러 추가 / M-3 `# type: ignore` → `cast()` 2 Repository / E-2 reset_*_factory 7 docstring 정정 / **gap detection** — DB union 영업일 calendar 기반 일자별 차집합 검사 (2 CLI compute_resume_remaining_codes 시그니처 + 로직 변경, should_skip_resume 폐기) | ✅ | **1037 tests** / coverage 81.15% / ADR § 30 / 1R 리뷰 PASS (CRITICAL 0 / HIGH 0 / MEDIUM 3 — M-1/M-2 fix, M-3 정책 동일) / C-4 잔존 stale ruff 4건 함께 fix |
 
 ---
 
@@ -143,13 +144,12 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **refactor R2 (1R Defer 일괄 정리)** | L-2 (NotImplementedError 핸들러 — C-4 이후 일부 잔존?) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 / E-2 / gap detection | refactor 5건 일괄 |
-| 2 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 (OHLCV + daily_flow 통합) | 분석 + 정책 결정 |
-| 3 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
-| 5 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
-| 6 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
-| 7 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
-| **최종** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | **사용자 결정 (2026-05-11): 모든 작업 완료 후 활성**. 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow + 통합 1주 모니터 → ADR § 26.5 + § 28 후속 측정 | env 변경 + 1주 |
+| **1** | **follow-up F6/F7/F8 일괄 분석** | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 (OHLCV + daily_flow 통합) | 분석 + 정책 결정 / 0.5일 |
+| 2 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
+| 3 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
+| 4 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
+| 5 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
+| **최종** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | **사용자 결정 (2026-05-11): 모든 작업 완료 후 활성**. 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow + 통합 1주 모니터 → ADR § 26.5 + § 28 + § 29 + § 30 후속 측정 | env 변경 + 1주 |
 | ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration + ALTER COLUMN |
 
 ---
@@ -197,6 +197,8 @@ P3 (선택):
 - **C-admin-CLI** — register_credential.py + sync_stock_master.py + 11 테스트 (ka10099 진입 도구) `12e09c2`
 - **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `e9ab050`
 - **C-운영검증-1** — ka10099 첫 실 호출 + 2 차단 버그 fix (next-key 빈값 + upsert_many chunk 분할) + admin 도구 보강 (dotenv autoload + KIWOOM_API_KEY fallback + 마스터키 가이드 신규) `<this commit>`
+- **C-4** — ka10094 년봉 OHLCV (Migration 014 / KRX only NXT skip / 응답 7 필드 / 매년 1월 5일 03:00 cron) `b75334c`
+- **R2** — 1R Defer 5건 일괄 정리 (L-2 stale docstring 5 / E-1 sync_ohlcv_daily KiwoomError 5종 / M-3 cast 2 Repository / E-2 reset_*_factory 7 docstring / gap detection 2 CLI 일자별 차집합) `<this commit>`
 
 ---
 

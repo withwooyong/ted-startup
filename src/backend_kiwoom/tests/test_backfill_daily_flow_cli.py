@@ -216,49 +216,6 @@ def test_summary_to_exit_code_partial_failure() -> None:
     assert summary_to_exit_code(result) == 1
 
 
-# ---------- 5. resume — DB max(trading_date) ----------
-
-
-def test_should_skip_resume_when_max_date_ge_end() -> None:
-    """resume + max(trading_date) >= end_date → skip."""
-    from scripts.backfill_daily_flow import should_skip_resume
-
-    assert (
-        should_skip_resume(
-            max_trading_date=date(2025, 9, 8),
-            end_date=date(2025, 9, 8),
-        )
-        is True
-    )
-    assert (
-        should_skip_resume(
-            max_trading_date=date(2025, 9, 9),
-            end_date=date(2025, 9, 8),
-        )
-        is True
-    )
-
-
-def test_should_not_skip_resume_when_max_date_lt_end() -> None:
-    """resume + max(trading_date) < end_date → 진행."""
-    from scripts.backfill_daily_flow import should_skip_resume
-
-    assert (
-        should_skip_resume(
-            max_trading_date=date(2025, 8, 1),
-            end_date=date(2025, 9, 8),
-        )
-        is False
-    )
-
-
-def test_should_not_skip_resume_when_no_data() -> None:
-    """resume + max(trading_date) None (적재 0) → 진행."""
-    from scripts.backfill_daily_flow import should_skip_resume
-
-    assert should_skip_resume(max_trading_date=None, end_date=date(2025, 9, 8)) is False
-
-
 # ---------- 6. dry_run 출력 ----------
 
 
@@ -295,7 +252,14 @@ async def test_main_returns_2_when_invalid_args() -> None:
     assert exc_info.value.code == 2
 
 
-# ---------- 8. resume — DB 통합 ----------
+# ---------- 8. resume — gap detection (R2 신규) ----------
+#
+# 시나리오: 영업일 calendar = SELECT DISTINCT trading_date FROM kiwoom.stock_daily_flow
+# (전체 종목 union, exchange='KRX'). candidate 의 trading_date set 와 영업일 set 의
+# 차집합이 ≥ 1 이면 진행 (gap 있음). = 0 이면 skip (완전 적재).
+#
+# R1 의 should_skip_resume(max_trading_date, end_date) 는 폐기 — 부분 적재 (gap) 종목을
+# 잘못 skip 함. 본 R2 는 일자별 검사로 정확도 향상.
 
 
 @pytest.mark.asyncio
@@ -311,6 +275,7 @@ async def test_compute_resume_remaining_codes_empty_returns_empty(
     async with factory() as session:
         remaining = await compute_resume_remaining_codes(
             session,
+            start_date=date(2025, 9, 1),
             end_date=date(2025, 9, 8),
             candidate_codes=[],
         )
@@ -318,10 +283,10 @@ async def test_compute_resume_remaining_codes_empty_returns_empty(
 
 
 @pytest.mark.asyncio
-async def test_compute_resume_remaining_codes_no_data_returns_all(
+async def test_compute_resume_remaining_codes_no_business_days_includes_all(
     engine: Any,
 ) -> None:
-    """적재 0 → 모든 후보 진행 대상 (stock_daily_flow 테이블 비어있음)."""
+    """영업일 set = ∅ (DB 0 rows in 범위) → 모든 candidate 진행 (가드 H-8)."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -340,6 +305,7 @@ async def test_compute_resume_remaining_codes_no_data_returns_all(
         async with factory() as session:
             remaining = await compute_resume_remaining_codes(
                 session,
+                start_date=date(2025, 9, 1),
                 end_date=date(2025, 9, 8),
                 candidate_codes=["TF701", "TF702"],
             )
@@ -348,6 +314,115 @@ async def test_compute_resume_remaining_codes_no_data_returns_all(
         async with factory() as session, session.begin():
             await session.execute(
                 text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TF701', 'TF702')")
+            )
+
+
+@pytest.mark.asyncio
+async def test_compute_resume_remaining_codes_skips_fully_loaded(
+    engine: Any,
+) -> None:
+    """영업일 set = 종목 trading_dates set → skip (완전 적재). KRX 만 본다."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from scripts.backfill_daily_flow import compute_resume_remaining_codes
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    business_days = [date(2025, 9, 1), date(2025, 9, 2), date(2025, 9, 3)]
+    async with factory() as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO kiwoom.stock (id, stock_code, stock_name, market_code) "
+                "VALUES (8801, 'TFA01', 'a', '0'), (8802, 'TFA02', 'b', '0') "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        for code_id in (8801, 8802):
+            for d in business_days:
+                await session.execute(
+                    text(
+                        "INSERT INTO kiwoom.stock_daily_flow "
+                        "(stock_id, exchange, trading_date, indc_mode, fetched_at) "
+                        "VALUES (:sid, 'KRX', :td, '1', now()) ON CONFLICT DO NOTHING"
+                    ).bindparams(sid=code_id, td=d)
+                )
+    try:
+        async with factory() as session:
+            remaining = await compute_resume_remaining_codes(
+                session,
+                start_date=date(2025, 9, 1),
+                end_date=date(2025, 9, 3),
+                candidate_codes=["TFA01", "TFA02"],
+            )
+            assert remaining == []
+    finally:
+        async with factory() as session, session.begin():
+            await session.execute(
+                text("DELETE FROM kiwoom.stock_daily_flow WHERE stock_id IN (8801, 8802)")
+            )
+            await session.execute(
+                text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TFA01', 'TFA02')")
+            )
+
+
+@pytest.mark.asyncio
+async def test_compute_resume_remaining_codes_includes_partial_loaded_with_gap(
+    engine: Any,
+) -> None:
+    """부분 적재 (gap ≥ 1) 종목 진행 — R2 gap detection 핵심.
+
+    종목 A = 9/1, 9/2, 9/3 (완전) → skip
+    종목 B = 9/1, 9/3 (9/2 gap) → 진행
+    종목 C = ∅ → 진행
+    """
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    from scripts.backfill_daily_flow import compute_resume_remaining_codes
+
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    async with factory() as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO kiwoom.stock (id, stock_code, stock_name, market_code) "
+                "VALUES (8901, 'TFB01', 'a', '0'), "
+                "(8902, 'TFC01', 'b', '0'), "
+                "(8903, 'TFD01', 'c', '0') "
+                "ON CONFLICT DO NOTHING"
+            )
+        )
+        for d in (date(2025, 9, 1), date(2025, 9, 2), date(2025, 9, 3)):
+            await session.execute(
+                text(
+                    "INSERT INTO kiwoom.stock_daily_flow "
+                    "(stock_id, exchange, trading_date, indc_mode, fetched_at) "
+                    "VALUES (8901, 'KRX', :td, '1', now()) ON CONFLICT DO NOTHING"
+                ).bindparams(td=d)
+            )
+        for d in (date(2025, 9, 1), date(2025, 9, 3)):
+            await session.execute(
+                text(
+                    "INSERT INTO kiwoom.stock_daily_flow "
+                    "(stock_id, exchange, trading_date, indc_mode, fetched_at) "
+                    "VALUES (8902, 'KRX', :td, '1', now()) ON CONFLICT DO NOTHING"
+                ).bindparams(td=d)
+            )
+    try:
+        async with factory() as session:
+            remaining = await compute_resume_remaining_codes(
+                session,
+                start_date=date(2025, 9, 1),
+                end_date=date(2025, 9, 3),
+                candidate_codes=["TFB01", "TFC01", "TFD01"],
+            )
+            assert sorted(remaining) == ["TFC01", "TFD01"]
+    finally:
+        async with factory() as session, session.begin():
+            await session.execute(
+                text("DELETE FROM kiwoom.stock_daily_flow WHERE stock_id IN (8901, 8902, 8903)")
+            )
+            await session.execute(
+                text("DELETE FROM kiwoom.stock WHERE stock_code IN ('TFB01', 'TFC01', 'TFD01')")
             )
 
 

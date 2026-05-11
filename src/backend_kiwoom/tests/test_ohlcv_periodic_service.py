@@ -51,6 +51,7 @@ from app.adapter.out.kiwoom.chart import (
     KiwoomChartClient,
     MonthlyChartRow,
     WeeklyChartRow,
+    YearlyChartRow,
 )
 from app.application.constants import Period
 from app.application.exceptions import StockMasterNotFoundError
@@ -135,10 +136,8 @@ def _make_monthly_row(dt: str = "20250901", cur_prc: str = "78900") -> MonthlyCh
     )
 
 
-def _make_yearly_row(dt: str = "20250102", cur_prc: str = "78900") -> "YearlyChartRow":
+def _make_yearly_row(dt: str = "20250102", cur_prc: str = "78900") -> YearlyChartRow:
     """ka10094 응답 7 필드만 (pred_pre/pred_pre_sig/trde_tern_rt 없음, C-4)."""
-    from app.adapter.out.kiwoom.chart import YearlyChartRow
-
     return YearlyChartRow(
         cur_prc=cur_prc,
         trde_qty="215040968",
@@ -154,7 +153,7 @@ def _make_chart_client(
     *,
     weekly_rows: list[WeeklyChartRow] | None = None,
     monthly_rows: list[MonthlyChartRow] | None = None,
-    yearly_rows: list["YearlyChartRow"] | None = None,
+    yearly_rows: list[YearlyChartRow] | None = None,
     weekly_exc: Exception | None = None,
     monthly_exc: Exception | None = None,
     yearly_exc: Exception | None = None,

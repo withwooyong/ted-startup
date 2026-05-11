@@ -25,7 +25,7 @@ OHLCV 백필 (`backfill_ohlcv.py`) 의 발견된 운영 차단 fix 3건 (since_d
     # AMOUNT 모드 (백만원 단위 — 디폴트는 QUANTITY)
     python scripts/backfill_daily_flow.py --years 3 --alias prod --indc-mode amount
 
-    # resume — 이미 적재된 종목 (max(trading_date) >= end_date) 은 skip
+    # resume — 영업일 calendar 와 비교해 gap 0 (완전 적재) 인 종목 skip (R2)
     python scripts/backfill_daily_flow.py --years 3 --alias prod --resume
 
 종료 코드:
@@ -138,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="이미 적재된 종목 (max(trading_date) >= end_date) 은 skip",
+        help="영업일 calendar 와 비교해 gap 0 (완전 적재) 인 종목 skip (R2)",
     )
     parser.add_argument(
         "--max-stocks",
@@ -218,67 +218,90 @@ def format_duration(seconds: float) -> str:
 # =============================================================================
 
 
-def should_skip_resume(
-    *,
-    max_trading_date: date | None,
-    end_date: date,
-) -> bool:
-    """resume mode — max(trading_date) >= end_date 면 skip.
-
-    max_trading_date None (적재 0) → 진행. 부분 적재는 skip 됨 — gap detection 별도 chunk.
-    OHLCV 백필 헬퍼와 동일 의미.
-    """
-    if max_trading_date is None:
-        return False
-    return max_trading_date >= end_date
-
-
-# daily_flow 영속화 테이블 (resume 시 max(trading_date) 조회용)
+# daily_flow 영속화 테이블 (resume 시 trading_date 조회용)
 _RESUME_TABLE: str = "kiwoom.stock_daily_flow"
 
 
 async def compute_resume_remaining_codes(
     session: AsyncSession,
     *,
+    start_date: date,
     end_date: date,
     candidate_codes: list[str],
 ) -> list[str]:
-    """resume mode — candidate_codes 중 max(trading_date) < end_date 인 종목만 반환.
+    """resume mode (R2 gap detection) — candidate_codes 중 [start_date, end_date] 의 영업일
+    set 와 비교해 gap 1+ 또는 적재 0 인 종목만 반환.
 
-    stock_daily_flow 의 max(trading_date) 만 본다. NXT 는 KRX 와 일자 거의 동일하므로 KRX
-    기준으로 충분 (정확한 NXT-only resume 은 별도 chunk).
+    영업일 calendar = SELECT DISTINCT trading_date FROM kiwoom.stock_daily_flow (exchange='KRX')
+    WHERE trading_date BETWEEN start AND end. NXT 는 KRX 와 일자 거의 동일하므로 KRX 기준.
+
+    가드 (H-8): 영업일 set = ∅ → 모든 candidate 진행.
+
+    R1 시점에는 `max(trading_date) >= end_date` 만 검사 — 부분 적재 (gap) 종목을 잘못 skip
+    하던 한계를 R2 에서 일자별 차집합으로 정밀화.
 
     Returns:
-        진행 대상 종목 코드 list. 모두 적재 완료면 빈 list.
+        진행 대상 종목 코드 list. 모두 완전 적재면 빈 list.
     """
     from sqlalchemy import text
 
-    sql = text(
+    # 1. 영업일 calendar — KRX 만 (NXT 는 KRX 와 일자 거의 동일)
+    business_days_sql = text(
         f"""
-        SELECT s.stock_code, MAX(p.trading_date) AS max_dt
-        FROM kiwoom.stock s
-        LEFT JOIN {_RESUME_TABLE} p ON p.stock_id = s.id
-        WHERE s.stock_code = ANY(:codes)
-        GROUP BY s.stock_code
+        SELECT DISTINCT trading_date
+        FROM {_RESUME_TABLE}
+        WHERE exchange = 'KRX' AND trading_date BETWEEN :start AND :end
         """
     )
-    result = await session.execute(sql.bindparams(codes=list(candidate_codes)))
-    max_by_code = {row[0]: row[1] for row in result.fetchall()}
+    bd_result = await session.execute(
+        business_days_sql.bindparams(start=start_date, end=end_date)
+    )
+    business_days: set[date] = {row[0] for row in bd_result.fetchall()}
+
+    if not business_days:
+        logger.info(
+            "[resume] 영업일 calendar 비어있음 (start=%s end=%s) — %d 종목 모두 진행",
+            start_date,
+            end_date,
+            len(candidate_codes),
+        )
+        return list(candidate_codes)
+
+    # 2. 종목별 trading_date set (KRX 만)
+    per_stock_sql = text(
+        f"""
+        SELECT s.stock_code, p.trading_date
+        FROM kiwoom.stock s
+        LEFT JOIN {_RESUME_TABLE} p ON p.stock_id = s.id
+            AND p.exchange = 'KRX'
+            AND p.trading_date BETWEEN :start AND :end
+        WHERE s.stock_code = ANY(:codes)
+        """
+    )
+    ps_result = await session.execute(
+        per_stock_sql.bindparams(codes=list(candidate_codes), start=start_date, end=end_date)
+    )
+    loaded_by_code: dict[str, set[date]] = {code: set() for code in candidate_codes}
+    for row in ps_result.fetchall():
+        code, td = row[0], row[1]
+        if td is not None:
+            loaded_by_code[code].add(td)
 
     remaining: list[str] = []
     skipped: list[str] = []
     for code in candidate_codes:
-        max_dt = max_by_code.get(code)
-        if should_skip_resume(max_trading_date=max_dt, end_date=end_date):
-            skipped.append(code)
-        else:
+        loaded = loaded_by_code.get(code, set())
+        gap = business_days - loaded
+        if gap:
             remaining.append(code)
+        else:
+            skipped.append(code)
 
     if skipped:
         logger.info(
-            "[resume] %d 종목 skip (max(trading_date) >= %s) — sample %s",
+            "[resume] %d 종목 skip (gap 0 — 영업일 %d 모두 적재) — sample %s",
             len(skipped),
-            end_date,
+            len(business_days),
             skipped[:5],
         )
     return remaining
@@ -527,6 +550,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                 if args.resume:
                     explicit_stock_codes = await compute_resume_remaining_codes(
                         session,
+                        start_date=start_date,
                         end_date=end_date,
                         candidate_codes=candidate_codes,
                     )
@@ -539,7 +563,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
 
     if active_count == 0:
         if args.resume:
-            logger.info("[resume] 모든 종목 이미 적재됨 (max(trading_date) >= %s)", end_date)
+            logger.info("[resume] 모든 종목 완전 적재 (gap 0, %s ~ %s)", start_date, end_date)
         else:
             logger.warning("active stock 0 — 종료")
         return 0

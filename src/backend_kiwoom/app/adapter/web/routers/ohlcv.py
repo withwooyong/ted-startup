@@ -147,10 +147,11 @@ async def sync_ohlcv_daily(
 
     per-(stock,exchange) try/except — 부분 실패 허용.
 
-    예외 매핑 (B-γ-2 패턴 일관):
+    예외 매핑 (B-γ-2 / refresh / _do_sync 패턴 일관, R2 E-1):
     - alias 미등록 → 404 / 비활성 → 400 / 한도 초과 → 503
     - base_date 범위 외 (ValueError) → 400
-    - 키움 호출 실패는 종목별로 errors 격리 — 200 반환
+    - 종목별 키움 호출 실패 → errors 격리 (200 반환)
+    - factory(alias) 진입 시점 / per-stock 우회 KiwoomError → 400/503/502 명시 매핑
     """
     try:
         async with factory(alias) as use_case:
@@ -178,6 +179,37 @@ async def sync_ohlcv_daily(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
+        ) from None
+    except KiwoomBusinessError as exc:
+        # R2 E-1 — factory(alias) 진입 시점 KiwoomError 누설 차단. message echo 차단.
+        logger.warning(
+            "ka10081 sync business error api_id=%s return_code=%d msg=%s",
+            exc.api_id,
+            exc.return_code,
+            exc.message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"return_code": exc.return_code, "error": "KiwoomBusinessError"},
+        ) from None
+    except KiwoomCredentialRejectedError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="키움 자격증명 거부") from None
+    except KiwoomRateLimitedError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="키움 RPS 초과 — 잠시 후 재시도",
+        ) from None
+    except (KiwoomUpstreamError, KiwoomResponseValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="키움 응답 오류",
+        ) from None
+    except KiwoomError as exc:
+        # B-β M-5 / _do_sync 패턴 — fallback (신규 KiwoomError subclass 안전망)
+        logger.warning("ka10081 sync fallback %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="키움 호출 실패",
         ) from None
 
     return OhlcvSyncResultOut(

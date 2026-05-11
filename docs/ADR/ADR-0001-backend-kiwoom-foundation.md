@@ -1950,3 +1950,70 @@ DailyFlowRowOut 패턴과 동일 — `POST /api/kiwoom/ohlcv/yearly/sync` 와 `P
 5. **Phase E/F/G** (공매도/대차/순위/투자자별 wave)
 6. **(최종) scheduler_enabled 일괄 활성 + 1주 모니터** — 사용자 결정 (모든 작업 완료 후)
 7. **KOSCOM cross-check 수동** — 가설 B 최종 확정
+
+
+## 30. Phase C-R2 — 1R Defer 5건 일괄 정리 (2026-05-11)
+
+### 30.1 결정
+
+ADR § 24.5 + § 25.6 의 1R Defer 5건 (L-2 / E-1 / M-3 / E-2 / gap detection) 일괄 정리. 외부 API contract 무변. C-4 (ka10094 / `b75334c`) 가 L-2 의 전제 조건을 변경 — YEARLY 활성화 → "_do_sync NotImplementedError 핸들러 추가" 가 dead branch 라 stale docstring 정리로 축소 (사용자 결정 옵션 A).
+
+### 30.2 핵심 설계 결정
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | L-2 처리 방향 | **옵션 A — 폐기 + stale docstring 5곳 정리**. C-4 가 YEARLY 활성화 → 핸들러 추가는 dead branch. `_ingest_one:392` 의 dead branch 가드는 defense-in-depth 로 유지 (Period enum 확장 시 fail-fast). 사용자 결정 (2026-05-11) |
+| 2 | E-1 sync KiwoomError 매핑 | **5종 핸들러 추가** — KiwoomBusinessError → 400 (return_code/message echo 차단) / KiwoomCredentialRejected → 400 / KiwoomRateLimited → **503** (429 가 아님 — refresh / _do_sync 와 일관) / Upstream + ResponseValidation → 502 / KiwoomError fallback → 502 (logger.warning). 동일 모듈 refresh_ohlcv_daily 와 동일 순서 (subclass first) |
+| 3 | M-3 cast vs type ignore | **typing.cast 채택** — `cast(list[T], list(result.scalars().all()))`. runtime 무영향 + mypy strict 안전. Union 타입은 ORM 모델 그대로 명시 (KRX \| NXT 또는 WKRX \| ... \| YNXT 6-way) |
+| 4 | E-2 reset_token_manager 정직성 | **"테스트 전용" 유지** — main.py:456-462 의 lifespan teardown 이 호출하지 않음. 7개 reset_*_factory 만 "lifespan teardown + 테스트" 로 정정. 1R 2b M4 fail-closed 정책 명시 |
+| 5 | gap detection 영업일 source | **DB 내 `SELECT DISTINCT trading_date` union** (사용자 결정) — 외부 패키지 의존성 0. 시장 전체 종목이 한 번이라도 거래한 일자 = 영업일. 신규 Stock (적재 0) 도 자연스럽게 비교. period 별 KRX 영속화 테이블 (daily/weekly/monthly/yearly) 또는 stock_daily_flow (exchange='KRX') 에서 union. 영업일 set = ∅ 가드 (H-8) — 첫 적재 시 모든 candidate 진행 |
+| 6 | gap detection 시그니처 변경 | **start_date 인자 추가 + should_skip_resume 폐기** — `compute_resume_remaining_codes(session, *, period, start_date, end_date, candidate_codes)`. 일자별 차집합으로 부분 적재 (gap) 정확 감지. caller 갱신 (start_date 가 이미 `resolve_date_range` 에서 가용) + argparse help / log message 정정 |
+| 7 | C-4 잔존 stale 함께 정리 | `test_ohlcv_periodic_service.py` 의 `YearlyChartRow` forward ref + 함수 내부 import → 모듈 top-level import + 일반 타입 annotation. ruff UP037/F821 4 errors 해소 (R2 진입 시 발견) |
+
+### 30.3 1차 리뷰 결과 (sonnet, MEDIUM 2 fix + LOW 1 fix → PASS)
+
+| # | 등급 | 이슈 | 처리 |
+|---|------|------|------|
+| H-1 | (false positive) | reset_token_manager docstring | 그대로 유지 (의도된 정직성) |
+| M-1 | MEDIUM | `backfill_ohlcv.py` 의 영업일 SQL 에 exchange 필터 없음 (daily_flow 와 패턴 차이) | 의도 주석 추가 — stock_price_*_krx 테이블은 KRX 전용, exchange 컬럼 자체 없음 |
+| M-2 | MEDIUM | `test_backfill_daily_flow_cli.py` 섹션 5 빈 헤더 (섹션 8 과 어긋남) | 섹션 5 헤더 제거. `test_backfill_ohlcv_cli.py` 도 동일 정정 |
+| M-3 | MEDIUM | sync_ohlcv_daily 의 `detail=str(exc)` ValueError echo (미래 안전성) | 본 chunk 범위 외 — refresh / _do_sync 의 동일 패턴. UseCase 내부 메시지에 외부 입력 무관 (기록만) |
+| L-1 | LOW | `_validate_period` 빈 body — 미래 Period 확장 인지 어려움 | 인라인 주석 추가 — defense-in-depth 가드 위치 명시 |
+| L-2 | LOW | M-3 cast 6-way Union | 이슈 없음. 명시성 우월 |
+| L-3 | LOW | should_skip_resume 폐기 처리 | PASS — 주석만 남고 import/호출 없음 |
+
+→ M-1 + M-2 + L-1 즉시 적용. CRITICAL/HIGH 0건. 자동 분류 = refactor → 2b 적대적 / 3-4 보안 / 4 E2E 자동 생략.
+
+### 30.4 결과
+
+- **테스트**: 1035 → **1037 cases** (+5 E-1 / +6 gap 신규 / -6 should_skip_resume 폐기 / -3 placeholder 통합 / +2 dispatch yearly 영향 = net +2)
+- **mypy --strict**: 78 source files / 0 errors
+- **ruff check + format**: All passed (C-4 잔존 stale 4건 fix 포함)
+- **coverage**: 81.15% (목표 80%+ 유지)
+- **수정 파일 (코드)**: app/application/service/ohlcv_periodic_service.py (L-2) / app/adapter/web/routers/ohlcv_periodic.py (L-2) / app/adapter/web/routers/ohlcv.py (E-1) / app/adapter/out/persistence/repositories/stock_price.py (M-3) / app/adapter/out/persistence/repositories/stock_price_periodic.py (M-3) / app/adapter/web/_deps.py (E-2) / scripts/backfill_ohlcv.py (gap) / scripts/backfill_daily_flow.py (gap) — 8 파일
+- **수정 파일 (테스트)**: tests/test_ohlcv_router.py (E-1 5 신규) / tests/test_backfill_ohlcv_cli.py (gap 3 신규 + 폐기 4) / tests/test_backfill_daily_flow_cli.py (gap 3 신규 + 폐기 3) / tests/test_ohlcv_periodic_service.py (C-4 잔존 fix) — 4 파일
+- **외부 API contract**: 무변. E-1 핸들러 추가는 미보호 5xx → 명시 매핑 (400/503/502) 으로 의도된 강화 (운영 알람 임계가 5xx 기반이면 KiwoomBusinessError → 400 누락 가능, 운영 공유 권고)
+
+### 30.5 ADR § 24.5 / § 25.6 Defer 해소 매핑
+
+| 출처 § | 항목 | 해소 |
+|--------|------|------|
+| § 24.5 | L-2 `_do_sync` / `_do_refresh` 에 `NotImplementedError → 501` 핸들러 | ✅ 폐기 (C-4 가 YEARLY 활성 → dead branch). stale docstring 5곳 정리 |
+| § 24.5 | E-1 ka10081 `sync_ohlcv_daily` KiwoomError 핸들러 미등록 | ✅ 5종 핸들러 추가 (refresh / _do_sync 일관) |
+| § 24.5 | E-2 `_deps.py` reset_ 함수 docstring "테스트 전용" | ✅ 7 함수 정정 (lifespan teardown + 테스트). reset_token_manager 는 정직성 유지 |
+| § 23.6 | M-3 `# type: ignore[arg-type]` vs `cast()` | ✅ 2 Repository typing.cast 적용 |
+| § 25.6 | gap detection (resume 정확도) | ✅ 2 CLI compute_resume_remaining_codes 일자별 차집합 검사 (DB union 영업일) |
+
+### 30.6 운영 영향 (회귀 위험)
+
+- **운영 호출 (`/ohlcv/daily/sync`) 의 status code 변화** — 본 chunk 전 키움 호출 실패 시 FastAPI 디폴트 500. 본 chunk 후 명시 매핑 (400/503/502). 운영 알람 임계가 5xx 기반이면 KiwoomBusinessError (→400) 가 알람에서 누락될 수 있음. 운영팀 공유 권고
+- **CLI `--resume` 동작 변경** — 부분 적재 (gap) 종목이 R1 에서는 skip 되던 것이 R2 에서는 진행. 운영팀이 R1 동작을 전제로 한 백필 스크립트가 있으면 영향. 사용자 결정 (디폴트 동작 변경 — 정확도 향상)
+
+### 30.7 다음 chunk 후보
+
+1. **follow-up F6/F7/F8 + daily_flow 빈 응답 1건** (LOW / 0.5일)
+2. **ETF/ETN OHLCV 별도 endpoint** (옵션 c)
+3. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉 (대용량 파티션 결정 선행)
+4. **Phase E/F/G** (공매도/대차/순위/투자자별 wave)
+5. **(최종) scheduler_enabled 일괄 활성 + 1주 모니터** — 사용자 결정 (모든 작업 완료 후)
+6. **KOSCOM cross-check 수동** — 가설 B 최종 확정

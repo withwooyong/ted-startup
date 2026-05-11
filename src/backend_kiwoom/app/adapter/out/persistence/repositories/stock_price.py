@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -138,4 +138,5 @@ class StockPriceRepository:
             .order_by(model.trading_date.asc())
         )
         result = await self._session.execute(stmt)
-        return list(result.scalars().all())  # type: ignore[arg-type]
+        # R2 M-3 — runtime 무영향 cast (model 은 KRX/NXT 한 가지로 분기됨)
+        return cast(list[StockPriceKrx | StockPriceNxt], list(result.scalars().all()))

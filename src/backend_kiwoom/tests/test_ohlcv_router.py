@@ -205,6 +205,85 @@ async def test_sync_maps_value_error_to_400(admin_key: str) -> None:
 
 
 # =============================================================================
+# R2 E-1 — sync_ohlcv_daily KiwoomError 핸들러 일관화 (refresh / _do_sync 패턴)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_sync_maps_business_error_to_400(admin_key: str) -> None:
+    """KiwoomBusinessError → 400. message echo 차단 (refresh / _do_sync 패턴 일관)."""
+    uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
+    uc.execute = AsyncMock(
+        side_effect=KiwoomBusinessError(api_id="ka10081", return_code=1, message="존재하지 않음")
+    )
+    app = _make_app(_stub_factory(uc))
+
+    async with _client(app) as cl:
+        resp = await cl.post(
+            "/api/kiwoom/ohlcv/daily/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+    assert resp.status_code == 400
+    assert "존재하지 않음" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_sync_maps_credential_to_400(admin_key: str) -> None:
+    uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
+    uc.execute = AsyncMock(side_effect=KiwoomCredentialRejectedError("401"))
+    app = _make_app(_stub_factory(uc))
+
+    async with _client(app) as cl:
+        resp = await cl.post(
+            "/api/kiwoom/ohlcv/daily/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_sync_maps_rate_limit_to_503(admin_key: str) -> None:
+    uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
+    uc.execute = AsyncMock(side_effect=KiwoomRateLimitedError("429"))
+    app = _make_app(_stub_factory(uc))
+
+    async with _client(app) as cl:
+        resp = await cl.post(
+            "/api/kiwoom/ohlcv/daily/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_sync_maps_upstream_to_502(admin_key: str) -> None:
+    uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
+    uc.execute = AsyncMock(side_effect=KiwoomUpstreamError("5xx"))
+    app = _make_app(_stub_factory(uc))
+
+    async with _client(app) as cl:
+        resp = await cl.post(
+            "/api/kiwoom/ohlcv/daily/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+    assert resp.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_sync_maps_validation_to_502(admin_key: str) -> None:
+    uc = AsyncMock(spec=IngestDailyOhlcvUseCase)
+    uc.execute = AsyncMock(side_effect=KiwoomResponseValidationError("Pydantic 위반"))
+    app = _make_app(_stub_factory(uc))
+
+    async with _client(app) as cl:
+        resp = await cl.post(
+            "/api/kiwoom/ohlcv/daily/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+    assert resp.status_code == 502
+
+
+# =============================================================================
 # POST /stocks/{code}/ohlcv/daily/refresh — admin
 # =============================================================================
 

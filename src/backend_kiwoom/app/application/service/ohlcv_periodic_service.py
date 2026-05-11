@@ -5,8 +5,8 @@
 ka10081 (IngestDailyOhlcvUseCase) ~95% 복제 + period dispatch:
 - WEEKLY → KiwoomChartClient.fetch_weekly + StockPricePeriodicRepository(period=WEEKLY)
 - MONTHLY → fetch_monthly + Repository(period=MONTHLY)
-- YEARLY → NotImplementedError (P2 chunk 진입 시 활성화, H-3)
-- DAILY → ValueError (별도 UseCase 사용 안내, H-3)
+- YEARLY → fetch_yearly + Repository(period=YEARLY, KRX only — NXT skip) — C-4 (b75334c) 활성
+- DAILY → Period enum 미포함 (별도 UseCase 사용)
 
 R1 정착 패턴 5종 전면 적용:
 1. errors: tuple[OhlcvSyncOutcome, ...] (mutable list 노출 금지)
@@ -118,22 +118,20 @@ class IngestPeriodicOhlcvUseCase:
         _skip_base_date_validation: bool = False,
         since_date: date | None = None,
     ) -> OhlcvSyncResult:
-        """active stock 순회 → ka10082/83 호출 → KRX (+ 옵션 NXT) 적재.
+        """active stock 순회 → ka10082/83/94 호출 → KRX (+ 옵션 NXT) 적재.
 
         Parameters:
-            period: WEEKLY 또는 MONTHLY. YEARLY → NotImplementedError. DAILY → ValueError.
+            period: WEEKLY / MONTHLY / YEARLY. YEARLY 는 KRX only (NXT skip).
             base_date: 기준일자. None 이면 KST today.
             only_market_codes: 특정 시장만 sync. None 이면 전체.
             _skip_base_date_validation: True 면 base_date 의 1년 cap 우회 (CLI backfill 전용).
                 미래 가드는 유지. 운영 라우터는 디폴트 False (C-backfill H-1).
-            since_date: ka10082/83 페이지네이션 하한일 (CLI backfill 전용). None 이면 운영
+            since_date: ka10082/83/94 페이지네이션 하한일 (CLI backfill 전용). None 이면 운영
                 cron 기존 동작 — daily 와 동일 fix (max_pages 초과 방어).
 
         Raises:
             ValueError: base_date 가 미래 또는 (skip=False 시) today - 365일 초과 과거 /
                 unknown market_code
-            NotImplementedError: period=YEARLY (P2 chunk 미구현) — `_skip_base_date_validation`
-                와 무관 (period 검증은 항상 수행)
         """
         self._validate_period(period)
         asof = base_date or date.today()
@@ -277,11 +275,10 @@ class IngestPeriodicOhlcvUseCase:
 
         Raises:
             StockMasterNotFoundError: Stock 마스터 미존재 / 비활성 (R1 M-2)
-            ValueError: base_date 범위 외 / period=DAILY
-            NotImplementedError: period=YEARLY
+            ValueError: base_date 범위 외
             KiwoomError: KRX 호출 실패 (라우터 매핑)
 
-        NXT 실패는 격리 (R1 L-5 — execute() 와 일관 partial-failure 모델).
+        NXT 실패는 격리 (R1 L-5 — execute() 와 일관 partial-failure 모델). YEARLY 는 KRX only.
         `_skip_base_date_validation`: CLI backfill 전용 (C-backfill H-1).
         """
         self._validate_period(period)
@@ -405,13 +402,14 @@ class IngestPeriodicOhlcvUseCase:
             return await repo.upsert_many(normalized, period=period, exchange=exchange)
 
     def _validate_period(self, period: Period) -> None:
-        """C-4 (ka10094) 진입 후 — WEEKLY/MONTHLY/YEARLY 모두 정상.
+        """Period enum 은 WEEKLY/MONTHLY/YEARLY 3값 (DAILY 미포함).
 
-        Period enum 은 WEEKLY/MONTHLY/YEARLY 3값 (DAILY 미포함). DAILY 분기는 enum 자체에서
-        차단됨. 향후 Period.DAILY 가 enum 에 추가되는 경우 해당 시점에 ValueError 분기를
-        추가 (1R M-1 결정).
+        DAILY 분기는 enum 자체에서 차단됨. 향후 Period.DAILY 가 enum 에 추가되는 경우
+        해당 시점에 ValueError 분기를 추가 (1R M-1 결정).
+
+        defense-in-depth 가드: `_ingest_one` 의 dispatch else 분기에 `NotImplementedError`
+        가 남아 있어 새 Period 가 추가되고 본 메서드 갱신 누락 시 첫 ingest 시점에 fail-fast.
         """
-        # C-4 Phase 진입으로 YEARLY 활성. NotImplementedError 제거.
         return
 
     def _validate_base_date(self, base_date: date, *, skip_past_cap: bool = False) -> None:

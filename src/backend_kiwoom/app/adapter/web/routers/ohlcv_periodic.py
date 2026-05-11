@@ -17,7 +17,7 @@ R1 정착 패턴 5종 전면 적용:
 응답 정책 (ka10081 패턴 일관):
 - POST sync 는 부분 성공 허용 — 200 + per-(stock,exchange) errors
 - ValueError (base_date 범위) → 400
-- NotImplementedError (period=YEARLY) → caller 에서 발생 안 함 (path 가 weekly/monthly 만)
+- YEARLY 는 KRX only (NXT skip) — UseCase 가드 (C-4 / b75334c)
 
 GET 시계열 endpoint 는 본 chunk 범위 외 — 별도 chunk 또는 본 router 추가 시점에 결정.
 """

@@ -292,43 +292,43 @@ def reset_token_manager() -> None:
 
 
 def reset_sync_sector_factory() -> None:
-    """테스트 전용 — sector factory 만 리셋."""
+    """lifespan teardown + 테스트 — sector factory 만 리셋 (1R 2b M4 fail-closed)."""
     global _sync_sector_factory
     _sync_sector_factory = None
 
 
 def reset_sync_stock_factory() -> None:
-    """테스트 전용 — stock factory 만 리셋."""
+    """lifespan teardown + 테스트 — stock factory 만 리셋 (1R 2b M4 fail-closed)."""
     global _sync_stock_factory
     _sync_stock_factory = None
 
 
 def reset_lookup_stock_factory() -> None:
-    """테스트 전용 — lookup factory 만 리셋."""
+    """lifespan teardown + 테스트 — lookup factory 만 리셋 (1R 2b M4 fail-closed)."""
     global _lookup_stock_factory
     _lookup_stock_factory = None
 
 
 def reset_sync_fundamental_factory() -> None:
-    """테스트 전용 — fundamental factory 만 리셋 (B-γ-2)."""
+    """lifespan teardown + 테스트 — fundamental factory 만 리셋 (B-γ-2, 1R 2b M4 fail-closed)."""
     global _sync_fundamental_factory
     _sync_fundamental_factory = None
 
 
 def reset_ingest_ohlcv_factory() -> None:
-    """테스트 전용 — ohlcv factory 만 리셋 (C-1β)."""
+    """lifespan teardown + 테스트 — ohlcv factory 만 리셋 (C-1β, 1R 2b M4 fail-closed)."""
     global _ingest_ohlcv_factory
     _ingest_ohlcv_factory = None
 
 
 def reset_ingest_daily_flow_factory() -> None:
-    """테스트 전용 — daily_flow factory 만 리셋 (C-2β)."""
+    """lifespan teardown + 테스트 — daily_flow factory 만 리셋 (C-2β, 1R 2b M4 fail-closed)."""
     global _ingest_daily_flow_factory
     _ingest_daily_flow_factory = None
 
 
 def reset_ingest_periodic_ohlcv_factory() -> None:
-    """테스트 전용 — periodic ohlcv factory 만 리셋 (C-3β)."""
+    """lifespan teardown + 테스트 — periodic ohlcv factory 만 리셋 (C-3β, 1R 2b M4 fail-closed)."""
     global _ingest_periodic_ohlcv_factory
     _ingest_periodic_ohlcv_factory = None
 
