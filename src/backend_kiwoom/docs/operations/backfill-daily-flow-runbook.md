@@ -226,7 +226,7 @@ uv run python scripts/backfill_daily_flow.py \
     > logs/backfill-daily-flow-resume-$(date +%Y%m%d).log 2>&1
 ```
 
-> resume 한계 — `max(trading_date) >= end_date` 만 본다. 부분 일자 누락 (gap) 은 detect 못 함. 별도 chunk (refactor R2 의 gap detection).
+> resume 동작 — R2 (`d43d956`) 부터 영업일 calendar (DB `SELECT DISTINCT trading_date` union) 기반 일자별 차집합 검사. 부분 일자 누락 (gap) 도 정밀 감지 → 진행. 완전 적재 (gap 0) 만 skip.
 
 ---
 
@@ -381,7 +381,7 @@ curl -X POST -H "X-API-Key: $ADMIN_API_KEY" \
 - **rollback 전략**: NUMERIC overflow 등 데이터 오염 시 — `kiwoom.stock_daily_flow` 의 본 백필 기간만 DELETE 가능 (운영 1년 cap 영역과 분리)
 - **TokenManager 자동 재발급**: 24h 토큰 lifecycle 가 백필 (1~2시간) 안에는 만료 가능성 낮음. OHLCV 와 동일 alias 재사용 시 자동 재발급
 - **DB 부하**: 단일 worker × 약 16,000 호출 (KRX 4078 × 2 page + NXT 626 × 2 page) → connection pool (`database_pool_size=5`) 흡수
-- **resume 한계**: `max(trading_date) >= end_date` 만 본다. 부분 일자 누락 (gap) 은 detect 못 함 (OHLCV 와 동일 한계)
+- **resume 동작 (R2 `d43d956`)**: 영업일 calendar (DB union) 기반 일자별 차집합 검사. 부분 일자 누락 (gap) 정밀 감지 → 진행 / 완전 적재만 skip
 
 ---
 

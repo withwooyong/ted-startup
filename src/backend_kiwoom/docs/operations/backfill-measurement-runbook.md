@@ -245,7 +245,7 @@ uv run python scripts/backfill_ohlcv.py \
     > logs/backfill-resume-daily-$(date +%Y%m%d).log 2>&1
 ```
 
-> resume 의 한계 — `max(trading_date) >= end_date` 만 본다. 부분 일자 누락 (gap) 은 detect 못 함. 별도 chunk (refactor R2 의 gap detection).
+> resume 동작 — R2 (`d43d956`) 부터 영업일 calendar (DB `SELECT DISTINCT trading_date` union) 기반 일자별 차집합 검사. 부분 일자 누락 (gap) 도 정밀 감지 → 진행. 완전 적재 (gap 0) 만 skip.
 
 ---
 
