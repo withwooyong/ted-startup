@@ -136,6 +136,13 @@ class Settings(BaseSettings):
             "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
         ),
     )
+    scheduler_yearly_ohlcv_sync_alias: str = Field(
+        default="",
+        description=(
+            "년봉 OHLCV (ka10094) sync cron job 이 사용할 키움 자격증명 alias (C-4 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

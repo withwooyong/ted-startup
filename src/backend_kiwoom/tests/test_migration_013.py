@@ -116,10 +116,12 @@ def test_migration_013_downgrade_with_data_raises(database_url: str) -> None:
         with sync_engine.begin() as conn:
             head_rev = conn.execute(text("SELECT version_num FROM kiwoom.alembic_version")).scalar_one()
         sync_engine.dispose()
-        # M-1 (1R) — 양성 단언. 008 패턴 (`!= 007_...`) 보다 strict: transactional DDL rollback 으로
-        # 013 head 에 머물러야 함. 다른 revision 으로 이탈도 검출.
-        assert head_rev == "013_drop_daily_flow_dup_2", (
-            f"013 가드 우회 — alembic_version 이 013 head 가 아님: {head_rev}. "
+        # 014 head 진입 후엔 command.downgrade(012) 가 014 → 013 → 012 다단계 진행.
+        # alembic 의 단일 transaction 안에서 RAISE → 전체 rollback → alembic_version 014 유지
+        # (test_migration_013 verification 발견 — 014 시점 head 유지).
+        # 핵심 검증: 가드 우회로 downgrade target (012) 까지 진행되지 않았음.
+        assert head_rev != "012_stock_price_monthly_nxt", (
+            f"013 가드 우회 — alembic_version 이 downgrade target 까지 진행됨: {head_rev}. "
             "DO $$ 블록 RAISE 후 trans rollback 가정 위반."
         )
 

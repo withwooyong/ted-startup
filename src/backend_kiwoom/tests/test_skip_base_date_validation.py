@@ -192,20 +192,26 @@ async def test_periodic_skip_validation_still_rejects_future(
 
 
 @pytest.mark.asyncio
-async def test_periodic_skip_validation_yearly_still_raises(
+async def test_periodic_skip_validation_yearly_executes(
     session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
 ) -> None:
-    """_skip_base_date_validation 은 base_date 만 우회. period 검증은 그대로 (H-3)."""
+    """C-4 — YEARLY 활성 후엔 _skip_base_date_validation 이 정상 동작 (NotImplementedError 부재).
+
+    active stock 0건이라 fetch_yearly 미호출. base_date 가 3년 전이라도 skip 으로 통과.
+    """
     client = AsyncMock(spec=KiwoomChartClient)
+    client.fetch_yearly.return_value = []
     use_case = IngestPeriodicOhlcvUseCase(
         session_provider=session_provider,
         chart_client=client,
         nxt_collection_enabled=False,
     )
     three_years_ago = date.today() - timedelta(days=365 * 3)
-    with pytest.raises(NotImplementedError):
-        await use_case.execute(
-            period=Period.YEARLY,
-            base_date=three_years_ago,
-            _skip_base_date_validation=True,
-        )
+    result = await use_case.execute(
+        period=Period.YEARLY,
+        base_date=three_years_ago,
+        _skip_base_date_validation=True,
+    )
+    # active stock 0건이라 total=0
+    assert result.total == 0
+    assert result.failed == 0

@@ -42,6 +42,7 @@ from app.batch.sector_sync_job import fire_sector_sync
 from app.batch.stock_fundamental_job import fire_stock_fundamental_sync
 from app.batch.stock_master_job import fire_stock_master_sync
 from app.batch.weekly_ohlcv_job import fire_weekly_ohlcv_sync
+from app.batch.yearly_ohlcv_job import fire_yearly_ohlcv_sync
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,9 @@ WEEKLY_OHLCV_SYNC_JOB_ID: Final[str] = "weekly_ohlcv_sync_weekly"
 
 MONTHLY_OHLCV_SYNC_JOB_ID: Final[str] = "monthly_ohlcv_sync_monthly"
 """월봉 OHLCV sync job 의 고유 ID (C-3β). KST 매월 1일 03:00 — 다른 cron 없는 시간대."""
+
+YEARLY_OHLCV_SYNC_JOB_ID: Final[str] = "yearly_ohlcv_sync_yearly"
+"""년봉 OHLCV sync job 의 고유 ID (C-4). KST 매년 1월 5일 03:00 — 직전 년 마감 + 새해 휴장 후 며칠 여유."""
 
 
 class SectorSyncScheduler:
@@ -662,6 +666,89 @@ class MonthlyOhlcvScheduler:
             self._started = False
 
 
+class YearlyOhlcvScheduler:
+    """년봉 OHLCV sync cron job 1개를 관리하는 단순 wrapper (C-4).
+
+    MonthlyOhlcvScheduler 와 동일 패턴. cron: KST **매년 1월 5일 03:00** — 직전 년 마감 +
+    새해 휴장 후 며칠 여유 (plan § 7).
+
+    NXT skip 정책은 UseCase 가드 (plan § 12.2 #3 yearly_nxt_disabled). KRX 만 호출.
+    """
+
+    def __init__(
+        self,
+        *,
+        factory: IngestPeriodicOhlcvUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._scheduler.get_job(job_id)
+
+    def start(self) -> None:
+        """scheduler 기동 + yearly ohlcv sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("yearly ohlcv scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("yearly ohlcv scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_yearly_ohlcv_sync,
+            trigger=CronTrigger(
+                month=1,
+                day=5,
+                hour=3,
+                minute=0,
+                timezone=KST,
+            ),
+            id=YEARLY_OHLCV_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "yearly ohlcv scheduler 시작 — job=%s alias=%s cron=매년 1월 5일 03:00 KST",
+            YEARLY_OHLCV_SYNC_JOB_ID,
+            self._alias,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001
+            logger.exception("yearly ohlcv scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
 __all__ = [
     "DAILY_FLOW_SYNC_JOB_ID",
     "KST",
@@ -671,6 +758,7 @@ __all__ = [
     "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
     "WEEKLY_OHLCV_SYNC_JOB_ID",
+    "YEARLY_OHLCV_SYNC_JOB_ID",
     "DailyFlowScheduler",
     "MonthlyOhlcvScheduler",
     "OhlcvDailyScheduler",
@@ -678,4 +766,5 @@ __all__ = [
     "StockFundamentalScheduler",
     "StockMasterScheduler",
     "WeeklyOhlcvScheduler",
+    "YearlyOhlcvScheduler",
 ]

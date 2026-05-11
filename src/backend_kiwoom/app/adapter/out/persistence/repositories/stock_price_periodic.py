@@ -1,10 +1,10 @@
-"""StockPricePeriodicRepository — 주봉/월봉 KRX/NXT upsert + 조회 (C-3α).
+"""StockPricePeriodicRepository — 주봉/월봉/년봉 KRX/NXT upsert + 조회 (C-3α + C-4).
 
-설계: phase-c-3-weekly-monthly-ohlcv.md § 3.1 + endpoint-07-ka10082.md § 6.2.
+설계: phase-c-3-weekly-monthly-ohlcv.md § 3.1 + endpoint-07-ka10082.md § 6.2 + endpoint-09-ka10094.md § 12.
 
 ka10081 의 StockPriceRepository 와 분리된 이유:
 - 일봉은 호출 빈도 + row 수가 압도적 → 별도 hot path
-- 주/월봉은 통합 인터페이스 (period dispatch) — ka10082/83/94 가 같은 계열
+- 주/월/년봉은 통합 인터페이스 (period dispatch) — ka10082/83/94 가 같은 계열
 
 책임:
 - (period, exchange) 별로 다른 ORM 모델 분기 — caller 는 어느 테이블인지 신경 안 씀
@@ -12,9 +12,9 @@ ka10081 의 StockPriceRepository 와 분리된 이유:
 - `trading_date == date.min` 빈 응답 row 자동 skip (caller 안전망)
 - 명시 update_set (B-γ-1 2R B-H3 패턴 일관) — schema-drift 차단
 
-YEARLY 미지원 (Migration 미작성, P2 chunk):
-- ka10094 진입 시 `_MODEL_BY_PERIOD_AND_EXCHANGE` 에 2 매핑 추가
-- 본 chunk 는 호출 시 ValueError
+YEARLY (C-4):
+- KRX/NXT 둘 다 dispatch table 등록. NXT 는 UseCase 가드에서 호출 차단 (yearly_nxt_disabled, plan § 12.2 #3)
+- 본 Repository 는 dispatch 매핑만 제공 — 실제 NXT 호출은 UseCase 가 결정
 
 SOR 미지원: 일봉 Repository 와 동일 정책 (Phase D 결정).
 """
@@ -35,23 +35,32 @@ from app.adapter.out.persistence.models.stock_price_periodic import (
     StockPriceMonthlyNxt,
     StockPriceWeeklyKrx,
     StockPriceWeeklyNxt,
+    StockPriceYearlyKrx,
+    StockPriceYearlyNxt,
 )
 from app.adapter.out.persistence.repositories._helpers import rowcount_of
 from app.application.constants import ExchangeType, Period
 
 PeriodicModel = (
-    type[StockPriceWeeklyKrx] | type[StockPriceWeeklyNxt] | type[StockPriceMonthlyKrx] | type[StockPriceMonthlyNxt]
+    type[StockPriceWeeklyKrx]
+    | type[StockPriceWeeklyNxt]
+    | type[StockPriceMonthlyKrx]
+    | type[StockPriceMonthlyNxt]
+    | type[StockPriceYearlyKrx]
+    | type[StockPriceYearlyNxt]
 )
 
 
 class StockPricePeriodicRepository:
-    """주봉/월봉 4 테이블의 인터페이스 통일 — period+exchange dispatch."""
+    """주봉/월봉/년봉 6 테이블의 인터페이스 통일 — period+exchange dispatch."""
 
     _MODEL_BY_PERIOD_AND_EXCHANGE: dict[tuple[Period, ExchangeType], PeriodicModel] = {
         (Period.WEEKLY, ExchangeType.KRX): StockPriceWeeklyKrx,
         (Period.WEEKLY, ExchangeType.NXT): StockPriceWeeklyNxt,
         (Period.MONTHLY, ExchangeType.KRX): StockPriceMonthlyKrx,
         (Period.MONTHLY, ExchangeType.NXT): StockPriceMonthlyNxt,
+        (Period.YEARLY, ExchangeType.KRX): StockPriceYearlyKrx,
+        (Period.YEARLY, ExchangeType.NXT): StockPriceYearlyNxt,
     }
 
     def __init__(self, session: AsyncSession) -> None:
@@ -63,7 +72,7 @@ class StockPricePeriodicRepository:
             raise ValueError(
                 f"unsupported (period, exchange) for stock_price_periodic: "
                 f"{period.value}/{exchange.value} "
-                "(WEEKLY/MONTHLY × KRX/NXT only — YEARLY 는 P2, SOR 은 Phase D)"
+                "(WEEKLY/MONTHLY/YEARLY × KRX/NXT only — SOR 은 Phase D)"
             )
         return self._MODEL_BY_PERIOD_AND_EXCHANGE[key]
 
@@ -144,7 +153,14 @@ class StockPricePeriodicRepository:
         exchange: ExchangeType,
         start: date,
         end: date,
-    ) -> Sequence[StockPriceWeeklyKrx | StockPriceWeeklyNxt | StockPriceMonthlyKrx | StockPriceMonthlyNxt]:
+    ) -> Sequence[
+        StockPriceWeeklyKrx
+        | StockPriceWeeklyNxt
+        | StockPriceMonthlyKrx
+        | StockPriceMonthlyNxt
+        | StockPriceYearlyKrx
+        | StockPriceYearlyNxt
+    ]:
         """[start, end] 시계열 조회 — period+exchange 분기 + trading_date asc.
 
         Raises:

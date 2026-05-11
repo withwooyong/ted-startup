@@ -58,6 +58,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kiwoom", tags=["kiwoom-ohlcv-periodic"])
 
 
+def _api_id_for(period: Period) -> str:
+    """logger 메시지용 — period → api_id 매핑 (C-3β/C-4)."""
+    if period is Period.WEEKLY:
+        return "ka10082"
+    if period is Period.MONTHLY:
+        return "ka10083"
+    if period is Period.YEARLY:
+        return "ka10094"
+    return f"period={period.value}"
+
+
 # =============================================================================
 # Pydantic 응답 / 요청 DTO (R1 정착 패턴)
 # =============================================================================
@@ -146,7 +157,7 @@ async def _do_sync(
         # 1R H-1 — factory(alias) 진입 시점 KiwoomError 누설 차단. message echo 차단.
         logger.warning(
             "%s sync business error api_id=%s return_code=%d msg=%s",
-            "ka10082" if period is Period.WEEKLY else "ka10083",
+            _api_id_for(period),
             exc.api_id,
             exc.return_code,
             exc.message,
@@ -169,7 +180,7 @@ async def _do_sync(
         ) from None
     except KiwoomError as exc:
         # 1R H-1 — fallback (신규 KiwoomError subclass 안전망)
-        logger.warning("ka10082/83 sync fallback %s", type(exc).__name__)
+        logger.warning("ka10082/83/94 sync fallback %s api_id=%s", type(exc).__name__, _api_id_for(period))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="키움 호출 실패",
@@ -223,7 +234,7 @@ async def _do_refresh(
         # message echo 차단 (B-γ-2 / C-1β 패턴 일관). 로그는 운영 디버그용으로 message 포함.
         logger.warning(
             "%s refresh business error api_id=%s return_code=%d msg=%s",
-            "ka10082" if period is Period.WEEKLY else "ka10083",
+            _api_id_for(period),
             exc.api_id,
             exc.return_code,
             exc.message,
@@ -245,7 +256,7 @@ async def _do_refresh(
             detail="키움 응답 오류",
         ) from None
     except KiwoomError as exc:
-        logger.warning("ka10082/83 fallback %s", type(exc).__name__)
+        logger.warning("ka10082/83/94 fallback %s api_id=%s", type(exc).__name__, _api_id_for(period))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="키움 호출 실패",
@@ -358,6 +369,58 @@ async def refresh_ohlcv_monthly(
 ) -> OhlcvPeriodicSyncResultOut:
     return await _do_refresh(
         period=Period.MONTHLY,
+        stock_code=stock_code,
+        alias=alias,
+        base_date=base_date,
+        factory=factory,
+    )
+
+
+# =============================================================================
+# yearly endpoint (ka10094, C-4) — KRX only, NXT skip (plan § 12.2 #3)
+# =============================================================================
+
+
+@router.post(
+    "/ohlcv/yearly/sync",
+    response_model=OhlcvPeriodicSyncResultOut,
+    summary="active stock 전체 년봉 OHLCV 동기화 (admin, ka10094, KRX only)",
+    dependencies=[Depends(require_admin_key)],
+)
+async def sync_ohlcv_yearly(
+    alias: Annotated[
+        str,
+        Query(min_length=1, max_length=50, description="키움 자격증명 alias"),
+    ],
+    body: OhlcvPeriodicSyncRequestIn = Body(default_factory=OhlcvPeriodicSyncRequestIn),
+    factory: IngestPeriodicOhlcvUseCaseFactory = Depends(get_ingest_periodic_ohlcv_factory),
+) -> OhlcvPeriodicSyncResultOut:
+    return await _do_sync(period=Period.YEARLY, alias=alias, body=body, factory=factory)
+
+
+@router.post(
+    "/stocks/{stock_code}/ohlcv/yearly/refresh",
+    response_model=OhlcvPeriodicSyncResultOut,
+    summary="단건 년봉 OHLCV 강제 새로고침 (admin, ka10094, KRX only)",
+    dependencies=[Depends(require_admin_key)],
+)
+async def refresh_ohlcv_yearly(
+    stock_code: Annotated[
+        str,
+        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+    ],
+    alias: Annotated[
+        str,
+        Query(min_length=1, max_length=50, description="키움 자격증명 alias"),
+    ],
+    base_date: Annotated[
+        date | None,
+        Query(description="기준일자. None 이면 today"),
+    ] = None,
+    factory: IngestPeriodicOhlcvUseCaseFactory = Depends(get_ingest_periodic_ohlcv_factory),
+) -> OhlcvPeriodicSyncResultOut:
+    return await _do_refresh(
+        period=Period.YEARLY,
         stock_code=stock_code,
         alias=alias,
         base_date=base_date,

@@ -411,3 +411,119 @@ ka10081 § 8 + 본 endpoint 추가:
 ---
 
 _Phase C 의 chart 카테고리 마지막 endpoint. 7 필드만이라 가장 짧지만 NXT 호출 정책 결정이 본 endpoint 의 unique 한 쟁점._
+
+---
+
+## 12. Phase C-4 — Migration 014 + ka10094 인프라 + 자동화 (통합 chunk)
+
+> **추가일**: 2026-05-11 (C-2δ Migration 013 직후, Phase C 종결 chunk)
+> **선행 조건**: C-3α/β (`8fcabe4` / `2d4e2ae`) + C-2δ (`8dd5727`) 완료
+> **분류**: feat (신규 endpoint 도입 + Migration 1 + 응답 DTO 신규). UseCase YEARLY NotImplementedError 제거 — 기존 가드 분기 활성화
+> **scheduler_enabled 상태**: 사용자 결정으로 활성 보류 — Scheduler job 등록 코드만, 실 가동은 모든 작업 완료 후
+
+### 12.1 배경 (Phase C 종결)
+
+10 endpoint (au/ka 2+8) 완료 후 Phase C chart 카테고리 마지막 endpoint = ka10094 (년봉). C-3α/β 의 `IngestPeriodicOhlcvUseCase` 가 Period 3값 (WEEKLY/MONTHLY/YEARLY) 분기 중 YEARLY 만 `NotImplementedError("period=YEARLY (ka10094) 는 P2 chunk — Migration 미작성")` 로 명시적 가드 — 본 chunk 에서 활성화.
+
+C-3 패턴 1:1 응용 + 응답 7 필드 (10 → 7) + NXT skip 정책 차이만 핵심.
+
+### 12.2 결정 (ADR-0001 § 29 신규)
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | 마이그레이션 번호 | **014** (C-2δ Migration 013 직후). revision id = `014_stock_price_yearly` (22 chars — VARCHAR(32) 안전) |
+| 2 | 테이블 분리 | **KRX / NXT 분리** — C-1α/3α 일관 (운영 동일성 검증 미완료 시점이라 분리 보존) |
+| 3 | NXT 호출 정책 | **skip** (plan doc § 11.1 #1 옵션 a) — UseCase 에서 `OhlcvIngestOutcome(skipped=True, reason="yearly_nxt_disabled")` 반환. NXT 운영 1년 후 재검토 |
+| 4 | 부분 년 OHLC 처리 (신규 상장) | **그대로 적재** (plan doc § 11.1 #2 옵션 a) — 키움 raw 의도 보존 |
+| 5 | 호출 빈도 | **연 1회** (plan doc § 11.1 #3 옵션 a) — 매년 1월 5일 KST 03:00 cron 등록 (실 활성은 scheduler_enabled 일괄 활성 시점) |
+| 6 | 응답 7 필드 처리 | `NormalizedDailyOhlcv` 의 `prev_compare_amount` / `prev_compare_sign` / `turnover_rate` 는 None 영속화 — DB NULL. ka10082/83 mixin 재사용 (None 필드 다수 plan doc § 11.4) |
+
+### 12.3 영향 범위 (10 코드 + 5 테스트)
+
+**코드 (10 files)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `migrations/versions/014_stock_price_yearly.py` (신규) | `stock_price_yearly_krx` + `stock_price_yearly_nxt` 2 테이블 신규. DDL 패턴 = 011/012 (월봉) 1:1 응용 |
+| 2 | `app/adapter/out/persistence/models/stock_price_yearly_krx.py` (신규) | ORM (mixin 재사용) |
+| 3 | `app/adapter/out/persistence/models/stock_price_yearly_nxt.py` (신규) | ORM (mixin 재사용) |
+| 4 | `app/adapter/out/persistence/models/__init__.py` | export 추가 |
+| 5 | `app/adapter/out/kiwoom/chart.py` | `fetch_yearly` 메서드 신규 + 빈 응답 sentinel break (C-flow-empty-fix 패턴 1:1) |
+| 6 | `app/adapter/out/kiwoom/_records.py` | `YearlyChartRow` / `YearlyChartResponse` Pydantic 7 필드 신규 |
+| 7 | `app/adapter/out/persistence/repositories/stock_price_periodic.py` | YEARLY 분기 활성 (KRX/NXT ORM dispatch table 등록) |
+| 8 | `app/application/service/ohlcv_periodic_service.py` | `_validate_period` YEARLY NotImplementedError 제거 + NXT skip 가드 (`OhlcvIngestOutcome(skipped=True, reason="yearly_nxt_disabled")`) |
+| 9 | `app/adapter/web/routers/ohlcv_periodic.py` | `POST /api/kiwoom/ohlcv/yearly/sync` + `POST /api/kiwoom/stocks/{code}/ohlcv/yearly/refresh` — C-3β 와 일관 (GET 시계열 endpoint 는 별도 chunk, ohlcv_periodic.py 헤더 § 정책 유지) |
+| 10 | `app/scheduler.py` | `yearly_ohlcv_sync_yearly` job 신규 (CronTrigger month=1 day=5 hour=3 minute=0 KST). settings + lifespan alias 등록 |
+
+**Pydantic + Settings (보조)**:
+- `app/config/settings.py` — `scheduler_yearly_ohlcv_sync_alias` 추가 (B/C 일관 fail-fast)
+
+**테스트 (4 갱신 + 2 신규)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `tests/test_migration_014.py` (신규) | 008/013 패턴 1:1 — yearly_krx / yearly_nxt 테이블 생성 / 컬럼 타입 / UNIQUE / FK / 인덱스 검증 |
+| 2 | `tests/test_kiwoom_chart_client.py` | `fetch_yearly` 시나리오 (mock 응답 30 row 단일 페이지, 빈 응답 break, 7 필드 normalize, ka10081 의 14 시나리오 중 페이지네이션/dt 빈/부호/자격증명/5xx 5개 응용) |
+| 3 | `tests/test_ohlcv_periodic_service.py` 또는 `test_ohlcv_periodic_use_case.py` | YEARLY 분기 활성 / NXT skip 가드 (`yearly_nxt_disabled`) / NotImplementedError 부재 단언 |
+| 4 | `tests/test_stock_price_periodic_repository.py` | YEARLY ORM dispatch table 활성 / upsert KRX 만 |
+| 5 | `tests/test_ohlcv_router.py` (또는 신규) | yearly path 3개 (sync / refresh / GET 시계열) — C-3β 패턴 1:1 |
+| 6 | `tests/test_scheduler_yearly_ohlcv.py` (신규 or 통합) | yearly job 등록 / CronTrigger month=1 day=5 03:00 KST / alias fail-fast |
+
+**문서**:
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 29 신규 (C-4 결과)
+- `CHANGELOG.md` / `STATUS.md` / `HANDOFF.md` / 본 doc § 12 (자기 참조)
+
+### 12.4 적대적 이중 리뷰 — 사전 self-check (ted-run 진입 전)
+
+| # | 위험 | 완화 |
+|---|------|------|
+| H-1 | VARCHAR(32) revision id (C-2δ 경험) | `014_stock_price_yearly` = 22 chars 안전 마진 10 chars. 008 답습 위험 없음 |
+| H-2 | NXT 운영 시작일 (2024-03) 이전 base_dt 호출 응답 불확실 (plan doc § 11.2) | UseCase NXT skip 가드로 호출 자체 차단 → 운영 응답 패턴 미확정 영향 0. 향후 NXT skip 해제 chunk 진입 전 별도 검증 |
+| H-3 | 응답 7 필드 가정 (plan doc § 11.2) — 운영에서 추가 필드 등장 | `YearlyChartRow` `extra="ignore"` 로 safe. 추가 필드 발견 시 영속화는 별도 chunk |
+| H-4 | 액면분할 30년 보정 (plan doc § 11.2) — `upd_stkpc_tp=1` 정확성 | 백테스팅 가치 평가 시 raw mode 별도 비교 권고. 본 chunk 는 일관성 위해 adjust mode (=1) 사용 |
+| H-5 | `prev_compare_amount` / `prev_compare_sign` / `turnover_rate` NULL 영속화 | DB NULL 허용 (ORM mixin 의 nullable=True). 응답 모델에서 None 정규화 |
+| H-6 | C-flow-empty-fix sentinel 패턴 적용 누락 | `fetch_yearly` 도 chart.py 일관 — `if not <list>: break` (mrkcond/chart 4곳 패턴 1:1) |
+| H-7 | 매년 cron 동작 verification 어려움 (1년 1회) | testcontainers / mock 으로 CronTrigger 파라미터 검증만. 실 fire 는 testcontainers 시간 조작 또는 trigger.get_next_fire_time() 검증 |
+| H-8 | Repository dispatch table (Period → ORM) 가 YEARLY 누락 (NotImplementedError) | 본 chunk 의 핵심 변경 = dispatch 활성. 누락 시 KeyError 발생하므로 test_stock_price_periodic_repository.py 가 즉시 발견 |
+| H-9 | Scheduler alias 누락 시 lifespan fail-fast | settings.scheduler_yearly_ohlcv_sync_alias 추가 + lifespan validation. C-1β/2β/3β 동일 패턴 |
+| H-10 | 응답 list key `stk_yr_pole_chart_qry` 가 Excel 표기만 (운영 검증 미완) | mock 테스트로 parser 검증. 운영 첫 호출 시 ka10082/83 의 `stk_stk_pole_chart_qry` / `stk_mth_pole_chart_qry` 패턴 확인 결과로 신뢰성 확보됨 — 빈 list 인 경우 sentinel 처리 |
+
+### 12.5 DoD (C-4)
+
+**코드**:
+- [ ] Migration 014 (yearly_krx + yearly_nxt 2 테이블)
+- [ ] ORM 2 (StockPriceYearlyKrx / StockPriceYearlyNxt)
+- [ ] Pydantic 2 (YearlyChartRow / YearlyChartResponse — 7 필드)
+- [ ] `KiwoomChartClient.fetch_yearly` + sentinel break
+- [ ] Repository YEARLY 분기 활성
+- [ ] UseCase YEARLY NotImplementedError 제거 + NXT skip 가드
+- [ ] Router 3 path (sync / refresh / GET 시계열)
+- [ ] Scheduler yearly_ohlcv_sync_yearly job 등록 (매년 1월 5일 KST 03:00)
+- [ ] Settings + lifespan alias
+
+**테스트** (목표: 1030 → ~1050~1060 cases / coverage 유지 ≥ 93%):
+- [ ] `test_migration_014.py` 신규 (8/13 패턴)
+- [ ] `test_kiwoom_chart_client.py` yearly 시나리오 추가
+- [ ] `test_ohlcv_periodic_*.py` YEARLY 분기 활성 + NXT skip
+- [ ] `test_stock_price_periodic_repository.py` YEARLY dispatch
+- [ ] yearly router / scheduler 테스트
+- [ ] `ruff check` + `mypy --strict` PASS
+
+**이중 리뷰**:
+- [ ] 1R PASS (Reviewer: 스키마/마이그레이션 + UseCase 분기 활성 정확성 + NXT skip 정책 일관성)
+
+**문서**:
+- [ ] ADR-0001 § 29 추가 (C-4 결과)
+- [ ] STATUS.md § 0 / § 3 / § 4 / § 5 갱신 (chunk → 완료, 다음 chunk = refactor R2)
+- [ ] CHANGELOG: `feat(kiwoom): Phase C-4 — ka10094 yearly OHLCV (Migration 014, KRX only, NXT skip, 11/25 endpoint)`
+- [ ] HANDOFF.md 갱신
+
+### 12.6 다음 chunk (C-4 이후)
+
+1. **refactor R2 (1R Defer 일괄 정리)** — L-2 / E-1 / M-3 / E-2 / gap detection (1일)
+2. **follow-up F6/F7/F8 + daily_flow 빈 응답 1건** (LOW / 0.5일)
+3. **ETF/ETN OHLCV 별도 endpoint** (옵션 c, 신규 도메인)
+4. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉 (대용량 파티션 결정 선행)
+5. **Phase E/F/G** (공매도 / 대차 / 순위 / 투자자별 — 신규 endpoint wave)
+6. **(최종) scheduler_enabled 일괄 활성 + 1주 모니터** — 사용자 결정 (모든 작업 완료 후)
+7. **KOSCOM cross-check 수동** — 가설 B 최종 확정

@@ -82,11 +82,20 @@ def test_repository_has_four_model_mappings() -> None:
     assert mappings[(Period.MONTHLY, ExchangeType.NXT)] is StockPriceMonthlyNxt
 
 
-def test_repository_yearly_not_in_mappings() -> None:
-    """YEARLY 매핑 부재 — Migration 미구현 (P2 chunk 후 추가)."""
+def test_repository_yearly_in_mappings() -> None:
+    """YEARLY 매핑 활성 — C-4 Migration 014 후 KRX/NXT 둘 다 dispatch table 등록.
+
+    NXT 매핑은 dispatch table 등록만 — 실제 NXT 호출은 UseCase 가드에서 차단
+    (plan § 12.2 #3 yearly_nxt_disabled).
+    """
+    from app.adapter.out.persistence.models.stock_price_periodic import (
+        StockPriceYearlyKrx,
+        StockPriceYearlyNxt,
+    )
+
     mappings = StockPricePeriodicRepository._MODEL_BY_PERIOD_AND_EXCHANGE
-    assert (Period.YEARLY, ExchangeType.KRX) not in mappings
-    assert (Period.YEARLY, ExchangeType.NXT) not in mappings
+    assert mappings[(Period.YEARLY, ExchangeType.KRX)] is StockPriceYearlyKrx
+    assert mappings[(Period.YEARLY, ExchangeType.NXT)] is StockPriceYearlyNxt
 
 
 # ---------- 통합 테스트 (DB) ----------
@@ -197,11 +206,11 @@ async def test_upsert_many_all_date_min_rows_returns_zero(session: AsyncSession)
 
 
 @pytest.mark.asyncio
-async def test_upsert_many_yearly_raises(session: AsyncSession) -> None:
-    """YEARLY 미구현 → ValueError (H-3 — Migration 미작성)."""
+async def test_upsert_many_yearly_empty_returns_zero(session: AsyncSession) -> None:
+    """YEARLY 활성 (C-4) — 빈 list upsert 는 0 return (raises 안 함)."""
     repo = StockPricePeriodicRepository(session)
-    with pytest.raises(ValueError, match="unsupported"):
-        await repo.upsert_many([], period=Period.YEARLY, exchange=ExchangeType.KRX)
+    affected = await repo.upsert_many([], period=Period.YEARLY, exchange=ExchangeType.KRX)
+    assert affected == 0
 
 
 @pytest.mark.asyncio
@@ -269,17 +278,18 @@ async def test_find_range_start_after_end_raises(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_find_range_yearly_raises(session: AsyncSession) -> None:
+async def test_find_range_yearly_empty(session: AsyncSession) -> None:
+    """YEARLY 활성 (C-4) — 빈 시계열 조회는 빈 list return (raises 안 함)."""
     sid = await _insert_test_stock(session, "TST307")
     repo = StockPricePeriodicRepository(session)
-    with pytest.raises(ValueError, match="unsupported"):
-        await repo.find_range(
-            sid,
-            period=Period.YEARLY,
-            exchange=ExchangeType.KRX,
-            start=date(2025, 1, 1),
-            end=date(2025, 12, 31),
-        )
+    rows = await repo.find_range(
+        sid,
+        period=Period.YEARLY,
+        exchange=ExchangeType.KRX,
+        start=date(2025, 1, 1),
+        end=date(2025, 12, 31),
+    )
+    assert list(rows) == []
 
 
 @pytest.mark.asyncio

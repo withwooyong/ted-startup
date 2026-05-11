@@ -83,6 +83,7 @@ from app.scheduler import (
     StockFundamentalScheduler,
     StockMasterScheduler,
     WeeklyOhlcvScheduler,
+    YearlyOhlcvScheduler,
 )
 from app.security.kiwoom_credential_cipher import KiwoomCredentialCipher
 
@@ -133,6 +134,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 ("scheduler_daily_flow_sync_alias", settings.scheduler_daily_flow_sync_alias),
                 ("scheduler_weekly_ohlcv_sync_alias", settings.scheduler_weekly_ohlcv_sync_alias),
                 ("scheduler_monthly_ohlcv_sync_alias", settings.scheduler_monthly_ohlcv_sync_alias),
+                ("scheduler_yearly_ohlcv_sync_alias", settings.scheduler_yearly_ohlcv_sync_alias),
             )
             if not value
         ]
@@ -428,11 +430,19 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     monthly_ohlcv_scheduler.start()
 
+    yearly_ohlcv_scheduler = YearlyOhlcvScheduler(
+        factory=_ingest_periodic_ohlcv_factory,
+        alias=settings.scheduler_yearly_ohlcv_sync_alias,
+        enabled=settings.scheduler_enabled,
+    )
+    yearly_ohlcv_scheduler.start()
+
     try:
         yield
     finally:
-        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β: scheduler 먼저 정지 — 실행 중 cron job 의
-        # KiwoomClient 호출이 graceful token revoke 와 충돌하지 않도록 보장.
+        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4: scheduler 먼저 정지 — 실행 중 cron
+        # job 의 KiwoomClient 호출이 graceful token revoke 와 충돌하지 않도록 보장.
+        yearly_ohlcv_scheduler.shutdown(wait=True)
         monthly_ohlcv_scheduler.shutdown(wait=True)
         weekly_ohlcv_scheduler.shutdown(wait=True)
         daily_flow_scheduler.shutdown(wait=True)

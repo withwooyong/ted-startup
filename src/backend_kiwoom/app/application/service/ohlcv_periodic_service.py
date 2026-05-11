@@ -37,6 +37,7 @@ from app.adapter.out.kiwoom.chart import (
     DailyChartRow,
     KiwoomChartClient,
     NormalizedDailyOhlcv,
+    YearlyChartRow,
 )
 from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
 from app.adapter.out.persistence.models import Stock
@@ -211,8 +212,10 @@ class IngestPeriodicOhlcvUseCase:
                     stock.stock_code,
                 )
 
-            # 2-2. NXT (settings + stock.nxt_enable 둘 다 True)
-            if not (self._nxt_enabled and stock.nxt_enable):
+            # 2-2. NXT (settings + stock.nxt_enable + period != YEARLY)
+            # C-4 — period=YEARLY 는 NXT 미호출 (plan § 12.2 #3 yearly_nxt_disabled).
+            # NXT 운영 시작일 (2024-03) 이전 base_dt 응답 패턴 미확정 + 30년 백필 의미 없음.
+            if not (self._nxt_enabled and stock.nxt_enable) or period is Period.YEARLY:
                 continue
             try:
                 await self._ingest_one(
@@ -297,7 +300,8 @@ class IngestPeriodicOhlcvUseCase:
         success_nxt = 0
         failed = 0
         errors: list[OhlcvSyncOutcome] = []
-        if self._nxt_enabled and stock.nxt_enable:
+        # C-4 — period=YEARLY 는 NXT 미호출 (plan § 12.2 #3 yearly_nxt_disabled).
+        if self._nxt_enabled and stock.nxt_enable and period is not Period.YEARLY:
             try:
                 await self._ingest_one(stock, period=period, base_date=base_date, exchange=ExchangeType.NXT)
                 success_nxt = 1
@@ -350,8 +354,10 @@ class IngestPeriodicOhlcvUseCase:
         since_date: date | None = None,
     ) -> int:
         """한 종목·한 거래소·한 period sync — 키움 호출 + 정규화 + DB upsert."""
-        # 1. period 분기 — fetch_weekly / fetch_monthly
-        rows: list[DailyChartRow]
+        # 1. period 분기 — fetch_weekly / fetch_monthly / fetch_yearly.
+        # YearlyChartRow 는 DailyChartRow 상속 아님 (7 필드 응답 차이). 단일 list 타입으로
+        # 모든 row variant 수용 — mypy invariant list 회피.
+        rows: list[DailyChartRow | YearlyChartRow]
         if period is Period.WEEKLY:
             rows = list(
                 await self._client.fetch_weekly(
@@ -365,6 +371,18 @@ class IngestPeriodicOhlcvUseCase:
         elif period is Period.MONTHLY:
             rows = list(
                 await self._client.fetch_monthly(
+                    stock.stock_code,
+                    base_date=base_date,
+                    exchange=exchange,
+                    adjusted=True,
+                    since_date=since_date,
+                )
+            )
+        elif period is Period.YEARLY:
+            # C-4 — ka10094 년봉. NXT skip 가드는 execute/refresh_one caller 측에서 처리
+            # (plan § 12.2 #3 yearly_nxt_disabled). 본 메서드는 KRX 만 호출되는 가정.
+            rows = list(
+                await self._client.fetch_yearly(
                     stock.stock_code,
                     base_date=base_date,
                     exchange=exchange,
@@ -387,14 +405,14 @@ class IngestPeriodicOhlcvUseCase:
             return await repo.upsert_many(normalized, period=period, exchange=exchange)
 
     def _validate_period(self, period: Period) -> None:
-        """H-3 — YEARLY → NotImplementedError.
+        """C-4 (ka10094) 진입 후 — WEEKLY/MONTHLY/YEARLY 모두 정상.
 
         Period enum 은 WEEKLY/MONTHLY/YEARLY 3값 (DAILY 미포함). DAILY 분기는 enum 자체에서
-        차단되므로 본 메서드는 YEARLY 만 검증. 향후 Period.DAILY 가 enum 에 추가되는 경우
-        해당 시점에 ValueError 분기를 추가 (1R M-1 결정).
+        차단됨. 향후 Period.DAILY 가 enum 에 추가되는 경우 해당 시점에 ValueError 분기를
+        추가 (1R M-1 결정).
         """
-        if period is Period.YEARLY:
-            raise NotImplementedError("period=YEARLY (ka10094) 는 P2 chunk — Migration 미작성")
+        # C-4 Phase 진입으로 YEARLY 활성. NotImplementedError 제거.
+        return
 
     def _validate_base_date(self, base_date: date, *, skip_past_cap: bool = False) -> None:
         """today - 365일 ~ today 외 → ValueError (C-1β 와 동일 정책).
@@ -422,6 +440,8 @@ class IngestPeriodicOhlcvUseCase:
             return "ka10082"
         if period is Period.MONTHLY:
             return "ka10083"
+        if period is Period.YEARLY:
+            return "ka10094"
         return f"period={period.value}"
 
 

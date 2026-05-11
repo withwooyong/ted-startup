@@ -135,14 +135,31 @@ def _make_monthly_row(dt: str = "20250901", cur_prc: str = "78900") -> MonthlyCh
     )
 
 
+def _make_yearly_row(dt: str = "20250102", cur_prc: str = "78900") -> "YearlyChartRow":
+    """ka10094 응답 7 필드만 (pred_pre/pred_pre_sig/trde_tern_rt 없음, C-4)."""
+    from app.adapter.out.kiwoom.chart import YearlyChartRow
+
+    return YearlyChartRow(
+        cur_prc=cur_prc,
+        trde_qty="215040968",
+        trde_prica="15774571011618",
+        dt=dt,
+        open_pric="68400",
+        high_pric="79500",
+        low_pric="67500",
+    )
+
+
 def _make_chart_client(
     *,
     weekly_rows: list[WeeklyChartRow] | None = None,
     monthly_rows: list[MonthlyChartRow] | None = None,
+    yearly_rows: list["YearlyChartRow"] | None = None,
     weekly_exc: Exception | None = None,
     monthly_exc: Exception | None = None,
+    yearly_exc: Exception | None = None,
 ) -> KiwoomChartClient:
-    """KiwoomChartClient stub — fetch_weekly / fetch_monthly 만 mock."""
+    """KiwoomChartClient stub — fetch_weekly / fetch_monthly / fetch_yearly mock (C-4)."""
     client = AsyncMock(spec=KiwoomChartClient)
     if weekly_exc is not None:
         client.fetch_weekly.side_effect = weekly_exc
@@ -152,6 +169,10 @@ def _make_chart_client(
         client.fetch_monthly.side_effect = monthly_exc
     else:
         client.fetch_monthly.return_value = monthly_rows or []
+    if yearly_exc is not None:
+        client.fetch_yearly.side_effect = yearly_exc
+    else:
+        client.fetch_yearly.return_value = yearly_rows or []
     # fetch_daily 은 본 UseCase 가 호출하면 안 됨
     client.fetch_daily.side_effect = AssertionError(
         "IngestPeriodicOhlcvUseCase 가 fetch_daily 를 호출하면 안 됨 (period 분기 위반)"
@@ -404,18 +425,29 @@ async def test_execute_future_base_date_raises(
 
 
 @pytest.mark.asyncio
-async def test_execute_yearly_raises_not_implemented(
+async def test_execute_yearly_krx_only(
+    session: AsyncSession,
     session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
 ) -> None:
-    """H-3 — YEARLY 는 enum 노출하되 Migration/Repository 미구현 (P2 chunk)."""
-    client = _make_chart_client()
+    """YEARLY 활성 (C-4) — KRX 만 적재, NXT 는 skip (plan § 12.2 #3 yearly_nxt_disabled).
+
+    nxt_collection_enabled=True 이고 stock.nxt_enable=True 라도 YEARLY 는 NXT 호출 안 함.
+    """
+    await _create_active_stock(session, "005930", nxt_enable=True)
+    client = _make_chart_client(yearly_rows=[_make_yearly_row()])
+
     use_case = IngestPeriodicOhlcvUseCase(
         session_provider=session_provider,
         chart_client=client,
-        nxt_collection_enabled=False,
+        nxt_collection_enabled=True,
     )
-    with pytest.raises(NotImplementedError, match="ka10094|YEARLY"):
-        await use_case.execute(period=Period.YEARLY, base_date=date(2025, 9, 8))
+    result = await use_case.execute(period=Period.YEARLY, base_date=date(2025, 9, 8))
+
+    assert result.success_krx == 1
+    assert result.success_nxt == 0  # YEARLY NXT skip
+    assert result.failed == 0
+    # fetch_yearly KRX 1회만, NXT 미호출
+    client.fetch_yearly.assert_awaited_once()
 
 
 # ---------- 8. refresh_one ----------
@@ -488,19 +520,27 @@ async def test_refresh_one_isolates_nxt_kiwoom_error(
 
 
 @pytest.mark.asyncio
-async def test_refresh_one_yearly_raises_not_implemented(
+async def test_refresh_one_yearly_krx_only(
     session: AsyncSession,
     session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
 ) -> None:
-    await _create_active_stock(session, "005930")
-    client = _make_chart_client()
+    """YEARLY refresh — KRX 만 호출 (plan § 12.2 #3 yearly_nxt_disabled).
+
+    NXT enabled 라도 YEARLY 는 NXT skip 가드 적용.
+    """
+    await _create_active_stock(session, "005930", nxt_enable=True)
+    client = _make_chart_client(yearly_rows=[_make_yearly_row()])
     use_case = IngestPeriodicOhlcvUseCase(
         session_provider=session_provider,
         chart_client=client,
-        nxt_collection_enabled=False,
+        nxt_collection_enabled=True,
     )
-    with pytest.raises(NotImplementedError):
-        await use_case.refresh_one("005930", period=Period.YEARLY, base_date=date(2025, 9, 8))
+    result = await use_case.refresh_one("005930", period=Period.YEARLY, base_date=date(2025, 9, 8))
+
+    assert result.success_krx == 1
+    assert result.success_nxt == 0  # YEARLY NXT skip
+    assert result.failed == 0
+    client.fetch_yearly.assert_awaited_once()
 
 
 # ---------- 9. 비활성 stock 미순회 ----------

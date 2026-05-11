@@ -14,6 +14,8 @@ from app.adapter.out.persistence.models.stock_price_periodic import (
     StockPriceMonthlyNxt,
     StockPriceWeeklyKrx,
     StockPriceWeeklyNxt,
+    StockPriceYearlyKrx,
+    StockPriceYearlyNxt,
 )
 
 __all__ = [
@@ -30,4 +32,6 @@ __all__ = [
     "StockPriceNxt",
     "StockPriceWeeklyKrx",
     "StockPriceWeeklyNxt",
+    "StockPriceYearlyKrx",
+    "StockPriceYearlyNxt",
 ]

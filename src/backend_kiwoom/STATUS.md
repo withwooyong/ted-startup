@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-11 (Migration 013 C-2δ 완료 — C/E 중복 2 컬럼 DROP / 1030 tests)
+> **마지막 갱신**: 2026-05-11 (Phase C-4 완료 — ka10094 년봉 / Migration 014 / 1035 tests / 11/25 endpoint)
 
 ---
 
@@ -12,8 +12,8 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **C-2δ Migration 013** — `credit_balance_rate` + `foreign_weight` DROP (10 → 8 도메인) / 1030 tests / ADR § 28 |
-| 다음 chunk | **scheduler_enabled 운영 cron 활성 + 1주 모니터** → follow-up F6/F7/F8 → ka10094 |
+| 마지막 완료 chunk | **C-4 — ka10094 년봉 (Migration 014, KRX only NXT skip)** / 1035 tests / ADR § 29 / Phase C chart 종결 |
+| 다음 chunk | **refactor R2** → follow-up F6/F7/F8 → ETF/ETN OHLCV → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
 | 25 Endpoint 진행 | **10 / 25 완료** (40%). CLI 도구 4건 |
 | 누적 chunk | 37 commits (... + flow-resume-eqcol-verify 1) |
 | 테스트 | **1024 cases** (993 → +31: mrkcond +2 / daily_flow_service +5 / backfill_daily_flow_cli +24) |
@@ -40,7 +40,7 @@
 
 ## 2. 25 Endpoint 카탈로그 (진척별)
 
-### 2.1 완료 (10 / 25)
+### 2.1 완료 (11 / 25)
 
 | # | API | 명 | Phase | chunk | 커밋 |
 |---|-----|----|-------|-------|------|
@@ -50,23 +50,22 @@
 | 4 | ka10100 | 종목정보 조회 | B-β | 1R + gap-filler / lazy fetch | `abce7e0` |
 | 5 | ka10001 | 주식기본정보 | B-γ-1/2 | 1R+2R + 자동화 | `a287172` / `56dbad9` |
 | 6 | ka10081 | 주식일봉차트 | C-1α/β | 1R+2R / 1R + 자동화 | `a98e37b` / `993874c` |
-| 7 | ka10086 | 일별주가 (수급) | C-2α/β/γ | 인프라 + 자동화 + Migration 008 (D-E 중복 DROP) | `cddd268` / `e442416` / (C-2γ) |
+| 7 | ka10086 | 일별주가 (수급) | C-2α/β/γ/δ | 인프라 + 자동화 + Migration 008/013 (중복 컬럼 DROP) | `cddd268` / `e442416` / (C-2γ) / `8dd5727` |
 | 8 | ka10101 | 업종코드 리스트 | A3-α/β | KiwoomClient 공통 + sector 영속화 | `cce855c` / `6cd4371` |
-| **9** | **ka10082** | **주식주봉차트** | **C-3α/β** | 인프라 + 자동화 (UseCase + Router 4 path + Scheduler 금 19:30) | `8fcabe4` / (C-3β) |
-| **10** | **ka10083** | **주식월봉차트** | **C-3α/β** | ka10082 와 동일 chunk (Period dispatch) — Scheduler 매월 1일 03:00 | `8fcabe4` / (C-3β) |
+| 9 | ka10082 | 주식주봉차트 | C-3α/β | 인프라 + 자동화 (UseCase + Router 4 path + Scheduler 금 19:30) | `8fcabe4` / (C-3β) |
+| 10 | ka10083 | 주식월봉차트 | C-3α/β | ka10082 와 동일 chunk (Period dispatch) — Scheduler 매월 1일 03:00 | `8fcabe4` / (C-3β) |
+| **11** | **ka10094** | **주식년봉차트** | **C-4** | Migration 014 + UseCase YEARLY 분기 활성 + Router 2 path + Scheduler 매년 1월 5일 03:00. KRX only (NXT skip) | (this commit) |
 
 ### 2.2 진행중 / 다음 (0)
 
 OHLCV 패밀리 (일/주/월) 자동화 + 백필 CLI 모두 완료. Phase C 95% 진행.
 다음은 **운영 실측** (사용자 수동) / **daily_flow 백필** / **refactor R2** / **ka10094** (P2).
 
-### 2.3 대기 (17 / 25)
+### 2.3 대기 (14 / 25)
 
 P1 (1주 내):
 | # | API | 명 | Phase | 비고 |
 |---|-----|----|-------|------|
-| 9 | ka10094 | 주식년봉차트 | C-3? | P2 (선택) |
-| 14 | ka10101 | (완료, 위 #8) | — | — |
 | 15 | ka10014 | 공매도 추이 | E | shsa endpoint 신규 |
 | 16 | ka10068 | 대차거래 추이 | E | slb endpoint 신규 |
 
@@ -111,7 +110,7 @@ P3 (선택):
 | **C-flow-empty-fix** | NXT 빈 응답 sentinel 무한 루프 fix (mrkcond + chart daily/weekly/monthly 4 곳 `if not <list>: break`) | ✅ | 010950 3년 reproduce PASS (13s / 0 fail) / 1026 tests (+2: mrkcond +1, chart +1) `72dbe69` |
 | **C-flow-resume-eqcol** | failed 166 NXT resume 재시도 + 컬럼 동일값 검증 (`IS DISTINCT FROM` SQL) | ✅ | resume 166/10/0 / 21m 33s — 최종 DB KRX 4077 + NXT 626 (OHLCV 일치). 컬럼 동일값 확정 (2.88M rows / `credit_diff=0` / `foreign_diff=0`) — Migration 013 chunk 진입 |
 | **C-2δ** | Migration 013 — C/E 중복 2 컬럼 DROP (`credit_balance_rate` / `foreign_weight`). 10 → 8 도메인 | ✅ | 1R PASS (M-1/L-1 fix), **1030 tests** (+4) / ADR § 28 / Verification 가 잡은 2건: VARCHAR(32) revision id truncation + test_008 hard-coded 카운트 |
-| C-4 (선택) | ka10094 (년봉) — P2 | ⏳ | `endpoint-09-ka10094.md` |
+| **C-4** | Migration 014 + ka10094 년봉 인프라 + 자동화. KRX only (NXT skip yearly_nxt_disabled). 응답 7 필드 + 매년 1월 5일 03:00 cron. Phase C chart 카테고리 종결 (10/25 → 11/25) | ✅ | **1035 tests** (+5) / ADR § 29 / Verification 가 잡은 5건: revision id 22 chars 사전 안전 / mypy invariant list / helper signature union / stale C-3α 가드 6건 / env alias 누락 2건 |
 
 ---
 
@@ -129,7 +128,8 @@ P3 (선택):
 | ~~14~~ | ~~`DAILY_MARKET_MAX_PAGES=10` 부족~~ | smoke 2026-05-10 | ✅ 해소 (`7c07fb7`) — fix `=40` |
 | ~~15~~ | ~~NXT 166 종목 max_pages=40 도 부족~~ | full 2026-05-11 | ✅ 해소 (`72dbe69`) — sentinel 무한 루프 mrkcond/chart 4 곳 fix + resume PASS |
 | ~~16~~ | ~~컬럼 동일값 의심~~ | NUMERIC SQL 2026-05-11 | ✅ 확정 (`2317528`) — 2,879,500 rows 100% 동일 |
-| ~~17~~ | ~~Migration 013 미진행~~ | resume 후 2026-05-11 | ✅ 해소 (`<this commit>`) — Migration 013 C-2δ / 10 → 8 도메인 / 1030 tests / ADR § 28 |
+| ~~17~~ | ~~Migration 013 미진행~~ | resume 후 2026-05-11 | ✅ 해소 (`8dd5727`) — Migration 013 C-2δ / 10 → 8 도메인 / 1030 tests / ADR § 28 |
+| ~~18~~ | ~~ka10094 (년봉) 미구현~~ | C-3β 가드 | ✅ 해소 (`<this commit>`) — C-4 Migration 014 / 11/25 endpoint / 1035 tests / ADR § 29 |
 | ~~8~~ | ~~CLI bug: `--max-stocks` 무시~~ | smoke 2026-05-10 | ✅ 해소 (`76b3a4a`) |
 | ~~9~~ | ~~ETF/ETN stock_code 호환성: 251 종목 ValueError~~ | smoke 2026-05-10 | ✅ 해소 (`c75ede6`) — UseCase 가드 (옵션 a) |
 | **10 (F6)** | since_date guard edge case — 2 종목 (002690, 004440) 만 since_date 보다 과거 적재 | full 2026-05-10 | LOW — 0.13% rows / 데이터 nuetral~plus. follow-up |
@@ -143,14 +143,14 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | 측정 #4 (일간 cron elapsed) 미수행. OHLCV + daily_flow 통합 1주 모니터 → ADR § 26.5 + § 28 추가 | env 변경 + 1주 운영 모니터 |
-| 2 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 | 분석 + 정책 결정 |
-| 4 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
-| 5 | refactor R2 (1R Defer 일괄 정리) | L-2 (NotImplementedError 핸들러) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 / E-2 / gap detection | refactor 5건 일괄 |
-| 6 | ka10094 (년봉, P2) | C-3 와 동일 패턴 (Migration 1 + UseCase YEARLY 분기 활성화 — 현재 NotImplementedError) | Migration 1 + ~200줄 |
-| 7 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
-| 8 | Phase D 진입 — ka10080 분봉 | 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
-| ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration 013 + ALTER COLUMN |
+| **1** | **refactor R2 (1R Defer 일괄 정리)** | L-2 (NotImplementedError 핸들러 — C-4 이후 일부 잔존?) / E-1 (ka10081 sync KiwoomError 핸들러) / M-3 / E-2 / gap detection | refactor 5건 일괄 |
+| 2 | follow-up F6/F7/F8 일괄 분석 | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 (OHLCV + daily_flow 통합) | 분석 + 정책 결정 |
+| 3 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
+| 5 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
+| 6 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
+| 7 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
+| **최종** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | **사용자 결정 (2026-05-11): 모든 작업 완료 후 활성**. 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow + 통합 1주 모니터 → ADR § 26.5 + § 28 후속 측정 | env 변경 + 1주 |
+| ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration + ALTER COLUMN |
 
 ---
 

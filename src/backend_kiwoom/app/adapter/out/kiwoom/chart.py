@@ -145,6 +145,70 @@ class MonthlyChartResponse(BaseModel):
     return_msg: Annotated[str, Field(max_length=200)] = ""
 
 
+class YearlyChartRow(BaseModel):
+    """ka10094 응답 row — 7 필드만 (DailyChartRow 와 다름, C-4).
+
+    설계: endpoint-09-ka10094.md § 3.2.
+
+    DailyChartRow 의 10 필드 중 `pred_pre` / `pred_pre_sig` / `trde_tern_rt` 없음.
+    `to_normalized` 에선 prev_compare_amount / prev_compare_sign / turnover_rate = None 으로
+    영속화 (NormalizedDailyOhlcv 의 모든 필드 Optional).
+
+    extra="ignore" — vendor 가 운영에서 누락 필드 추가 시 silent 무시 (plan § 12.4 H-3).
+
+    `dt` 의미: 해의 첫 거래일 (가설 — 운영 first-call 후 확정).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    cur_prc: Annotated[str, Field(max_length=32)] = ""
+    trde_qty: Annotated[str, Field(max_length=32)] = ""
+    trde_prica: Annotated[str, Field(max_length=32)] = ""
+    dt: Annotated[str, Field(max_length=8)] = ""
+    open_pric: Annotated[str, Field(max_length=32)] = ""
+    high_pric: Annotated[str, Field(max_length=32)] = ""
+    low_pric: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        stock_id: int,
+        exchange: ExchangeType,
+        adjusted: bool,
+    ) -> NormalizedDailyOhlcv:
+        """ka10094 row → NormalizedDailyOhlcv.
+
+        7 필드만 → prev_compare_* / turnover_rate = None (NULL 영속).
+        빈 dt → trading_date=date.min. caller (Repository.upsert_many) 가 skip.
+        """
+        return NormalizedDailyOhlcv(
+            stock_id=stock_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            exchange=exchange,
+            adjusted=adjusted,
+            open_price=_to_int(self.open_pric),
+            high_price=_to_int(self.high_pric),
+            low_price=_to_int(self.low_pric),
+            close_price=_to_int(self.cur_prc),
+            trade_volume=_to_int(self.trde_qty),
+            trade_amount=_to_int(self.trde_prica),
+            prev_compare_amount=None,
+            prev_compare_sign=None,
+            turnover_rate=None,
+        )
+
+
+class YearlyChartResponse(BaseModel):
+    """ka10094 응답 — `stk_yr_pole_chart_qry` list 키."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    stk_cd: Annotated[str, Field(max_length=20)] = ""
+    stk_yr_pole_chart_qry: list[YearlyChartRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
 @dataclass(frozen=True, slots=True)
 class NormalizedDailyOhlcv:
     """ka10081 정규화 도메인 — Repository 가 보는 형태.
@@ -180,6 +244,9 @@ class KiwoomChartClient:
     WEEKLY_MAX_PAGES = 3
     MONTHLY_API_ID = "ka10083"
     MONTHLY_MAX_PAGES = 2
+    YEARLY_API_ID = "ka10094"
+    # 년봉은 30년 백필도 1 페이지 가정 (plan § 11.3 / 12.4 H-7). 안전 마진으로 2 cap.
+    YEARLY_MAX_PAGES = 2
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
@@ -300,11 +367,12 @@ class KiwoomChartClient:
         return all_rows
 
     @staticmethod
-    def _page_reached_since(rows: Sequence[DailyChartRow], since_date: date) -> bool:
+    def _page_reached_since(rows: Sequence[DailyChartRow | YearlyChartRow], since_date: date) -> bool:
         """페이지의 가장 오래된 row date 가 since_date 보다 과거 (이하) 면 True.
 
-        ka10081/82/83 응답은 신→구 정렬 가정 — 마지막 row 가 가장 과거. 빈 dt 는 무시.
+        ka10081/82/83/94 응답은 신→구 정렬 가정 — 마지막 row 가 가장 과거. 빈 dt 는 무시.
         Weekly/MonthlyChartRow 는 DailyChartRow subclass — Sequence (covariant) 로 호환.
+        YearlyChartRow 는 별도 정의 (7 필드) — `dt` attribute 동일하므로 union 으로 cover.
         """
         for row in reversed(rows):
             parsed = _parse_yyyymmdd(row.dt)
@@ -313,7 +381,7 @@ class KiwoomChartClient:
         return False
 
     @staticmethod
-    def _row_on_or_after(row: DailyChartRow, since_date: date) -> bool:
+    def _row_on_or_after(row: DailyChartRow | YearlyChartRow, since_date: date) -> bool:
         """row date >= since_date 면 True. 빈 dt (date.min) 는 keep — Repository 가 skip."""
         parsed = _parse_yyyymmdd(row.dt)
         if parsed is None:
@@ -474,6 +542,85 @@ class KiwoomChartClient:
 
         return all_rows
 
+    async def fetch_yearly(
+        self,
+        stock_code: str,
+        *,
+        base_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        adjusted: bool = True,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[YearlyChartRow]:
+        """ka10094 년봉 OHLCV — fetch_weekly/monthly 패턴 복제. list 키 + api_id 만 다름.
+
+        Parameters / Raises 는 fetch_weekly 와 동일 (api_id="ka10094", list 키
+        `stk_yr_pole_chart_qry`). NXT skip 정책은 UseCase 가드에서 처리 — 본 메서드는
+        호출되지 않거나 KRX 만 호출됨.
+
+        `dt` 의미는 해의 첫 거래일 (가설 — 운영 first-call 후 확정).
+        응답 7 필드만 (pred_pre/pred_pre_sig/trde_tern_rt 없음) — to_normalized 에서 NULL 영속.
+        """
+        expected_stk_cd = build_stk_cd(stock_code, exchange)
+
+        body: dict[str, Any] = {
+            "stk_cd": expected_stk_cd,
+            "base_dt": base_date.strftime("%Y%m%d"),
+            "upd_stkpc_tp": "1" if adjusted else "0",
+        }
+
+        cap = max_pages if max_pages is not None else self.YEARLY_MAX_PAGES
+        all_rows: list[YearlyChartRow] = []
+
+        async for page in self._client.call_paginated(
+            api_id=self.YEARLY_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=cap,
+        ):
+            validation_failed = False
+            parsed: YearlyChartResponse | None = None
+            try:
+                parsed = YearlyChartResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(f"{self.YEARLY_API_ID} 응답 검증 실패")
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+
+            if parsed.stk_cd:
+                response_base = strip_kiwoom_suffix(parsed.stk_cd)
+                expected_base = strip_kiwoom_suffix(expected_stk_cd)
+                if response_base != expected_base:
+                    raise KiwoomResponseValidationError(
+                        f"{self.YEARLY_API_ID} 응답 stk_cd 메아리 mismatch (요청 vs 응답)"
+                    )
+
+            if parsed.return_code != 0:
+                raise KiwoomBusinessError(
+                    api_id=self.YEARLY_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+
+            all_rows.extend(parsed.stk_yr_pole_chart_qry)
+
+            # 빈 응답 가드 (fetch_daily/weekly/monthly 와 동일 — sentinel 무한 루프 방어, C-flow-empty-fix).
+            if not parsed.stk_yr_pole_chart_qry:
+                break
+
+            if since_date is not None and self._page_reached_since(
+                parsed.stk_yr_pole_chart_qry, since_date
+            ):
+                break
+
+        if since_date is not None:
+            all_rows = [r for r in all_rows if self._row_on_or_after(r, since_date)]
+
+        return all_rows
+
 
 __all__ = [
     "DailyChartResponse",
@@ -484,4 +631,6 @@ __all__ = [
     "NormalizedDailyOhlcv",
     "WeeklyChartResponse",
     "WeeklyChartRow",
+    "YearlyChartResponse",
+    "YearlyChartRow",
 ]

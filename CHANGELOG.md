@@ -7,6 +7,72 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] feat(kiwoom): Phase C-4 — ka10094 년봉 OHLCV (Migration 014, KRX only NXT skip, 11/25 endpoint)
+
+C-3α/β 의 `IngestPeriodicOhlcvUseCase` YEARLY 분기 NotImplementedError 가드 → 활성화. 응답 7 필드 + NXT skip 정책 + 매년 1월 5일 KST 03:00 cron 차이만 핵심. Phase C chart 카테고리 (일/주/월/년봉) 종결. /ted-run 풀 파이프라인 (TDD → 구현 → 1R → Verification Loop → ADR § 29).
+
+### 1. 변경 범위 (11 코드 + 6 테스트)
+
+**코드** (10 신규/수정):
+- `migrations/versions/014_stock_price_yearly.py` (신규, revision id 22 chars)
+- `app/adapter/out/persistence/models/stock_price_periodic.py` (StockPriceYearly{Krx,Nxt} 2 클래스 + mixin 재사용)
+- `app/adapter/out/persistence/models/__init__.py` (export 2)
+- `app/adapter/out/kiwoom/chart.py` (YearlyChartRow + YearlyChartResponse 7 필드 + fetch_yearly + sentinel break)
+- `app/adapter/out/persistence/repositories/stock_price_periodic.py` (YEARLY dispatch table 등록, PeriodicModel union 확장)
+- `app/application/service/ohlcv_periodic_service.py` (`_validate_period` NotImplementedError 제거 / `_ingest_one` YEARLY 분기 + fetch_yearly / `_api_id_for` YEARLY → ka10094 / NXT skip 가드)
+- `app/adapter/web/routers/ohlcv_periodic.py` (yearly sync + refresh 2 path / `_api_id_for` 모듈 헬퍼)
+- `app/batch/yearly_ohlcv_job.py` (신규, monthly 패턴 1:1)
+- `app/scheduler.py` (YearlyOhlcvScheduler + YEARLY_OHLCV_SYNC_JOB_ID + CronTrigger month=1 day=5 hour=3)
+- `app/config/settings.py` (`scheduler_yearly_ohlcv_sync_alias` 추가)
+- `app/main.py` (lifespan alias fail-fast + YearlyOhlcvScheduler 등록/shutdown)
+
+**테스트** (1030 → **1035**, +5 cases):
+- `tests/test_migration_014.py` (신규 5 cases — yearly 2 테이블 / UNIQUE / 인덱스 / FK CASCADE / downgrade 가드 / 라운드트립)
+- `tests/test_stock_price_periodic_repository.py` (3 stale yearly raises → YEARLY 활성 검증)
+- `tests/test_ohlcv_periodic_service.py` (2 stale NotImplementedError → YEARLY KRX-only 성공 + NXT skip)
+- `tests/test_skip_base_date_validation.py` (1 stale NotImplementedError → YEARLY skip-validation 정상)
+- `tests/test_scheduler.py` + `test_stock_master_scheduler.py` (SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS env 추가)
+- `tests/test_migration_013.py` (downgrade 가드 단언 정정 — 014 head 후 transactional rollback)
+
+### 2. Verification Loop 가 잡은 5건
+
+정적 분석 (ruff PASS) 으로 못 잡고 mypy + testcontainers 가 발견:
+
+1. **mypy `--strict` invariant list 거부** — `rows: list[DailyChartRow] | list[YearlyChartRow]` (variant) → `list[DailyChartRow | YearlyChartRow]` (covariant). WeeklyChartRow/MonthlyChartRow 의 DailyChartRow 상속과 YearlyChartRow 별도 정의 차이가 type system 노출
+2. **`_page_reached_since` / `_row_on_or_after` helper signature 확장** — `Sequence[DailyChartRow]` → `Sequence[DailyChartRow | YearlyChartRow]`
+3. **C-3α stale 가드 단언 6건** — repository 3건 + service 2건 + skip_base_date 1건. plan doc § 12.3 미명시 — testcontainers 자동 발견 (C-2δ test_008 패턴 재현)
+4. **테스트 env alias 누락 2건** — test_scheduler.py + test_stock_master_scheduler.py 의 lifespan fail-fast 테스트가 SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS 누락
+5. **test_migration_013 단언 정정** — 014 head 진입 후 command.downgrade(012) 가 014 → 013 다단계, 단일 transaction rollback 으로 014 head 유지. 양성 단언 → downgrade target 미도달 단언으로 정정
+
+### 3. 결정
+
+- **응답 7 필드** — YearlyChartRow 별도 정의 (DailyChartRow 상속 불가). `to_normalized` 에서 prev_compare_amount/sign/turnover_rate=None → DB NULL 영속
+- **NXT skip** — UseCase execute/refresh_one 의 NXT 가드에 `or period is Period.YEARLY` 추가. fetch_yearly 자체는 호출 안 됨
+- **테이블 KRX/NXT 분리** — Migration 014 가 두 테이블 신규. dispatch table 도 둘 다 등록. 향후 NXT skip 해제 chunk 시 활용
+- **revision id 22 chars** — C-2δ VARCHAR(32) 학습 후 안전 마진 10 chars 확보
+- **scheduler_enabled 보류** — 사용자 결정 (모든 작업 완료 후 활성). 코드 등록까지만
+
+### 4. Phase C 종결
+
+| API | 명 | cron | 상태 |
+|-----|----|----- |------|
+| ka10081 | 일봉 | 평일 18:30 | ✅ |
+| ka10082 | 주봉 | 금 19:30 | ✅ |
+| ka10083 | 월봉 | 매월 1일 03:00 | ✅ |
+| ka10094 | **년봉** | **매년 1월 5일 03:00** | ✅ **본 chunk** |
+| ka10086 | 일별 수급 | 평일 19:00 | ✅ |
+
+### 5. 다음 chunk 후보
+
+1. **refactor R2 (1R Defer 일괄 정리)** (LOW / 1일)
+2. follow-up F6/F7/F8 + daily_flow 빈 응답 1건 (LOW / 0.5일)
+3. ETF/ETN OHLCV 별도 endpoint (옵션 c)
+4. Phase D 진입 — ka10080 분봉 / ka20006 업종일봉
+5. Phase E/F/G (공매도/대차/순위/투자자별 wave)
+6. **(최종) scheduler_enabled 일괄 활성** — 사용자 결정
+
+---
+
 ## [2026-05-11] refactor(kiwoom): Phase C-2δ — Migration 013 (C/E 중복 2 컬럼 DROP, 10→8 도메인)
 
 운영 실측 § 5.6 IS DISTINCT FROM 검증 (2.88M rows / `credit_diff=0` / `foreign_diff=0`) 으로 확정된 C/E 중복 2 컬럼 (`credit_balance_rate` / `foreign_weight`) DROP. C-2γ Migration 008 (D-E 중복 3 컬럼 DROP) 패턴 1:1 응용. /ted-run 풀 파이프라인 (TDD → 구현 → 1R PASS → Verification Loop → ADR/STATUS/HANDOFF/CHANGELOG).
