@@ -232,7 +232,11 @@ async def test_fetch_daily_propagates_business_error() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_daily_rejects_invalid_stock_code() -> None:
-    """6자리 ASCII 숫자 외 거부 (어댑터 사전 검증, ka10100 패턴 일관)."""
+    """6자리 영숫자 대문자 외 거부 (CHART 패턴, ADR § 32 chunk 2).
+
+    영숫자 대문자 (`03473K`) 통과 — 우선주/ETF 호출 가능. lowercase / 특수문자 /
+    suffix 박힌 입력은 그대로 거부.
+    """
     call_count = 0
 
     def handler(_req: httpx.Request) -> httpx.Response:
@@ -242,7 +246,7 @@ async def test_fetch_daily_rejects_invalid_stock_code() -> None:
 
     async with _make_kiwoom_client(handler) as kc:
         adapter = KiwoomChartClient(kc)
-        for invalid in ("00593", "ABC123", "005930_NX", "      ", ""):
+        for invalid in ("00593", "005930_NX", "      ", "", "0000d0", "00ABC!"):
             with pytest.raises(ValueError):
                 await adapter.fetch_daily(invalid, base_date=date(2025, 9, 8))
 

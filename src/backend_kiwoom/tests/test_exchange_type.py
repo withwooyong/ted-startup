@@ -51,7 +51,22 @@ def test_build_stk_cd_rejects_empty_stock_code() -> None:
 
 
 def test_build_stk_cd_rejects_invalid_format() -> None:
-    """6자리 숫자 외 거부 (KRX-only 6자리 정책 일관, B-β 어댑터 패턴)."""
-    for invalid in ("00593", "ABC123", "0059300", "005930_NX"):
+    """6자리 영숫자 대문자 외 거부 (CHART 패턴, ADR § 32 chunk 2).
+
+    영숫자 대문자 통과 (`ABC123`) → CHART 패턴 분리 후 정책 변경. 기존 LOOKUP
+    의 ASCII-only 거부는 lookup 계열 (ka10100/ka10001) 에서만 유지.
+    """
+    for invalid in ("00593", "0059300", "005930_NX", "      ", "", "0000d0", "00ABC!"):
         with pytest.raises(ValueError):
             build_stk_cd(invalid, ExchangeType.KRX)
+
+
+def test_build_stk_cd_accepts_alphanumeric_uppercase() -> None:
+    """우선주 / ETF 영숫자 대문자 stk_cd 통과 (ADR § 32 Chunk 1 dry-run 확정).
+
+    KRX/NXT/SOR 3 거래소 모두 CHART 패턴 (`^[0-9A-Z]{6}$`) 적용. base code →
+    `_NX`/`_AL` suffix 합성 동일.
+    """
+    assert build_stk_cd("03473K", ExchangeType.KRX) == "03473K"
+    assert build_stk_cd("00088K", ExchangeType.NXT) == "00088K_NX"
+    assert build_stk_cd("0000D0", ExchangeType.SOR) == "0000D0_AL"

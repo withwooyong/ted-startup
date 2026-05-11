@@ -7,7 +7,8 @@
 
 책임:
 - KiwoomClient 위임 — 토큰 / 재시도 / rate-limit / cont-yn 페이지네이션
-- stock_code 6자리 ASCII 사전 검증 (build_stk_cd) — `_NX`/`_AL` suffix 입력 거부
+- stock_code 6자리 영숫자 대문자 사전 검증 (build_stk_cd / STK_CD_CHART_PATTERN, ADR § 32)
+  — `_NX`/`_AL` suffix 입력 거부, 우선주 (`*K`) 등 영숫자 종목 허용
 - exchange 별 stk_cd suffix 합성 (KRX/NXT/SOR)
 - 응답 row 파싱 (Pydantic) — KiwoomBusinessError / KiwoomResponseValidationError 매핑
 - 페이지네이션 결과 합치기

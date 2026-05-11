@@ -448,23 +448,22 @@ async def test_execute_skips_inactive_stocks(
     assert result.total == 1
 
 
-# ---------- 10-bis. ka10081 호환 가드 (ETF/ETN/우선주 skip) ----------
+# ---------- 10-bis. ka10081 호환 가드 (CHART 영숫자 통과 / 비호환 skip) ----------
 
 
 @pytest.mark.asyncio
-async def test_execute_skips_alpha_stock_codes(
+async def test_execute_accepts_alphanumeric_uppercase_stock_codes(
     session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
     session: AsyncSession,
 ) -> None:
-    """영문 포함 stock_code (`0000D0` ETF / `00088K` 우선주) 는 호출 전 사전 skip.
+    """영숫자 대문자 stock_code (`0000D0` ETF / `00088K` 우선주) 통과 (ADR § 32 chunk 2).
 
-    smoke 운영 발견 — `kiwoom.stock` 의 active 중 ETF/ETN/우선주 약 6.7% 가 영문
-    포함 코드. 이전엔 build_stk_cd 가 ValueError 던져 errors 에 누적. UseCase
-    가드로 호출 자체 차단 (불필요 try/except 회피).
+    Chunk 1 dry-run 에서 키움 chart endpoint 가 우선주 `*K` / ETF 영숫자 stk_cd
+    수용 확정. CHART 패턴 (`^[0-9A-Z]{6}$`) 분리 후 UseCase 가드도 동일 정책.
     """
-    await _create_active_stock(session, "005930", "삼성전자")  # 호환
-    await _create_active_stock(session, "0000D0", "TIGER ETF")  # ETF — skip
-    await _create_active_stock(session, "00088K", "한화3우B")  # 우선주 — skip
+    await _create_active_stock(session, "005930", "삼성전자")  # 숫자 6자리
+    await _create_active_stock(session, "0000D0", "TIGER ETF")  # ETF 영숫자
+    await _create_active_stock(session, "00088K", "한화3우B")  # 우선주 영숫자
     await session.commit()
 
     called: list[str] = []
@@ -488,7 +487,46 @@ async def test_execute_skips_alpha_stock_codes(
     )
     result = await uc.execute(base_date=date(2025, 9, 8))
 
-    # 호환 1 종목 (005930) 만 호출. ETF/우선주 2 종목은 사전 가드로 skip.
+    # CHART 패턴 통과 — 3 종목 모두 호출 (영숫자 대문자 허용)
+    assert sorted(called) == ["0000D0", "00088K", "005930"]
+    assert result.total == 3
+    assert result.success_krx == 3
+    assert result.failed == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_skips_incompatible_stock_codes(
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    session: AsyncSession,
+) -> None:
+    """비호환 stock_code (lowercase / 5자리 / 특수문자) 사전 skip — CHART 패턴 거부 케이스."""
+    await _create_active_stock(session, "005930", "삼성전자")  # 호환
+    await _create_active_stock(session, "0000d0", "lowercase 변형")  # skip
+    await _create_active_stock(session, "00088!", "특수문자 변형")  # skip
+    await session.commit()
+
+    called: list[str] = []
+
+    async def _fetch(
+        stock_code: str,
+        *,
+        base_date: date,
+        exchange: ExchangeType = ExchangeType.KRX,
+        adjusted: bool = True,
+        max_pages: int | None = None,
+        since_date: date | None = None,
+    ) -> list[DailyChartRow]:
+        called.append(stock_code)
+        return [_row("20250908")]
+
+    client = AsyncMock(spec=KiwoomChartClient)
+    client.fetch_daily = _fetch
+    uc = IngestDailyOhlcvUseCase(
+        session_provider=session_provider, chart_client=client, nxt_collection_enabled=False
+    )
+    result = await uc.execute(base_date=date(2025, 9, 8))
+
+    # 호환 1 종목만 호출. 2 비호환 종목은 사전 가드로 skip.
     assert called == ["005930"]
     assert result.total == 1
     assert result.success_krx == 1

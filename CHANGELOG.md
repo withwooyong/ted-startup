@@ -7,6 +7,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] feat(kiwoom): chart stk_cd 영숫자 가드 완화 Chunk 2 — STK_CD_CHART_PATTERN 신규 (옵션 c-A, ADR § 33)
+
+§ 32 Chunk 1 dry-run (KRX 6/6 SUCCESS) 결과를 근거로 가드 분리 구현. plan doc `phase-c-chart-alphanumeric-guard.md` § 4 범위 그대로.
+
+### 1. 핵심 변경
+
+- **`stkinfo.py`**: `STK_CD_CHART_PATTERN = ^[0-9A-Z]{6}$` 상수 신규 + `_STK_CD_CHART_RE` 컴파일 + `_validate_stk_cd_for_chart` 검증 함수 신규 (A-L1 메시지 cap 정책 일관)
+- **`build_stk_cd`**: `_validate_stk_cd_for_lookup` → `_validate_stk_cd_for_chart` 교체. docstring 갱신 (6자리 ASCII → 6자리 영숫자 대문자)
+- **chart adapter** (`chart.py` / `mrkcond.py`): 모듈 docstring 갱신 — "CHART 패턴 (STK_CD_CHART_PATTERN, ADR § 32)" 명시
+- **chart 5 router 7 path**: `ohlcv.py` (ka10081 sync/refresh) / `ohlcv_periodic.py` (ka10082/83/94 sync/refresh/get) / `daily_flow.py` (ka10086 sync/refresh) 가 `STK_CD_LOOKUP_PATTERN` → `STK_CD_CHART_PATTERN`
+- **3 UseCase**: `ohlcv_daily_service` / `ohlcv_periodic_service` / `daily_flow_service` 의 `_KA*_COMPATIBLE_RE` 가 LOOKUP → CHART
+- **lookup 계열 5곳 무변**: `stocks.py` (ka10100) / `fundamentals.py` (ka10001) / `stkinfo._validate_stk_cd_for_lookup` 그대로 — Excel R22 ASCII 명시 제약 유지
+
+### 2. 테스트 (1037 → 1046, +9)
+
+- **신규 5**: `test_validate_stk_cd_for_chart_accepts_alphanumeric_uppercase` / `..._rejects_invalid_format` / `..._message_capped_at_50_chars` / `test_validate_stk_cd_for_lookup_still_rejects_alphanumeric` (lookup 보호 단언) / `test_build_stk_cd_accepts_alphanumeric_uppercase`
+- **회귀 갱신 6→4**: `test_build_stk_cd_rejects_invalid_format` / `test_fetch_daily_rejects_invalid_stock_code` / `test_fetch_daily_market_rejects_invalid_stock_code` / `test_get_ohlcv_rejects_invalid_stock_code` / `test_get_daily_flow_rejects_invalid_stock_code` — invalid set 에서 `ABC123` 제거 + `0000d0` / `00ABC!` 추가
+- **의미 반전**: `test_execute_skips_alpha_stock_codes` → `test_execute_accepts_alphanumeric_uppercase_stock_codes` (3 UseCase 모두) + 신규 거부 케이스 (`test_execute_skips_incompatible_stock_codes`)
+- **신규 chart 라우터 영숫자 통과 단언**: `test_get_ohlcv_accepts_alphanumeric_uppercase_stock_code` / `test_get_daily_flow_accepts_alphanumeric_uppercase_stock_code`
+
+### 3. Verification 가 잡은 회귀 6건
+
+testcontainers 가 자동 발견 — chart 계열 거부 단언이 영숫자에서 의도와 반대로 작동. plan doc § 4.6 의 예측 적중. 6건 모두 의미 반전 또는 invalid set 갱신으로 해소.
+
+### 4. 외부 contract 영향
+
+chart 계열 endpoint 의 호출 대상 stock 범위가 영숫자 (`*K` 우선주 + 영숫자 ETF) 까지 확장 — 운영 cron 실행 시 ~295 종목 추가 호출. OHLCV daily cron elapsed 34분 → ~44분 추정 (2초 rate limit 직렬화). STATUS § 4 신규 항목 #19 로 추적.
+
+### 5. Verification
+
+- ruff All checks passed / mypy --strict Success / pytest 1046 PASS / coverage 91% (이전 81%)
+
+### 6. 결과 / 산출물
+
+- 코드 변경 5 파일 (stkinfo / chart / mrkcond + 3 router + 3 service = 8 파일이지만 일부 import 만)
+- 테스트 변경 7 파일 (단위 3 + 서비스 3 + 라우터 2 + stkinfo 1)
+- ADR § 33 신규 / STATUS § 0 + § 4 #19/#20 + § 5 #1 변경 + § 6 누적
+
+---
+
 ## [2026-05-11] docs(kiwoom): chart 영숫자 stk_cd 가드 완화 — Chunk 1 dry-run (옵션 c-A, ADR § 32)
 
 § 31.6 #1 "ETF/ETN OHLCV 별도 endpoint (옵션 c)" 의 사용자 분기 — **옵션 A (우선주/특수 종목 가드 완화)** 채택. 2단계 진행의 Chunk 1 = 운영 dry-run (코드 0줄).

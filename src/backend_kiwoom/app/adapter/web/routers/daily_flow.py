@@ -32,7 +32,7 @@ from app.adapter.out.kiwoom._exceptions import (
     KiwoomResponseValidationError,
     KiwoomUpstreamError,
 )
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_CHART_PATTERN
 from app.adapter.out.persistence.repositories.stock import StockRepository
 from app.adapter.out.persistence.repositories.stock_daily_flow import (
     StockDailyFlowRepository,
@@ -208,7 +208,7 @@ async def sync_daily_flow(
 async def refresh_daily_flow(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     alias: Annotated[
         str,
@@ -311,7 +311,7 @@ async def refresh_daily_flow(
 async def get_daily_flow(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     start: Annotated[date, Query(description="시작일 (포함)")],
     end: Annotated[date, Query(description="종료일 (포함)")],

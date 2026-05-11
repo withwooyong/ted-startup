@@ -39,7 +39,7 @@ from app.adapter.out.kiwoom._exceptions import (
     KiwoomResponseValidationError,
     KiwoomUpstreamError,
 )
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_CHART_PATTERN
 from app.adapter.web._deps import (
     IngestPeriodicOhlcvUseCaseFactory,
     get_ingest_periodic_ohlcv_factory,
@@ -303,7 +303,7 @@ async def sync_ohlcv_weekly(
 async def refresh_ohlcv_weekly(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     alias: Annotated[
         str,
@@ -355,7 +355,7 @@ async def sync_ohlcv_monthly(
 async def refresh_ohlcv_monthly(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     alias: Annotated[
         str,
@@ -407,7 +407,7 @@ async def sync_ohlcv_yearly(
 async def refresh_ohlcv_yearly(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     alias: Annotated[
         str,

@@ -474,14 +474,32 @@ async def test_get_ohlcv_rejects_inverted_window() -> None:
 
 @pytest.mark.asyncio
 async def test_get_ohlcv_rejects_invalid_stock_code() -> None:
-    """5자리 / 영문 → 422."""
+    """CHART path 거부 — 5자리 / suffix / lowercase / 특수문자 (ADR § 32 chunk 2).
+
+    영숫자 대문자 (`03473K`) 는 CHART 패턴 통과로 별도 테스트.
+    """
     app = _make_app()
     async with _client(app) as cl:
-        for invalid in ("00593", "005930_NX", "ABC123"):
+        for invalid in ("00593", "005930_NX", "0000d0", "00ABC!"):
             resp = await cl.get(
                 f"/api/kiwoom/stocks/{invalid}/ohlcv/daily?start=2025-09-01&end=2025-09-30"
             )
             assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_ohlcv_accepts_alphanumeric_uppercase_stock_code() -> None:
+    """CHART path 통과 — 우선주 영숫자 대문자 (`03473K` SK우, ADR § 32 chunk 2).
+
+    Path pattern 만 검증 — 종목 자체는 stock 마스터에 없을 수 있어 응답 status_code 는
+    422 가 아니어야 함 (pattern 통과). 200/404/400 등 어느 status 든 422 아니면 통과.
+    """
+    app = _make_app()
+    async with _client(app) as cl:
+        resp = await cl.get(
+            "/api/kiwoom/stocks/03473K/ohlcv/daily?start=2025-09-01&end=2025-09-30"
+        )
+        assert resp.status_code != 422, "CHART 영숫자 path pattern 통과 단언"
 
 
 # 2b-M1 회귀 — date range cap (DoS amplification 차단)

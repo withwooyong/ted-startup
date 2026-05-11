@@ -692,21 +692,22 @@ async def test_execute_default_indc_mode_is_quantity(
     assert captured_modes == [DailyMarketDisplayMode.QUANTITY]
 
 
-# ---------- ka10086 호환 stock_code 가드 (ETF/ETN/우선주 skip) ----------
+# ---------- ka10086 호환 가드 (CHART 영숫자 통과 / 비호환 skip) ----------
 
 
 @pytest.mark.asyncio
-async def test_execute_skips_etf_etn_with_alphabetic_stock_code(
+async def test_execute_accepts_alphanumeric_uppercase_stock_code(
     session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
     session: AsyncSession,
 ) -> None:
-    """영문 포함 stock_code (ETF/ETN — `0000D0`) 는 fullmatch fail → 사전 skip + 가시성 로깅.
+    """영숫자 대문자 stock_code (`0000D0` ETF / `12345A` ETN) 통과 (ADR § 32 chunk 2).
 
-    OHLCV 백필 패턴 일관 — KOSPI active 의 12% 영문 포함 코드. build_stk_cd ValueError
-    로 호출 차단되어 errors 누적되던 것을 사전 필터.
+    Chunk 1 dry-run 에서 키움 mrkcond endpoint 가 영숫자 stk_cd 수용 확정.
+    CHART 패턴 (`^[0-9A-Z]{6}$`) — daily/weekly OHLCV 와 동일 정책.
     """
     await _create_active_stock(session, "005930", "삼성전자")
-    await _create_active_stock(session, "0000D0", "코덱스200ETF")  # ETF — fullmatch fail
+    await _create_active_stock(session, "0000D0", "TIGER ETF")
+    await _create_active_stock(session, "12345A", "ETN샘플", market="0")
     await session.commit()
 
     captured_codes: list[str] = []
@@ -732,19 +733,21 @@ async def test_execute_skips_etf_etn_with_alphabetic_stock_code(
     )
     result = await uc.execute(base_date=date(2025, 9, 8))
 
-    assert captured_codes == ["005930"], "ETF (0000D0) skip — 005930 만 호출"
-    assert result.total == 1, "raw_stocks 2 → 호환 1 (skip 1)"
+    # CHART 패턴 통과 — 3 종목 모두 호출.
+    assert sorted(captured_codes) == ["0000D0", "005930", "12345A"]
+    assert result.total == 3
     assert result.failed == 0
 
 
 @pytest.mark.asyncio
-async def test_execute_skips_short_stock_code(
+async def test_execute_skips_incompatible_stock_code(
     session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
     session: AsyncSession,
 ) -> None:
-    """알파벳 포함 stock_code (ETN — `12345A`) 는 fullmatch fail → skip."""
+    """비호환 stock_code (lowercase / 특수문자) 사전 skip — CHART 패턴 거부 케이스."""
     await _create_active_stock(session, "005930", "삼성전자")
-    await _create_active_stock(session, "12345A", "ETN샘플", market="0")
+    await _create_active_stock(session, "0000d0", "lowercase 변형", market="0")
+    await _create_active_stock(session, "00088!", "특수문자 변형", market="0")
     await session.commit()
 
     captured_codes: list[str] = []

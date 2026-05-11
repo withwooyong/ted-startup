@@ -44,7 +44,7 @@ from app.adapter.out.kiwoom._records import (
     NormalizedDailyFlow,
 )
 from app.adapter.out.kiwoom.mrkcond import KiwoomMarketCondClient
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_CHART_PATTERN
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_daily_flow import (
     StockDailyFlowRepository,
@@ -57,7 +57,8 @@ from app.application.constants import (
 from app.application.exceptions import StockMasterNotFoundError
 
 # ka10086 호환 stock_code 패턴 — daily/weekly OHLCV 와 동일 (build_stk_cd 공유).
-_KA10086_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)
+# CHART (`^[0-9A-Z]{6}$`, ADR § 32) — 우선주 (`*K`) 통과.
+_KA10086_COMPATIBLE_RE = re.compile(STK_CD_CHART_PATTERN)
 
 logger = logging.getLogger(__name__)
 

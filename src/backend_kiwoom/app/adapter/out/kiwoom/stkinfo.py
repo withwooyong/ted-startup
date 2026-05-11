@@ -210,14 +210,30 @@ class StockListResponse(BaseModel):
 
 
 STK_CD_LOOKUP_PATTERN: Final[str] = r"^[0-9]{6}$"
-"""ka10100 stk_cd 정규식 — Excel R22 Length=6, ASCII 0-9 only.
+"""ka10100/ka10001 lookup stk_cd 정규식 — Excel R22 Length=6, ASCII 0-9 only.
 
 `_NX`/`_AL` suffix 거부 + unicode digit 거부 (`\\d` 가 unicode digit 매칭하는 점
-방어, 1R 2b L2). 어댑터 검증 / Pydantic Request / 라우터 Path pattern 세 곳이
-모두 본 상수 참조 — 단일 source of truth.
+방어, 1R 2b L2). lookup 계열 어댑터 검증 / Pydantic Request / 라우터 Path pattern
+세 곳이 모두 본 상수 참조.
+
+chart 계열 (ka10081/82/83/94 + ka10086) 은 `STK_CD_CHART_PATTERN` (영숫자) 사용 —
+Chunk 1 dry-run (ADR § 32) 에서 키움 chart endpoint 가 우선주 영숫자 stk_cd 수용
+확정 후 분리.
+"""
+
+STK_CD_CHART_PATTERN: Final[str] = r"^[0-9A-Z]{6}$"
+"""chart 계열 (ka10081/82/83/94 + ka10086) stk_cd 정규식 — 영숫자 대문자 6자리.
+
+LOOKUP 패턴과의 차이: 우선주 (`*K` suffix, 예 `03473K` SK우) / 특수 종목 호환. Excel
+docs 는 lookup R22 ASCII 만 명시하나 운영 dry-run (ADR § 32) 에서 chart endpoint
+6 호출 모두 SUCCESS — wire-level 수용 확정.
+
+lowercase 거부 유지 (정규식 `A-Z` 만) — 키움 응답 / 마스터 데이터 모두 uppercase 만
+관찰. lowercase 입력은 mock/test 사고 또는 공격 패턴으로 간주.
 """
 
 _STK_CD_LOOKUP_RE = re.compile(STK_CD_LOOKUP_PATTERN)
+_STK_CD_CHART_RE = re.compile(STK_CD_CHART_PATTERN)
 
 
 def _validate_stk_cd_for_lookup(stk_cd: str) -> None:
@@ -231,6 +247,19 @@ def _validate_stk_cd_for_lookup(stk_cd: str) -> None:
     """
     if not _STK_CD_LOOKUP_RE.fullmatch(stk_cd):
         raise ValueError(f"stk_cd 는 6자리 ASCII 숫자만 허용: {stk_cd[:50]!r}")
+
+
+def _validate_stk_cd_for_chart(stk_cd: str) -> None:
+    """ka10081/82/83/94/ka10086 stk_cd 사전 검증 — 6자리 영숫자 대문자. 호출 자체 차단.
+
+    LOOKUP 보다 관대 — 우선주 (`*K` suffix) / 특수 종목 호환. ADR § 32 dry-run 에서
+    영숫자 stk_cd 수용 확정 후 분리. base code 만 (`_NX`/`_AL` suffix 거부) — caller 가
+    이미 strip 후 호출. lowercase/특수문자/unicode 모두 거부.
+
+    예외 메시지 50자 cap 정책은 LOOKUP 과 동일.
+    """
+    if not _STK_CD_CHART_RE.fullmatch(stk_cd):
+        raise ValueError(f"stk_cd 는 6자리 영숫자 대문자만 허용: {stk_cd[:50]!r}")
 
 
 class StockLookupResponse(BaseModel):
@@ -439,20 +468,21 @@ def strip_kiwoom_suffix(stk_cd: str) -> str:
 def build_stk_cd(stock_code: str, exchange: ExchangeType) -> str:
     """`(stock_code, exchange) → 키움 호출용 stk_cd` (Phase C 첫 도입).
 
-    설계: endpoint-06-ka10081.md § 2.4. ka10081 / ka10082 / ka10083 / ka10094 등
-    시계열 endpoint 가 본 헬퍼로 stk_cd suffix 합성.
+    설계: endpoint-06-ka10081.md § 2.4. ka10081 / ka10082 / ka10083 / ka10094 +
+    ka10086 chart 계열 endpoint 가 본 헬퍼로 stk_cd suffix 합성.
 
-    KRX:  '005930' → '005930'
-    NXT:  '005930' → '005930_NX'
-    SOR:  '005930' → '005930_AL'
+    KRX:  '005930' → '005930'  /  '03473K' → '03473K'
+    NXT:  '005930' → '005930_NX'  /  '03473K' → '03473K_NX'
+    SOR:  '005930' → '005930_AL'  /  '03473K' → '03473K_AL'
 
-    pre-validation: stock_code 6자리 ASCII 숫자 (`STK_CD_LOOKUP_PATTERN` 재사용).
+    pre-validation: stock_code 6자리 영숫자 대문자 (`STK_CD_CHART_PATTERN`). LOOKUP
+    (`^[0-9]{6}$`) 보다 관대 — 우선주 (`*K` suffix) / 특수 종목 호환 (ADR § 32 chunk 2).
     `_NX`/`_AL` suffix 가 박힌 입력은 거부 — caller 가 이미 base code 로 strip 후 호출.
 
     Raises:
-        ValueError: stock_code 가 6자리 숫자 외 또는 미지원 ExchangeType.
+        ValueError: stock_code 가 6자리 영숫자 대문자 외 또는 미지원 ExchangeType.
     """
-    _validate_stk_cd_for_lookup(stock_code)
+    _validate_stk_cd_for_chart(stock_code)
     if exchange is ExchangeType.KRX:
         return stock_code
     if exchange is ExchangeType.NXT:

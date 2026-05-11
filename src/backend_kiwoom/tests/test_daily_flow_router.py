@@ -411,14 +411,25 @@ async def test_get_daily_flow_rejects_inverted_window() -> None:
 
 @pytest.mark.asyncio
 async def test_get_daily_flow_rejects_invalid_stock_code() -> None:
-    """5자리 / 영문 → 422."""
+    """CHART path 거부 — 5자리 / suffix / lowercase / 특수문자 (ADR § 32 chunk 2)."""
     app = _make_app()
     async with _client(app) as cl:
-        for invalid in ("00593", "005930_NX", "ABC123"):
+        for invalid in ("00593", "005930_NX", "0000d0", "00ABC!"):
             resp = await cl.get(
                 f"/api/kiwoom/stocks/{invalid}/daily-flow?start=2025-09-01&end=2025-09-30"
             )
             assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_daily_flow_accepts_alphanumeric_uppercase_stock_code() -> None:
+    """CHART path 통과 — 영숫자 대문자 (`03473K` SK우, ADR § 32 chunk 2)."""
+    app = _make_app()
+    async with _client(app) as cl:
+        resp = await cl.get(
+            "/api/kiwoom/stocks/03473K/daily-flow?start=2025-09-01&end=2025-09-30"
+        )
+        assert resp.status_code != 422, "CHART 영숫자 path pattern 통과 단언"
 
 
 @pytest.mark.asyncio

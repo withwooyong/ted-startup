@@ -42,16 +42,16 @@ from app.adapter.out.kiwoom.chart import (
     KiwoomChartClient,
     NormalizedDailyOhlcv,
 )
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_CHART_PATTERN
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_price import StockPriceRepository
 from app.application.constants import ExchangeType, StockListMarketType
 from app.application.exceptions import StockMasterNotFoundError
 
-# ka10081 호환 stock_code 패턴 — `^[0-9]{6}$` 만 통과 (build_stk_cd 와 일치).
-# ka10099 sync 가 ETF/ETN/우선주 (예: `0000D0`, `00088K`) 도 stock 테이블에 적재하므로
-# UseCase 단계에서 사전 필터 — 호출 자체 차단 (build_stk_cd ValueError 회피).
-_KA10081_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)
+# ka10081 호환 stock_code 패턴 — chart 영숫자 (`^[0-9A-Z]{6}$`, ADR § 32). 우선주
+# (`*K` suffix, 예 `03473K` SK우) 통과. ka10099 sync 의 영문 포함 lowercase / 특수문자
+# 만 skip. build_stk_cd 와 동일 패턴 (CHART) — UseCase 사전 필터로 호출 차단.
+_KA10081_COMPATIBLE_RE = re.compile(STK_CD_CHART_PATTERN)
 
 logger = logging.getLogger(__name__)
 

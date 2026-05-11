@@ -2135,4 +2135,74 @@ ORDER BY s.stock_code;
 2. Phase D — ka10080 분봉 / ka20006 업종일봉
 3. Phase E/F/G wave
 4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터
+
+
+## 33. Phase C — chart 영숫자 stk_cd 가드 완화 — Chunk 2 구현 (옵션 c-A, 2026-05-11)
+
+### 33.1 결정
+
+§ 32 Chunk 1 dry-run 결과 (KRX 6/6 SUCCESS) 를 근거로 Chunk 2 진행. plan doc `phase-c-chart-alphanumeric-guard.md` § 4 범위 그대로 — `STK_CD_CHART_PATTERN` 신규 + chart 계열 가드 분리. lookup 계열 (ka10100/ka10001) 은 Excel R22 ASCII 제약 유지.
+
+본 chunk 의 코드 변경 5 파일 + 테스트 7 파일 갱신/신규. **1037 → 1046 tests** (+9) / coverage 91% (이전 81% 보다 향상 — 보호 단언 추가 효과). 외부 contract 영향: chart 계열 endpoint 의 호출 대상 stock 범위가 영숫자 (`*K` 우선주 + 영숫자 ETF) 까지 확장. **운영 cron 실행 시 ~295 종목 추가 호출** → elapsed 비례 증가 (2초 rate limit 직렬화).
+
+### 33.2 변경 면 매핑
+
+| Layer | 위치 | 변경 |
+|------|------|------|
+| **상수** | `stkinfo.py:212` `STK_CD_LOOKUP_PATTERN` (`^[0-9]{6}$`) | **유지** — lookup 계열 (ka10100/ka10001) 단일 source |
+| **상수 (신규)** | `stkinfo.py:224` `STK_CD_CHART_PATTERN` (`^[0-9A-Z]{6}$`) | **신규** — chart 계열 (ka10081/82/83/94 + ka10086) 단일 source |
+| **검증 함수 (신규)** | `stkinfo.py:474` `_validate_stk_cd_for_chart` | **신규** — A-L1 메시지 cap 정책 일관 |
+| **build_stk_cd** | `stkinfo.py:454` | `_validate_stk_cd_for_lookup` → `_validate_stk_cd_for_chart`. docstring 갱신 (6자리 ASCII 숫자 → 6자리 영숫자 대문자) |
+| **adapter docstring** | `chart.py:10` / `mrkcond.py:10` | "6자리 ASCII" → "6자리 영숫자 대문자 (STK_CD_CHART_PATTERN)" |
+| **chart router Path** | `ohlcv.py:35,239,342` (ka10081) / `ohlcv_periodic.py:42,306,358,410` (ka10082/83/94) / `daily_flow.py:35,211,314` (ka10086) | `STK_CD_LOOKUP_PATTERN` → `STK_CD_CHART_PATTERN`. 7 path + 3 import |
+| **lookup router Path** | `stocks.py` / `fundamentals.py` | **변경 없음** — LOOKUP 그대로 (5곳 무변 확인) |
+| **UseCase active_stocks filter** | `ohlcv_daily_service.py:54` / `ohlcv_periodic_service.py:52` / `daily_flow_service.py:61` | `_KA*_COMPATIBLE_RE` 가 LOOKUP → CHART. 3 service |
+
+### 33.3 테스트 변경 (+9)
+
+| 파일 | 변경 |
+|------|------|
+| `test_exchange_type.py` | `test_build_stk_cd_rejects_invalid_format` 의 `ABC123` 제거 + `0000d0` / `00ABC!` 추가 + **신규** `test_build_stk_cd_accepts_alphanumeric_uppercase` |
+| `test_kiwoom_chart_client.py` | `test_fetch_daily_rejects_invalid_stock_code` 의 invalid set 갱신 (`ABC123` 제거) |
+| `test_kiwoom_mrkcond_client.py` | `test_fetch_daily_market_rejects_invalid_stock_code` 동일 |
+| `test_kiwoom_stkinfo_basic_info.py` | **신규 4건** — `test_validate_stk_cd_for_chart_accepts_alphanumeric_uppercase` / `test_validate_stk_cd_for_chart_rejects_invalid_format` / `test_validate_stk_cd_for_chart_message_capped_at_50_chars` / `test_validate_stk_cd_for_lookup_still_rejects_alphanumeric` (lookup 보호 단언) |
+| `test_ingest_daily_ohlcv_service.py` | `test_execute_skips_alpha_stock_codes` → `test_execute_accepts_alphanumeric_uppercase_stock_codes` (의미 반전 + 단언 갱신) + **신규** `test_execute_skips_incompatible_stock_codes` (lowercase/특수문자) |
+| `test_ohlcv_periodic_service.py` | 동일 패턴 — accepts/skips 분리 |
+| `test_ingest_daily_flow_service.py` | 동일 패턴 — accepts/skips 분리 |
+| `test_ohlcv_router.py` | `test_get_ohlcv_rejects_invalid_stock_code` invalid set 갱신 + **신규** `test_get_ohlcv_accepts_alphanumeric_uppercase_stock_code` |
+| `test_daily_flow_router.py` | 동일 패턴 |
+
+### 33.4 회귀 발견 (Verification 가 잡은 6건)
+
+`testcontainers` 가 자동 발견 — chart 계열 거부 단언이 영숫자에서 의도와 반대로 작동. plan doc § 4.6 의 예측 ("기존 chart 계열 거부 단언이 있다면 영숫자 허용으로 갱신 필요") 적중. 6건 모두 의미 반전 + 새 거부 케이스로 분리.
+
+1. `test_build_stk_cd_rejects_invalid_format` — `ABC123` 거부 단언이 깨짐
+2. `test_fetch_daily_rejects_invalid_stock_code` (chart_client) — 동일
+3. `test_fetch_daily_market_rejects_invalid_stock_code` (mrkcond_client) — 동일
+4. `test_execute_skips_alpha_stock_codes` (ohlcv_daily) — `0000D0`/`00088K` skip 단언이 깨짐
+5. `test_execute_weekly_skips_alpha_stock_codes` (ohlcv_periodic) — 동일
+6. `test_execute_skips_etf_etn_with_alphabetic_stock_code` + `test_execute_skips_short_stock_code` (daily_flow) — 동일
+
+→ chart 계열은 의미 반전, lookup 계열은 보호 단언 강화 (`test_validate_stk_cd_for_lookup_still_rejects_alphanumeric` 신규).
+
+### 33.5 결과
+
+- **코드**: 5 파일 (stkinfo / chart / mrkcond / 3 router / 3 service = 9 파일이지만 중복 카운팅 제외)
+- **테스트**: 1037 → **1046** (+9 — 신규 5 / 갱신 의미반전 4)
+- **coverage**: 91% (이전 81% — 신규 단언 paths 추가 효과)
+- **ruff** / **mypy --strict**: 모두 PASS
+- **외부 contract**: lookup 계열 (ka10100/ka10001) 무변 / chart 계열 영숫자 호출 가능 확장
+
+### 33.6 알려진 follow-up
+
+1. **운영 cron elapsed 증가** — ~295 종목 추가 호출. OHLCV daily cron 현재 34분 → ~44분 추정. STATUS § 4 신규 항목으로 추적
+2. **NXT sentinel 빈 row 1개 detection** — 우선주 NXT 호출 시 (`*K_NX`) 키움이 1 빈 row 반환. 현재 sentinel 가드 (`if not <list>: break`, `72dbe69`) 통과 가능. 운영 영향 0 (우선주 `nxt_enable=False` 가 호출 자체 차단). LOW priority follow-up
+3. **백필 운영** — 295 종목 × 3년 = 추가 ~200K rows. cron 자연 수집 또는 `scripts/backfill_ohlcv.py --resume` 별도 chunk
+
+### 33.7 다음 chunk 후보
+
+1. **운영 백필** (영숫자 295 종목) — Chunk 2 머지 후 cron 자연 수집 또는 별도 `backfill_ohlcv.py --resume` chunk
+2. Phase D — ka10080 분봉 / ka20006 업종일봉 (대용량 파티션 결정 선행)
+3. Phase E/F/G wave
+4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터
 5. KOSCOM cross-check 수동 — 가설 B 최종 확정

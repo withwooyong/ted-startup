@@ -32,7 +32,7 @@ from app.adapter.out.kiwoom._exceptions import (
     KiwoomResponseValidationError,
     KiwoomUpstreamError,
 )
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_CHART_PATTERN
 from app.adapter.out.persistence.repositories.stock import StockRepository
 from app.adapter.out.persistence.repositories.stock_price import StockPriceRepository
 from app.adapter.out.persistence.session import get_sessionmaker
@@ -236,7 +236,7 @@ async def sync_ohlcv_daily(
 async def refresh_ohlcv_daily(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     alias: Annotated[
         str,
@@ -339,7 +339,7 @@ async def refresh_ohlcv_daily(
 async def get_ohlcv_daily(
     stock_code: Annotated[
         str,
-        Path(min_length=6, max_length=6, pattern=STK_CD_LOOKUP_PATTERN),
+        Path(min_length=6, max_length=6, pattern=STK_CD_CHART_PATTERN),
     ],
     start: Annotated[date, Query(description="시작일 (포함)")],
     end: Annotated[date, Query(description="종료일 (포함)")],

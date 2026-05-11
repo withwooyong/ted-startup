@@ -214,6 +214,10 @@ async def test_fetch_daily_market_business_error() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_daily_market_rejects_invalid_stock_code() -> None:
+    """CHART 패턴 거부 — 5자리 / suffix / lowercase / 특수문자 (ADR § 32 chunk 2).
+
+    영숫자 대문자 (`03473K`) 는 CHART 패턴 통과로 wire-level 호출 가능.
+    """
     call_count = 0
 
     def handler(_req: httpx.Request) -> httpx.Response:
@@ -223,7 +227,7 @@ async def test_fetch_daily_market_rejects_invalid_stock_code() -> None:
 
     async with _make_kiwoom_client(handler) as kc:
         adapter = KiwoomMarketCondClient(kc)
-        for invalid in ("00593", "ABC123", "005930_NX", "      ", ""):
+        for invalid in ("00593", "005930_NX", "      ", "", "0000d0", "00ABC!"):
             with pytest.raises(ValueError):
                 await adapter.fetch_daily_market(invalid, query_date=date(2024, 11, 25))
 

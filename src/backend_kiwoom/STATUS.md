@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-11 (chart 영숫자 stk_cd 가드 완화 — Chunk 1 dry-run 완료 / KRX 6/6 SUCCESS + NXT 6/6 empty / 우선주 dominant / ADR § 32)
+> **마지막 갱신**: 2026-05-11 (chart 영숫자 stk_cd 가드 완화 — **Chunk 2 구현 완료** / STK_CD_CHART_PATTERN 신규 / 11곳 가드 교체 / 1037→1046 tests / coverage 91% / ADR § 33)
 
 ---
 
@@ -12,11 +12,11 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **chart 영숫자 stk_cd 가드 완화 — Chunk 1 dry-run** — KRX 6/6 SUCCESS (ka10081 600 row / ka10086 20 row) + NXT 6/6 empty (우선주 미상장) / 우선주 dominant 패턴 (`*K` suffix) / Chunk 2 진행 결정 / ADR § 32 / 코드 0줄 |
-| 다음 chunk | **chart 영숫자 가드 완화 Chunk 2** (옵션 c-A, Chunk 1 dry-run 완료 / ADR § 32) → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
-| 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 |
-| 누적 chunk | 39 commits (follow-up 분석 1) |
-| 테스트 | **1037 cases** (1035 → +5 E-1 신규 / +6 gap 신규 / -6 should_skip_resume 폐기 / -3 placeholder 통합 / +2 dispatch yearly = net +4 ※ 통계 1035→1037) |
+| 마지막 완료 chunk | **chart 영숫자 stk_cd 가드 완화 — Chunk 2 구현** — STK_CD_CHART_PATTERN (`^[0-9A-Z]{6}$`) 신규 + chart 계열 11곳 가드 교체 + UseCase 가드 의미 반전 (skip→keep) / lookup 계열 5곳 무변 / 1046 tests / coverage 91% / ADR § 33 |
+| 다음 chunk | **영숫자 295 종목 백필** → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
+| 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 + **영숫자 호환성 확장** (우선주/특수 종목 포함) |
+| 누적 chunk | 40 commits (Chunk 1 dry-run `a14bb10` + Chunk 2 구현) |
+| 테스트 | **1046 cases** (1037 → +9 — Chunk 2: 신규 5 보호/통과 단언 + 갱신 의미 반전 4) / coverage 91% |
 | 운영 검증 | ✅ **full 3년 OHLCV 백필 34분 / 4078 호환 / 0 failed**. daily_flow 백필 ⏳ 사용자 실측 대기 |
 
 ---
@@ -138,6 +138,8 @@ P3 (선택):
 | ~~12 (F8)~~ | ~~full backfill 1 종목 빈 응답 (OHLCV 4078 fetch / 4077 적재)~~ | full 2026-05-10 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록) / 신규 상장 직후 / sentinel 가드 정상 / **NO-FIX** |
 | ~~daily_flow 빈 응답 1 종목~~ | ~~success_krx 3922 vs DISTINCT KRX 3921~~ | full 2026-05-11 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (F8 동일 종목) / **NO-FIX** |
 | **13** | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 | scheduler_enabled 활성화 chunk |
+| **19** | 영숫자 295 종목 추가로 cron elapsed +10분 추정 | ADR § 33.6 | scheduler_enabled 활성화 chunk + 첫 영업일 모니터 |
+| **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
 
 ---
 
@@ -145,7 +147,7 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **chart 영숫자 stk_cd 가드 완화 — Chunk 2** (옵션 c-A) | Chunk 1 dry-run (ADR § 32) 에서 KRX chart 가 `^[0-9A-Z]{6}$` 수용 확정. `STK_CD_CHART_PATTERN` 신규 + chart 계열 11곳 가드 교체. NXT 우선주는 기존 `nxt_enable=False` 가 자연 차단 | 코드 5 + 테스트 4 + 문서 4 |
+| **1** | **영숫자 295 종목 백필** | Chunk 2 (ADR § 33) 머지 후 chart 가드 영숫자 허용. cron 자연 수집 또는 `backfill_ohlcv.py --resume` 별도 chunk. ~295 종목 × 3년 = 추가 ~200K rows | 사용자 결정 — 수동 또는 별도 chunk |
 | 2 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
 | 3 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
 | 4 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
@@ -201,7 +203,8 @@ P3 (선택):
 - **R2** — 1R Defer 5건 일괄 정리 (L-2 stale docstring 5 / E-1 sync_ohlcv_daily KiwoomError 5종 / M-3 cast 2 Repository / E-2 reset_*_factory 7 docstring / gap detection 2 CLI 일자별 차집합) `d43d956`
 - **R2-docs sync** — R2 후 backfill runbook 의 resume 동작 설명 현행화 (3 곳) `d6357da`
 - **follow-up 분석** — F6/F7/F8 + daily_flow 빈 응답 1건 통합 분석 (4건 모두 NO-FIX / `452980` 신한제11호스팩 식별) `e8d9d38`
-- **chart 영숫자 stk_cd Chunk 1 dry-run** — KRX chart endpoint (ka10081/86) 영숫자 6자리 stk_cd 수용 확정 (rc=0 / 600+20 rows). NXT 우선주 미지원 확정 (sentinel empty). plan doc 신규 + dry-run CLI 신규 + 결과 doc 신규 / ADR § 32 / 코드 0줄 `<this commit>`
+- **chart 영숫자 stk_cd Chunk 1 dry-run** — KRX chart endpoint (ka10081/86) 영숫자 6자리 stk_cd 수용 확정 (rc=0 / 600+20 rows). NXT 우선주 미지원 확정 (sentinel empty). plan doc 신규 + dry-run CLI 신규 + 결과 doc 신규 / ADR § 32 / 코드 0줄 `a14bb10`
+- **chart 영숫자 stk_cd Chunk 2 구현** — `STK_CD_CHART_PATTERN = ^[0-9A-Z]{6}$` 신규 + `_validate_stk_cd_for_chart` 함수 + chart 계열 11곳 가드 교체 (build_stk_cd / 5 router 7 path / 3 UseCase). lookup 계열 5곳 무변 (ka10100/ka10001). 6 회귀 테스트 의미 반전 + 신규 5 보호/통과 단언 / 1046 tests / coverage 91% / ADR § 33 `<this commit>`
 
 ---
 

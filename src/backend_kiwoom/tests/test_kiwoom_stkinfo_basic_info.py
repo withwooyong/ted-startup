@@ -591,6 +591,48 @@ def test_validate_stk_cd_message_capped_at_50_chars() -> None:
     assert len(msg) < 200, f"메시지가 길이 cap 안 됨 (len={len(msg)})"
 
 
+# ADR § 32 chunk 2 — _validate_stk_cd_for_chart (CHART 영숫자) ----------------
+
+
+def test_validate_stk_cd_for_chart_accepts_alphanumeric_uppercase() -> None:
+    """CHART 패턴 영숫자 대문자 통과 (우선주 `*K`, ETF `0000D0` 등)."""
+    from app.adapter.out.kiwoom.stkinfo import _validate_stk_cd_for_chart
+
+    for valid in ("005930", "03473K", "00088K", "0000D0", "ABC123"):
+        _validate_stk_cd_for_chart(valid)  # raise 없어야 함
+
+
+def test_validate_stk_cd_for_chart_rejects_invalid_format() -> None:
+    """CHART 패턴 거부 — lowercase / 5자리 / 7자리 / 특수문자 / suffix / 빈값."""
+    from app.adapter.out.kiwoom.stkinfo import _validate_stk_cd_for_chart
+
+    for invalid in ("0000d0", "00593", "0059300", "00ABC!", "005930_NX", "      ", "", "X" * 10):
+        with pytest.raises(ValueError):
+            _validate_stk_cd_for_chart(invalid)
+
+
+def test_validate_stk_cd_for_chart_message_capped_at_50_chars() -> None:
+    """A-L1 패턴 일관 — chart 검증 메시지도 50자 cap."""
+    from app.adapter.out.kiwoom.stkinfo import _validate_stk_cd_for_chart
+
+    huge_input = "x" * 10_000  # lowercase 라 거부 트리거
+    with pytest.raises(ValueError) as exc_info:
+        _validate_stk_cd_for_chart(huge_input)
+
+    msg = str(exc_info.value)
+    assert len(msg) < 200, f"메시지가 길이 cap 안 됨 (len={len(msg)})"
+
+
+def test_validate_stk_cd_for_lookup_still_rejects_alphanumeric() -> None:
+    """ka10100/ka10001 lookup 가드 무변 — 영숫자 거부 유지 (Excel R22 ASCII 제약)."""
+    from app.adapter.out.kiwoom.stkinfo import _validate_stk_cd_for_lookup
+
+    # CHART 가 통과시키는 영숫자도 LOOKUP 은 거부 — 보호 단언
+    for invalid in ("03473K", "0000D0", "00088K", "ABC123"):
+        with pytest.raises(ValueError):
+            _validate_stk_cd_for_lookup(invalid)
+
+
 # C-M4 normalize_basic_info exchange 인자 BC 보존 -----------------------------
 
 

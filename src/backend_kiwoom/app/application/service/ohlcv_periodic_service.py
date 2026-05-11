@@ -39,7 +39,7 @@ from app.adapter.out.kiwoom.chart import (
     NormalizedDailyOhlcv,
     YearlyChartRow,
 )
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_CHART_PATTERN
 from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.stock_price_periodic import (
     StockPricePeriodicRepository,
@@ -47,8 +47,9 @@ from app.adapter.out.persistence.repositories.stock_price_periodic import (
 from app.application.constants import ExchangeType, Period, StockListMarketType
 from app.application.exceptions import StockMasterNotFoundError
 
-# ka10082/83 호환 stock_code 패턴 — daily (ka10081) 와 동일 (chart.py 의 build_stk_cd 공유).
-_KA10082_COMPATIBLE_RE = re.compile(STK_CD_LOOKUP_PATTERN)
+# ka10082/83/94 호환 stock_code 패턴 — daily (ka10081) 와 동일 (chart.py build_stk_cd 공유).
+# CHART (`^[0-9A-Z]{6}$`, ADR § 32) — 우선주 (`*K`) 통과.
+_KA10082_COMPATIBLE_RE = re.compile(STK_CD_CHART_PATTERN)
 
 logger = logging.getLogger(__name__)
 
