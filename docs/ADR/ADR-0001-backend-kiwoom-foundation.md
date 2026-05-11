@@ -2017,3 +2017,65 @@ ADR § 24.5 + § 25.6 의 1R Defer 5건 (L-2 / E-1 / M-3 / E-2 / gap detection) 
 4. **Phase E/F/G** (공매도/대차/순위/투자자별 wave)
 5. **(최종) scheduler_enabled 일괄 활성 + 1주 모니터** — 사용자 결정 (모든 작업 완료 후)
 6. **KOSCOM cross-check 수동** — 가설 B 최종 확정
+
+
+## 31. Phase C — follow-up F6/F7/F8 + daily_flow 빈 응답 1건 통합 분석 (2026-05-11)
+
+### 31.1 결정
+
+STATUS § 4 의 LOW 4건 (F6 / F7 / F8 / daily_flow 빈 응답) 일괄 분석. **4건 모두 NO-FIX** 결정. 코드 변경 0줄 — 분석 + 문서 정리 chunk. 사용자 결정 (옵션 A, 2026-05-11).
+
+### 31.2 4건 검증 결과
+
+| # | 항목 | 발생 | 검증 | 결정 |
+|---|------|------|------|------|
+| **F6** | since_date guard edge | 2 종목 (`002690` 동일제강 / `004440` 삼일씨엔에스), 4078 중 0.13% | `chart.py:355 _page_reached_since` 가 page 단위 break — 직전 page 의 row 일부가 since_date 보다 과거 적재. 두 종목 모두 1980 년대 상장이라 페이지 수 많음. 비롯 since_date guard 가 row 단위가 아닌 page 단위라 0.13% 잔존 | **NO-FIX** — 데이터 가치 ≥ 1 년 한도 위반 비용. row 단위 정밀화는 ~15 줄 + 테스트 가능하나 운영 영향 미미. 미래 운영 데이터 검증 시 재평가 |
+| **F7** | turnover_rate 음수 anomaly | min `-57.32` (2.73M rows, `|값|>1000` 24건 = 0.0009%) | `chart.py:89 turnover_rate=_to_decimal(self.trde_tern_rt)` — **키움 raw 응답 그대로 보존**. 키움 측 수정주가 조정 아티팩트로 추정. 24건 / 2.73M = 0.0009% | **NO-FIX** — 정직성 우선 (키움 데이터 그대로). 분석 시 0/NaN/MAX(0,x) 처리는 분석 코드 책임으로 분리. `_to_decimal` 에 음수 가드 추가는 키움 raw 의 정보 손실이라 거부 |
+| **F8** | OHLCV 1 종목 row 0 | success_krx **4078** vs DISTINCT **4077** = 1 종목 | DB SELECT 식별: **`452980` 신한제11호스팩** (KOSDAQ, 등록일 2026-05-09, **신규 상장 SPAC**). sentinel 가드 (`72dbe69`) 정상 동작 — 키움이 거래 데이터 없는 신규 상장 종목에 empty 응답 → break → row 0 적재 | **NO-FIX** — 종목 자체 상태 (시장 거래 시작 전). 다음 cron 에 자연히 row 추가됨 |
+| **daily_flow 빈 응답** | daily_flow 1 종목 row 0 | success_krx **3922** vs DISTINCT KRX **3921** | DB SELECT 식별: **`452980` 신한제11호스팩** (F8 과 **동일 종목**, results.md 의 "OHLCV F8 일관" 명시와 일치). sentinel 가드 mrkcond + chart 4 곳 (`72dbe69`) 정상 동작 | **NO-FIX** — F8 와 동일 (종목 자체 상태) |
+
+### 31.3 식별 SQL
+
+본 chunk 의 핵심 발견 — F8 + daily_flow 빈 응답이 **동일 종목** 인지 확정:
+
+```sql
+-- F8 (OHLCV)
+SELECT s.stock_code, s.stock_name, s.market_code, s.is_active, s.created_at::date AS reg_date
+FROM kiwoom.stock s
+WHERE s.is_active = true
+  AND s.stock_code ~ '^[0-9]{6}$'  -- ETF 가드
+  AND s.id NOT IN (SELECT DISTINCT stock_id FROM kiwoom.stock_price_krx)
+ORDER BY s.stock_code;
+-- → 452980 신한제11호스팩 (1 row)
+
+-- daily_flow
+SELECT s.stock_code, s.stock_name, s.market_code, s.is_active, s.created_at::date AS reg_date
+FROM kiwoom.stock s
+WHERE s.is_active = true
+  AND s.stock_code ~ '^[0-9]{6}$'
+  AND s.id NOT IN (SELECT DISTINCT stock_id FROM kiwoom.stock_daily_flow WHERE exchange = 'KRX')
+ORDER BY s.stock_code;
+-- → 452980 신한제11호스팩 (1 row, F8 동일)
+```
+
+### 31.4 권고 follow-up (미래 chunk)
+
+- **F6** 운영 1주~1개월 후 재평가 — 1980 년대 상장 종목 추가 식별 시 row 단위 fragment 제거 chunk 검토
+- **F7** 분석 코드 (백테스팅 layer) 에서 turnover_rate 0/NaN 처리 정책 명시 — DB 정규화는 거부
+- **F8 / daily_flow 빈 응답** — 다음 cron (운영 daily_flow KST 19:00 + ohlcv 18:30) 실행 후 신한제11호스팩 row 추가 확인. row 0 종목이 다른 신규 상장 SPAC 으로 늘어나면 별도 대응 (현재 패턴 정상)
+
+### 31.5 결과
+
+- **코드 변경**: 0줄 (분석 + 문서 chunk)
+- **테스트**: 변화 없음 (1037 유지)
+- **mypy / ruff**: 변화 없음 (변경 0)
+- **문서 변경**: ADR § 31 (본 §) / STATUS § 4 (4 항목 해소 표시) / CHANGELOG prepend / HANDOFF 갱신
+- **STATUS § 5 follow-up F6/F7/F8 + daily_flow 빈 응답 항목 제거** (해소)
+
+### 31.6 다음 chunk 후보
+
+1. **ETF/ETN OHLCV 별도 endpoint** (옵션 c) — ETF 자체 OHLCV 백테스팅 가치
+2. Phase D — ka10080 분봉 / ka20006 업종일봉 (대용량 파티션 결정 선행)
+3. Phase E/F/G wave (공매도/대차/순위/투자자별)
+4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터 — 사용자 결정 (모든 작업 완료 후)
+5. KOSCOM cross-check 수동 — 가설 B 최종 확정

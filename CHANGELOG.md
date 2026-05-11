@@ -7,6 +7,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-11] docs(kiwoom): follow-up F6/F7/F8 + daily_flow 빈 응답 통합 분석 (4건 모두 NO-FIX, ADR § 31)
+
+STATUS § 4 의 LOW 4건 일괄 분석 + 정책 결정. **코드 변경 0줄** (분석 + 문서 chunk).
+
+### 1. 4건 검증 결과
+
+- **F6** (since_date guard edge, 2 종목 / 0.13%) — 1980s 상장 종목 (`002690` 동일제강 / `004440` 삼일씨엔에스), page 단위 break 의 row 잔존. **NO-FIX** (데이터 가치 ≥ 비용)
+- **F7** (turnover_rate min -57.32 음수, 0.0009%) — 키움 raw 응답 그대로 보존 (정직성). **NO-FIX** (분석 layer 책임)
+- **F8** (OHLCV 1 종목 row 0) — DB SELECT 식별: **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록, 신규 상장 직후). sentinel 가드 정상 동작. **NO-FIX**
+- **daily_flow 빈 응답** — F8 와 **동일 종목 (`452980`)**. **NO-FIX**
+
+### 2. 식별 SQL (ADR § 31.3)
+
+```sql
+SELECT s.stock_code, s.stock_name, s.market_code, s.created_at::date
+FROM kiwoom.stock s
+WHERE s.is_active = true
+  AND s.stock_code ~ '^[0-9]{6}$'
+  AND s.id NOT IN (SELECT DISTINCT stock_id FROM kiwoom.stock_price_krx)
+ORDER BY s.stock_code;
+-- → 452980 신한제11호스팩 (1 row, F8 + daily_flow 동일)
+```
+
+### 3. 권고 미래 follow-up
+
+- F6: 운영 1주~1개월 후 재평가 — 1980s 상장 종목 증가 시 row 단위 fragment 제거 chunk 검토
+- F7: 분석 코드 (백테스팅 layer) 에서 turnover_rate 0/NaN 처리 정책 명시 (DB 정규화 거부)
+- F8 / daily_flow: 다음 cron 실행 후 신한제11호스팩 row 추가 확인. row 0 종목이 다른 신규 상장 SPAC 으로 늘어나면 별도 대응
+
+### 4. 다음 chunk 후보
+
+1. ETF/ETN OHLCV 별도 endpoint (옵션 c)
+2. Phase D — ka10080 분봉 / ka20006 업종일봉
+3. Phase E/F/G wave
+4. (최종) scheduler_enabled 일괄 활성 + 1주 모니터
+5. KOSCOM cross-check 수동
+
+---
+
 ## [2026-05-11] refactor(kiwoom): Phase C-R2 — 1R Defer 5건 일괄 정리 (L-2 / E-1 / M-3 / E-2 / gap detection)
 
 ADR § 24.5 / § 25.6 의 1R Defer 5건 일괄 정리. 외부 API contract 무변. C-4 (`b75334c`) 가 L-2 의 전제 조건을 변경 (YEARLY 활성 → 핸들러 dead branch) — stale docstring 정리로 축소 (사용자 결정 옵션 A). /ted-run 풀 파이프라인 (TDD → 구현 → 1R sonnet → Verification 4관문 → ADR § 30).

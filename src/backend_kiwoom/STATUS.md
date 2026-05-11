@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-11 (Phase C-R2 완료 — 1R Defer 5건 일괄 정리 / 1037 tests / coverage 81.15%)
+> **마지막 갱신**: 2026-05-11 (follow-up F6/F7/F8 + daily_flow 빈 응답 통합 분석 완료 — 4건 모두 NO-FIX / 452980 신한제11호스팩 식별 / ADR § 31)
 
 ---
 
@@ -12,10 +12,10 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급, 자격증명·종목sync admin CLI + since_date guard + daily_flow 백필 CLI — Phase C 97%) |
-| 마지막 완료 chunk | **R2 — 1R Defer 5건 일괄 정리 (L-2 / E-1 / M-3 / E-2 / gap detection)** / 1037 tests / ADR § 30 / coverage 81.15% |
-| 다음 chunk | **follow-up F6/F7/F8** → ETF/ETN OHLCV → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
+| 마지막 완료 chunk | **follow-up F6/F7/F8 + daily_flow 빈 응답 통합 분석** — 4건 모두 NO-FIX 결정 / 1 종목 `452980` 신한제11호스팩 (SPAC) 식별 / ADR § 31 / 코드 0줄 |
+| 다음 chunk | **ETF/ETN OHLCV 별도 endpoint** → Phase D/E/F/G → **(최종) scheduler_enabled 활성** |
 | 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 |
-| 누적 chunk | 38 commits (R2 1) |
+| 누적 chunk | 39 commits (follow-up 분석 1) |
 | 테스트 | **1037 cases** (1035 → +5 E-1 신규 / +6 gap 신규 / -6 should_skip_resume 폐기 / -3 placeholder 통합 / +2 dispatch yearly = net +4 ※ 통계 1035→1037) |
 | 운영 검증 | ✅ **full 3년 OHLCV 백필 34분 / 4078 호환 / 0 failed**. daily_flow 백필 ⏳ 사용자 실측 대기 |
 
@@ -133,9 +133,10 @@ P3 (선택):
 | ~~18~~ | ~~ka10094 (년봉) 미구현~~ | C-3β 가드 | ✅ 해소 (`<this commit>`) — C-4 Migration 014 / 11/25 endpoint / 1035 tests / ADR § 29 |
 | ~~8~~ | ~~CLI bug: `--max-stocks` 무시~~ | smoke 2026-05-10 | ✅ 해소 (`76b3a4a`) |
 | ~~9~~ | ~~ETF/ETN stock_code 호환성: 251 종목 ValueError~~ | smoke 2026-05-10 | ✅ 해소 (`c75ede6`) — UseCase 가드 (옵션 a) |
-| **10 (F6)** | since_date guard edge case — 2 종목 (002690, 004440) 만 since_date 보다 과거 적재 | full 2026-05-10 | LOW — 0.13% rows / 데이터 nuetral~plus. follow-up |
-| **11 (F7)** | turnover_rate min -57.32 음수 anomaly | full 2026-05-10 | LOW — 키움 데이터 특성 검증 follow-up |
-| **12 (F8)** | full backfill 1 종목 빈 응답 (4078 fetch / 4077 적재) | full 2026-05-10 | LOW — 1/4078 = 0.025% follow-up |
+| ~~10 (F6)~~ | ~~since_date guard edge case — 2 종목 (002690, 004440)~~ | full 2026-05-10 | ✅ 분석 완료 (ADR § 31) — **NO-FIX** (0.13% / 1980s 상장 종목 / page 단위 break 의 row 잔존 / 데이터 가치 ≥ 비용) |
+| ~~11 (F7)~~ | ~~turnover_rate min -57.32 음수 anomaly~~ | full 2026-05-10 | ✅ 분석 완료 (ADR § 31) — **NO-FIX** (키움 raw 보존 정직성 / 0.0009% / 분석 layer 책임) |
+| ~~12 (F8)~~ | ~~full backfill 1 종목 빈 응답 (OHLCV 4078 fetch / 4077 적재)~~ | full 2026-05-10 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록) / 신규 상장 직후 / sentinel 가드 정상 / **NO-FIX** |
+| ~~daily_flow 빈 응답 1 종목~~ | ~~success_krx 3922 vs DISTINCT KRX 3921~~ | full 2026-05-11 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (F8 동일 종목) / **NO-FIX** |
 | **13** | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 | scheduler_enabled 활성화 chunk |
 
 ---
@@ -144,11 +145,10 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **follow-up F6/F7/F8 일괄 분석** | since_date edge case (002690 등) + turnover_rate 음수 + 빈 응답 1 종목 (OHLCV + daily_flow 통합) | 분석 + 정책 결정 / 0.5일 |
-| 2 | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 | 신규 도메인 + 신규 endpoint chunk |
-| 3 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
-| 4 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
-| 5 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
+| **1** | **ETF/ETN OHLCV 별도 endpoint** (옵션 c) | 본 chunk 가드는 skip 만. ETF 자체 OHLCV 도 백테스팅 가치 (295 종목 / 6.7%) | 신규 도메인 + 신규 endpoint chunk |
+| 2 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
+| 3 | Phase D 진입 — ka10080 분봉 / ka20006 업종일봉 | 분봉 대용량 파티션 결정 선행 필요 | 신규 도메인 + 파티션 전략 |
+| 4 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
 | **최종** | **scheduler_enabled 운영 cron 활성 + 1주 모니터** | **사용자 결정 (2026-05-11): 모든 작업 완료 후 활성**. 측정 #4 (일간 cron elapsed) / OHLCV + daily_flow + 통합 1주 모니터 → ADR § 26.5 + § 28 + § 29 + § 30 후속 측정 | env 변경 + 1주 |
 | ※ | (실측 결과 의존) NUMERIC 마이그레이션 | 측정 #3 에서 NUMERIC(8,4) overflow 발견 시 즉시 1순위 상승 | Migration + ALTER COLUMN |
 
@@ -198,7 +198,9 @@ P3 (선택):
 - **C-env-rename** — DATABASE_URL → KIWOOM_DATABASE_URL (다른 프로젝트 격리, 5 코드 + 3 문서 rename) `e9ab050`
 - **C-운영검증-1** — ka10099 첫 실 호출 + 2 차단 버그 fix (next-key 빈값 + upsert_many chunk 분할) + admin 도구 보강 (dotenv autoload + KIWOOM_API_KEY fallback + 마스터키 가이드 신규) `<this commit>`
 - **C-4** — ka10094 년봉 OHLCV (Migration 014 / KRX only NXT skip / 응답 7 필드 / 매년 1월 5일 03:00 cron) `b75334c`
-- **R2** — 1R Defer 5건 일괄 정리 (L-2 stale docstring 5 / E-1 sync_ohlcv_daily KiwoomError 5종 / M-3 cast 2 Repository / E-2 reset_*_factory 7 docstring / gap detection 2 CLI 일자별 차집합) `<this commit>`
+- **R2** — 1R Defer 5건 일괄 정리 (L-2 stale docstring 5 / E-1 sync_ohlcv_daily KiwoomError 5종 / M-3 cast 2 Repository / E-2 reset_*_factory 7 docstring / gap detection 2 CLI 일자별 차집합) `d43d956`
+- **R2-docs sync** — R2 후 backfill runbook 의 resume 동작 설명 현행화 (3 곳) `d6357da`
+- **follow-up 분석** — F6/F7/F8 + daily_flow 빈 응답 1건 통합 분석 (4건 모두 NO-FIX / `452980` 신한제11호스팩 식별) `<this commit>`
 
 ---
 
