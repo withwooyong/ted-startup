@@ -7,6 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] docs(ops): secret 회전 절차서 + 회전 시점 = 전체 개발 완료 후 (사용자 결정)
+
+§ 38 Docker 배포 후 새벽 검증 전 chunk 결정. ADR § 38.8 #6 (노출 secret 4건) + #7 (Docker Hub PAT) 의 회전 절차서를 작성하면서, 회전 실행 시점은 사용자 결정에 따라 "전체 개발 / 테스트 / 검증 종료 후" 로 연기.
+
+### 1. 신규 / 갱신 파일
+
+- **신규** `docs/ops/secret-rotation-2026-05-12.md` — 230줄. 배경 / 회전 순서 / 사전 준비 / 단계별 회전 (Docker PAT → KIWOOM_*KEY → Fernet 마스터키 → ACCOUNT_NO) / 검증 / 롤백 / 완료 체크리스트 / 보안 권고 / 의존성 다이어그램
+- **갱신** `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` — § 38.8 #6/#7 결정 시점 "사용자 즉시" → "전체 개발 완료 후 (2026-05-12 사용자 결정)" + 절차서 링크 추가
+- **갱신** `HANDOFF.md` — Pending #2 / Known Issues #23 시점 변경 + 절차서 링크 추가
+
+### 2. 사용자 결정 (2026-05-12)
+
+`.env.prod` 편집 + Fernet 마스터키 교체 + DB 재암호화 + 컨테이너 재기동은 운영 영향이 크고 비가역. 개발 chunk 중간에 회전하면 후속 개발이 회전된 환경에 영향받음 → 디버깅 복잡도 ↑. 노출 위험은 존재하나 실제 침해 정황은 없음 → 회전 시점이 오면 본 절차서를 그대로 따라 수행.
+
+### 3. 절차서 핵심 설계
+
+- **회전 순서 의존성 다이어그램** — Docker PAT (독립) → KIWOOM_APPKEY/SECRETKEY (키움 콘솔) → Fernet 마스터키 (KIWOOM_*KEY 회전 직후 = 동일 plaintext 재암호화 1회) → ACCOUNT_NO (선택)
+- **재암호화 단순화** — DB row 가 `alias=prod` 1개뿐이라 `register_credential.py` 재호출 (upsert) 로 회전 마이그레이션 스크립트 부재 (ADR § 3.4) 우회
+- **secret 값 비기록 원칙** — 실제 값은 사용자 shell / `.env.prod` 에만 존재. 절차서엔 변수명/구조/명령만
+- **롤백 가능 시점** — Fernet 회전 단계 완료 전까지. 백업 SQL 경유 복원 가능
+
+### 4. 영향
+
+- 코드 변경 0 (운영 절차서 chunk)
+- 테스트 1059 그대로 / coverage 91% 그대로
+- backend_kiwoom STATUS.md § 0~6 어떤 섹션도 직접 변경 없음 (§ 1.5 예외 — 단순 운영 절차서)
+
+---
+
 ## [2026-05-12] ops(kiwoom): Docker 컨테이너 배포 — kiwoom-app service (ADR § 38)
 
 § 36 scheduler 활성 후 사용자 앱 재시작이 필요했으나 backend_kiwoom 의 운영 인프라 자체가 미완성 (Dockerfile 5/7 작성 후 entrypoint 누락, compose 에 앱 service 없음). 사용자 결정 (옵션 C) — docker-compose 새 service 추가 + 컨테이너 운영. 5-13 06:00 KST 첫 cron 발화 전 완성.

@@ -31,7 +31,7 @@
 | # | Task | Status | Notes |
 |---|------|--------|-------|
 | **1** | **(5-13 06:00 발화 직후) cron 발화 결과 즉시 검증** | **다음 chunk 1순위** | `docker compose logs kiwoom-app` + DB SQL — 5-13 NXT trading_date row count 등 |
-| **2** | **노출된 secret 4건 회전 (CRITICAL)** | **사용자 즉시** | API_KEY/SECRET revoke + Fernet 마스터키 회전 + DB 재암호화 + Docker Hub PAT revoke (대화 로그 영구 기록 — ADR § 38.8 #6/#7) |
+| **2** | **노출된 secret 4건 회전** | **전체 개발 완료 후** | API_KEY/SECRET revoke + Fernet 마스터키 회전 + DB 재암호화 + Docker Hub PAT revoke (ADR § 38.8 #6/#7). **시점 연기**: 2026-05-12 사용자 결정 — `.env.prod` / DB 재암호화 영향이 커서 개발/테스트/검증 종결 후 일괄. **절차서**: [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) |
 | **3** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 정리 | 사용자 직접 | compose env override 로 우회 완료. .env.prod 정리는 별도 |
 | **4** | (5-19 이후) § 36.5 1주 모니터 측정 채움 | 대기 | 컨테이너 로그 기반 cron elapsed / NXT 정상 / failed / 알람 |
 | **5** | Mac 절전 시 컨테이너 중단 → cron 누락 위험 | 사용자 환경 결정 | 절전 차단 또는 서버 이전 (ADR § 38.8 #1) |
@@ -57,7 +57,7 @@
 | 20 | NXT 우선주 sentinel 빈 row 1개 detection | § 32.3 + § 33.6 | LOW — 운영 영향 0 |
 | ~~21~~ | ~~5-11 NXT 74 rows 보완~~ | § 35.8 | ✅ 해소 (`00ac3b0`) |
 | **22** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 잘못된 prefix | § 38.6.2' | 사용자 직접 (compose env override 로 우회) |
-| **23** | 노출된 secret 4건 회전 | § 38.8 #6/#7 | 사용자 즉시 |
+| **23** | 노출된 secret 4건 회전 | § 38.8 #6/#7 | **전체 개발 완료 후** (5-12 사용자 결정) — 절차서 [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) 작성됨 |
 | **24** | Mac 절전 시 컨테이너 중단 → cron 누락 | § 38.8 #1 | 사용자 환경 결정 |
 
 ## Context for Next Session

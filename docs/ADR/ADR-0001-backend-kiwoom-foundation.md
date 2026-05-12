@@ -2757,8 +2757,8 @@ yearly_ohlcv_sync_yearly   alias=prod  cron=매년 1월 5일 03:00 KST
 | 3 | 다중 worker 시 외부 scheduler | 처리량 확장 | 단일 worker 한계 도달 시 |
 | 4 | 로그 영속성 (volume mount) | 컨테이너 stdout 만으로 부족 시 | 운영 모니터 1주 후 결정 |
 | 5 | **`.env.prod` 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 정리** | env_prefix 불일치 발견 (§ 38.6.2') | 사용자 직접 — 잘못된 이름 9 env 제거 또는 `SCHEDULER_*` 로 rename |
-| 6 | **노출된 secret 4건 회전** (대화 로그 영구 기록) | 컨테이너 env 점검 시 평문 노출 | 사용자 즉시 — KIWOOM_API_KEY/SECRET revoke + 재발급 / Fernet 마스터키 회전 + DB 재암호화 / ACCOUNT_NO (위험도 낮음) |
-| 7 | **Docker Hub PAT 토큰 회수** | credsStore 진단 시 평문 노출 (`dckr_pat_...`) | 사용자 즉시 — https://hub.docker.com/settings/security 에서 revoke |
+| 6 | **노출된 secret 4건 회전** (대화 로그 영구 기록) | 컨테이너 env 점검 시 평문 노출 | **전체 개발 완료 후** (2026-05-12 사용자 결정 — `.env.prod` / DB 재암호화 영향이 커 개발 종결 후 일괄). KIWOOM_API_KEY/SECRET revoke + 재발급 / Fernet 마스터키 회전 + DB 재암호화 / ACCOUNT_NO (위험도 낮음). **절차서**: [`docs/ops/secret-rotation-2026-05-12.md`](../ops/secret-rotation-2026-05-12.md) |
+| 7 | **Docker Hub PAT 토큰 회수** | credsStore 진단 시 평문 노출 (`dckr_pat_...`) | **전체 개발 완료 후** (동일 결정). https://hub.docker.com/settings/security 에서 revoke. **절차서**: 동상 § 3.1 |
 
 ### 38.9 결과
 
