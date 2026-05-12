@@ -29,7 +29,7 @@
 | **B — 종목 마스터** | stock + nxt_enable / 단건 조회 / 펀더멘털 | ✅ **완료** | B-α / B-β / B-γ-1 / B-γ-2 (4) | ka10099, ka10100, ka10001 |
 | **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 + 영숫자 호환성 | ✅ **종결 (데이터 측면 100%)** | C-1α/β / C-2α/β/γ/δ / R1/R2 / C-3α/β / C-backfill / C-4 / chart 영숫자 Chunk 1/2 / 영숫자 백필 (16) | 모두 ✅ / scheduler 활성만 남음 |
 | **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | 🔄 **진행** | **D-1 풀 구현 ✅** (`a1e20e0` plan doc + `249c277` 구현) / D-2 ka10080 분봉 마지막 / ka10079 (P3) | ka10079, ka10080, **ka20006 ✅ (D-1)** |
-| **E — 시그널 보강** | 공매도 / 대차거래 | ✅ **완료** | plan doc § 12 (`ac6a941`) + 풀 구현 (this commit) | ka10014 ✅ / ka10068 ✅ / ka20068 ✅ |
+| **E — 시그널 보강** | 공매도 / 대차거래 | ✅ **완료** | plan doc § 12 (`ac6a941`) + 풀 구현 `0e767fe` | ka10014 ✅ / ka10068 ✅ / ka20068 ✅ |
 | **F — 순위** | 등락률/거래량/거래대금 5종 통합 | ⏳ 대기 | — | ka10027, ka10030, ka10031, ka10032, ka10023 |
 | **G — 투자자별** | 일별 매매 / 종목별 / 연속매매 | ⏳ 대기 | — | ka10058, ka10059, ka10131 |
 | **H — 통합** | 백테스팅 view, 데이터 품질 리포트, README/SPEC, Grafana | ⏳ 대기 | — | (인프라 only) |
@@ -56,9 +56,9 @@
 | 10 | ka10083 | 주식월봉차트 | C-3α/β | ka10082 와 동일 chunk (Period dispatch) — Scheduler 매월 1일 03:00 | `8fcabe4` / (C-3β) |
 | **11** | **ka10094** | **주식년봉차트** | **C-4** | Migration 014 + UseCase YEARLY 분기 활성 + Router 2 path + Scheduler 매년 1월 5일 03:00. KRX only (NXT skip) | `b75334c` |
 | **12** | **ka20006** | **업종일봉조회** | **D-1** | Migration 015 + ORM + Pydantic 3 + DTO 2 + KiwoomChartClient.fetch_sector_daily + SectorPriceDailyRepository + UseCase Single+Bulk + Router 2 path + Scheduler mon-fri 07:00 KST. centi BIGINT + sector_id FK + NXT skip + 7 필드 응답. 9 scheduler 활성 | `249c277` |
-| **13** | **ka10014** | **공매도 추이** | **E** | Migration 016 (`short_selling_kw` 테이블) + ORM + Pydantic 3 + ShortSellingTimeType enum + DTO 3 + KiwoomShortSellingClient.fetch_trend (KRX + NXT 시도) + ShortSellingKwRepository (UNIQUE + partial index `idx_*_weight_high`) + UseCase Single+Bulk (partial 5%/15% 분모=KRX only) + Router 4 path + Scheduler mon-fri 07:30 KST | (this commit) |
-| **14** | **ka10068** | **시장 대차거래 추이** | **E** | Migration 016 (`lending_balance_kw` 통합, scope=MARKET) + ORM (partial unique 2 + CHECK `chk_lending_scope`) + Pydantic 3 + LendingScope enum + DTO 3 + KiwoomLendingClient.fetch_market_trend + LendingBalanceKwRepository.upsert_market (partial unique 매핑) + UseCase IngestLendingMarketUseCase + Router 2 path + Scheduler mon-fri 07:45 KST | (this commit) |
-| **15** | **ka20068** | **종목별 대차거래 추이** | **E** | 공통 클래스 / 테이블 재사용 (scope=STOCK) — KiwoomLendingClient.fetch_stock_trend (KRX only Length=6) + LendingBalanceKwRepository.upsert_stock + UseCase IngestLendingStockUseCase + IngestLendingStockBulkUseCase (50건마다 commit) + Router 2 path + Scheduler mon-fri 08:00 KST (90분 grace) | (this commit) |
+| **13** | **ka10014** | **공매도 추이** | **E** | Migration 016 (`short_selling_kw` 테이블) + ORM + Pydantic 3 + ShortSellingTimeType enum + DTO 3 + KiwoomShortSellingClient.fetch_trend (KRX + NXT 시도) + ShortSellingKwRepository (UNIQUE + partial index `idx_*_weight_high`) + UseCase Single+Bulk (partial 5%/15% 분모=KRX only) + Router 4 path + Scheduler mon-fri 07:30 KST | `0e767fe` |
+| **14** | **ka10068** | **시장 대차거래 추이** | **E** | Migration 016 (`lending_balance_kw` 통합, scope=MARKET) + ORM (partial unique 2 + CHECK `chk_lending_scope`) + Pydantic 3 + LendingScope enum + DTO 3 + KiwoomLendingClient.fetch_market_trend + LendingBalanceKwRepository.upsert_market (partial unique 매핑) + UseCase IngestLendingMarketUseCase + Router 2 path + Scheduler mon-fri 07:45 KST | `0e767fe` |
+| **15** | **ka20068** | **종목별 대차거래 추이** | **E** | 공통 클래스 / 테이블 재사용 (scope=STOCK) — KiwoomLendingClient.fetch_stock_trend (KRX only Length=6) + LendingBalanceKwRepository.upsert_stock + UseCase IngestLendingStockUseCase + IngestLendingStockBulkUseCase (50건마다 commit) + Router 2 path + Scheduler mon-fri 08:00 KST (90분 grace) | `0e767fe` |
 
 ### 2.2 진행중 / 다음 (0)
 

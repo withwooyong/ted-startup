@@ -1,8 +1,9 @@
 # Session Handoff
 
-> Last updated: 2026-05-13 (KST) — Phase E 풀 구현 완료 (ted-run 풀 파이프라인).
-> Branch: `master` → 직전 `ac6a941` (Phase E plan doc § 12). 본 turn 에서 commit 예정 (push 는 사용자 명시 요청 시).
-> 미푸시 commit: 본 turn commit 1건 (Phase E 풀 구현)
+> Last updated: 2026-05-13 (KST) — Phase E 풀 구현 완료 + 푸시 (`0e767fe` HEAD).
+> Branch: `master` → `origin/master` 동기화 완료
+> Latest commit: `0e767fe` (Phase E 풀 구현 / Migration 016 / 15/25 endpoint 60%)
+> 미푸시 commit: **0 건** — 본 세션 2 commit (`ac6a941` / `0e767fe`) 모두 push 완료
 
 ## Current Status
 
@@ -26,7 +27,7 @@
 | 6 | Phase D-1 ka20006 plan doc § 12 작성 + STATUS/HANDOFF 갱신 + commit | Migration 015 + 인프라 + 자동화 통합 chunk § (9 결정 + 13 self-check + DoD 10 코드 6 테스트) | 3 / `a1e20e0` |
 | 7 | **Phase D-1 ka20006 풀 구현 (ted-run)** — TDD 38 신규 / 구현 10 파일 / 1R CONDITIONAL → PASS / Verification 5관문 PASS / 컨테이너 재배포 / ADR § 39 / 메타 갱신 | 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint | 16 / `249c277` |
 | 8 | **Phase E 통합 chunk plan doc § 12 작성** — endpoint-15-ka10014.md 본문 끝에 § 12 (12.1~12.7) 신규 / endpoint-16/17 cross-ref / STATUS / HANDOFF / CHANGELOG 갱신 | 10 결정 + 13 self-check + DoD 15 코드 8 테스트 — ted-run 대기 | 6 / `ac6a941` |
-| 9 | **Phase E 풀 구현 (ted-run)** — TDD 89 sonnet 3 병렬 → 구현 25 파일 opus 3 병렬 → 1R CONDITIONAL → fix 10건 (CRITICAL 6 + HIGH 10) → PASS → Verification 5관문 → ADR § 40 / 메타 3종 / master.md 3 row | 1186 tests / coverage 86.30% / ruff + mypy strict PASS / 15/25 endpoint (60%) | 28 / (this commit) |
+| 9 | **Phase E 풀 구현 (ted-run)** — TDD 89 sonnet 3 병렬 → 구현 25 파일 opus 3 병렬 → 1R CONDITIONAL → fix 10건 (CRITICAL 6 + HIGH 10) → PASS → Verification 5관문 → ADR § 40 / 메타 3종 / master.md 3 row | 1186 tests / coverage 86.30% / ruff + mypy strict PASS / 15/25 endpoint (60%) | 41 / `0e767fe` |
 
 ## In Progress / Pending
 
