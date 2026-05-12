@@ -7,6 +7,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] fix(kiwoom): 5-11 NXT 74 rows 보완 — daily 백필 + 검증 (ADR § 37)
+
+§ 35.8 의 별도 chunk — § 35 cron 시간 NXT 마감 후 새벽 이동 결정의 데이터 측면 정합성 확정. 5-11 NXT 적재 12% (74 / 정상 ~630) anomaly 보완. § 36 scheduler 활성 직후 5-13 첫 OhlcvDaily cron 발화 전 NXT 데이터 표 깨끗화.
+
+### 1. 백필 실행 — `--resume` 미사용 의도적
+
+```bash
+nohup uv run python scripts/backfill_ohlcv.py --period daily \
+  --start-date 2026-05-11 --end-date 2026-05-11 --alias prod \
+  > logs/backfill-nxt-2026-05-11.log 2>&1 &
+# PID 57104 / 시작 10:15:18 ~ 종료 10:36:24 KST / 21m 6s
+```
+
+gap detection 이 KRX 만 본다 (`d43d956`). KRX UPSERT idempotent + NXT 만 실질 보완.
+
+### 2. 결과
+
+| 항목 | 값 |
+|------|-----|
+| total | 4373 종목 |
+| success_krx | 4373 / DB 적재 4370 (5-7/8 대비 -2 = 5-11 자체 신규/정지 종목 차이 — 회귀 0) |
+| **success_nxt** | **630 / DB 적재 628** (정상 ~630 대비 99.7%) |
+| failed | 0 (0.00%) |
+| elapsed | 21m 6s (추정 36m 의 60% — 영숫자 `nxt_enable=false` 호출 skip 덕) |
+| 실제 호출 수 | 5003 / 8746 dry-run 추정 (57%) |
+| 실제 ERROR/WARNING/429 | **0** (grep false positive 4건 = timestamp `.429` ms + Summary `failed:` 키워드) |
+
+### 3. 검증 SQL 4건 — 모두 PASS
+
+- NXT 5-11: 628 rows (이전 74 → +554)
+- KRX 5-11: 4370 rows (회귀 0)
+- NXT 분포 5-7/8/11: 630 / 630 / 628 (anomaly 해소)
+- KRX 분포 5-7/8/11: 4372 / 4372 / 4370 (idempotent UPSERT 정상)
+
+### 4. 의미
+
+- **§ 35.8 anomaly 완전 해소** — 12% → 99.7%
+- **§ 36.5.2 1주 모니터 SQL 깨끗** — 5-13 ~ 5-19 NXT 표가 5-11 부터 ~630 균일로 시작
+- **§ 36.9 Phase C 완료 선언 1보 진전** — 본 chunk + 5-19 § 36.5 측정 = Phase C 100%
+- **`--resume` 미사용 패턴 검증** — KRX UPSERT idempotent 동작 사후 확인
+
+### 5. 파일 — 코드 변경 0
+
+- 갱신 `docs/adr/ADR-0001-backend-kiwoom-foundation.md` § 37 신규 + § 35.8 cross-ref + § 36.7 #1 해소
+- 갱신 `src/backend_kiwoom/STATUS.md` — § 0 / § 4 #21 해소 / § 6 chunk 추가
+- 갱신 `HANDOFF.md`
+- 본 prepend
+- 신규 (commit 외부) `src/backend_kiwoom/logs/backfill-nxt-2026-05-11.log`
+
+---
+
 ## [2026-05-12] ops(kiwoom): scheduler_enabled 활성 + 1주 모니터 (ADR § 36)
 
 Phase C 의 마지막 chunk — 운영 본격 진입. § 35 cron 시간 fix 후 8 cron scheduler 의 default disabled 상태 해소.

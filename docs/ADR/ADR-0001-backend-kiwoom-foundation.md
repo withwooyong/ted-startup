@@ -2401,7 +2401,7 @@ def previous_kst_business_day(today: date) -> date:
 - **Weekly**: sat 07:00 — 주말 새벽. 토요일 사용자 분석은 이날 자정 이후 안전
 - **base_date** 일자: 전 영업일. router manual sync (오늘 데이터 fetch) 와 cron (어제 데이터 fetch) 의도 분리 — 명확
 
-### 35.8 5-11 NXT 74 rows 보완 (본 chunk 와 별개)
+### 35.8 5-11 NXT 74 rows 보완 (본 chunk 와 별개) — ✅ 완료 (§ 37 참조)
 
 plan doc § 7 명시. 사용자 수동:
 
@@ -2411,6 +2411,8 @@ uv run python scripts/backfill_ohlcv.py --period daily --start-date 2026-05-11 -
 ```
 
 `--resume` 미사용 — gap detection 이 KRX 만 본다 (`d43d956` `_RESUME_TABLE_BY_PERIOD`). 4373 종목 모두 5-11 호출 → KRX UPSERT idempotent / NXT 미적재 보완.
+
+**실행 결과**: § 37 별도 chunk 에서 2026-05-12 수행. NXT 74 → 628 rows / 0 failed / 21m 6s. anomaly 12% → 99.7% 정상화.
 
 ### 35.9 다음 chunk
 
@@ -2520,16 +2522,111 @@ GROUP BY trading_date ORDER BY trading_date;
 
 | # | 항목 | 출처 | 결정 시점 |
 |---|------|------|-----------|
-| 1 | 5-11 NXT 74 rows 보완 | § 35.8 | 사용자 수동 — 본 chunk 와 별개 |
+| ~~1~~ | ~~5-11 NXT 74 rows 보완~~ | § 35.8 | ✅ **해소** — § 37 (2026-05-12, NXT 74 → 628 / 0 failed / 21m 6s) |
 | 2 | 공휴일 calendar 도입 | § 35.3 | 별도 chunk 가능 — 본 chunk 후 1주 모니터에서 빈 응답 패턴 관찰 후 |
 | 3 | NXT scheduler 분리 (KRX + NXT 시간 다른 운영) | § 35.2 (옵션 C 미채택) | 운영 데이터 축적 후 별도 결정 |
 
 ### 36.8 다음 chunk
 
 1. **(별도 chunk) 1주 후 § 36.5 측정 결과 채움** — 2026-05-19 (mon) 이후 사용자 요청 시
-2. **5-11 NXT 보완 백필** — 사용자 수동 (§ 35.8)
+2. ~~5-11 NXT 보완 백필~~ — ✅ 해소 (§ 37)
 3. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉
 
 ### 36.9 Phase C 완료 선언 (조건부)
 
 본 chunk + 1주 후 측정 chunk 종료 시 Phase C 100% 완료. 25 endpoint 중 11개 적재 + 8 cron 정상 운영 + historical 3년 완성. 다음 wave = Phase D (분봉/업종일봉).
+
+---
+
+## 37. Phase C — 5-11 NXT 74 rows 보완 백필 (별도 chunk, 2026-05-12 ✅ 완료)
+
+### 37.1 결정
+
+§ 35.8 의 별개 chunk. § 35 cron shift 의 정합성 데이터 정리 — 5-11 NXT 적재 12% (74 / 정상 ~630) anomaly 보완. § 36 scheduler 활성 직후 5-13 첫 OhlcvDaily cron 발화 전에 NXT 데이터 표 깨끗화 → § 36.5.2 1주 모니터 SQL 결과가 5-11 부터 anomaly 없이 진행되도록.
+
+사용자 결정 (2026-05-12) — 5-19 § 36.5 측정 chunk 의존도 낮은 마이크로 작업부터 처리. ted-run 우회 (옵션 B = 직접 호출) — 측정값 수집 + ADR 문서 placeholder 교체만이라 TDD/리뷰 사이클 오버킬.
+
+### 37.2 실행
+
+```bash
+cd src/backend_kiwoom
+# 1) dry-run — 사전 검증
+uv run python scripts/backfill_ohlcv.py --period daily \
+  --start-date 2026-05-11 --end-date 2026-05-11 --alias prod --dry-run
+# stocks=4373 / NXT enabled / 8746 calls / 36m 26s 추정
+
+# 2) 실 백필 — nohup 백그라운드 (사용자 셸 점유 회피)
+mkdir -p logs && nohup uv run python scripts/backfill_ohlcv.py --period daily \
+  --start-date 2026-05-11 --end-date 2026-05-11 --alias prod \
+  > logs/backfill-nxt-2026-05-11.log 2>&1 &
+# PID 57104 / 시작 10:15:18 KST
+```
+
+`--resume` 미사용 의도적 (§ 35.8 / `d43d956`) — gap detection 이 KRX 만 보므로 KRX UPSERT idempotent + NXT 만 실질 보완.
+
+### 37.3 결과
+
+**Summary 블록 (로그 발췌)**:
+
+| 항목 | 값 |
+|------|-----|
+| period | daily |
+| date range | 2026-05-11 ~ 2026-05-11 |
+| total | 4373 종목 |
+| success_krx | 4373 |
+| **success_nxt** | **630** (정상 거래 종목 100%) |
+| failed | **0** (0.00%) |
+| elapsed | **21m 6s** (10:15:18 ~ 10:36:24 KST) |
+| avg/stock | 0.3s |
+| 실제 호출 수 | 5003 (8746 추정 대비 57% — 영숫자 종목 `nxt_enable=false` 호출 skip 덕) |
+
+ERROR / WARNING / 429 / Exception **실제 0건** (grep false positive 4건 = timestamp 의 `.429` ms 단위 + Summary 의 `failed:` 키워드).
+
+### 37.4 검증 SQL — DB 적재 검증
+
+```sql
+-- (1) NXT 5-11 row count
+SELECT count(*) FROM kiwoom.stock_price_nxt WHERE trading_date = '2026-05-11';
+-- 628 rows
+
+-- (2) KRX 5-11 row count (UPSERT idempotent 검증)
+SELECT count(*) FROM kiwoom.stock_price_krx WHERE trading_date = '2026-05-11';
+-- 4370 rows
+
+-- (3) NXT 분포 (5-7 ~ 5-12)
+-- 5-7 (목): 630 / 5-8 (금): 630 / 5-11 (월): 628
+
+-- (4) KRX 분포 (5-7 ~ 5-12)
+-- 5-7 (목): 4372 / 5-8 (금): 4372 / 5-11 (월): 4370
+```
+
+**판정**:
+- NXT 628 / 정상 ~630 = **99.7%** — anomaly 12% → 0.3% (sentinel 빈 응답 2 종목 평소 패턴)
+- KRX 4370 = 5-7/8 (4372) 대비 -2 — **5-11 자체 신규/정지 종목 차이** (백필 회귀 0)
+- 두 표 모두 5-11 가 평소 영업일 패턴과 일관 → § 35 cron shift 결정 사후 정합성 확정
+
+### 37.5 의미
+
+- **§ 35.8 anomaly 완전 해소** — § 35 cron 시간 NXT 마감 후 새벽 이동 결정의 데이터 측면 정합성 확정
+- **§ 36.5.2 1주 모니터 SQL 깨끗** — 5-13 ~ 5-19 trading_date 별 NXT row 분포가 5-11 부터 ~630 균일로 시작 (5-11 anomaly 가 표 안에서 outlier 가 아님)
+- **§ 36.9 Phase C 완료 선언 1보 진전** — 본 chunk + § 36.5 측정 = Phase C 100% 종결
+- **`--resume` 미사용 패턴 검증** — KRX UPSERT idempotent + NXT 차분 보완 동작 사후 확인 (4370 KRX 회귀 0 + NXT 74 → 628)
+
+### 37.6 follow-up
+
+- 본 chunk 자체 신규 follow-up 없음
+- § 36.7 #1 (5-11 NXT 74 rows 보완) **해소** — STATUS § 4 #21 ✅
+- § 36.5.2 의 5-11 placeholder 가 1주 후 측정 chunk 에서 ~628 로 채워질 예정 (anomaly 없음)
+
+### 37.7 결과
+
+- **코드 변경 0** — script / batch / scheduler 모두 그대로
+- **테스트**: 1059 그대로 (변경 없음)
+- **데이터**: NXT 5-11 +554 rows / KRX 회귀 0
+- **문서 변경**: ADR § 37 (본 §) + § 35.8 결과 cross-ref + § 36.7 #1 해소 + STATUS § 4 #21 해소 + § 6 chunk 추가 + HANDOFF + CHANGELOG
+
+### 37.8 다음 chunk
+
+1. **(1주 후) § 36.5 측정 결과 채움** — 2026-05-19 (mon) 이후. NXT 5-11 ~628 / 5-13 ~5-19 ~630 균일 검증
+2. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉
+3. 공휴일 calendar (§ 36.7 #2) — 1주 모니터 빈 응답 패턴 관찰 후
