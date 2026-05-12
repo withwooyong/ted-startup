@@ -210,6 +210,101 @@ class YearlyChartResponse(BaseModel):
     return_msg: Annotated[str, Field(max_length=200)] = ""
 
 
+class SectorChartRow(BaseModel):
+    """ka20006 응답 row — 업종 일봉 7 필드 (D-1).
+
+    설계: endpoint-13-ka20006.md § 3.4 + § 12.2 #6.
+
+    필드 7개 — ka10081 의 10 필드 중 `pred_pre` / `pred_pre_sig` / `trde_tern_rt` 없음.
+    응답값은 **지수 × 100** (centi) — KOSPI 2521.27 → "252127" (plan § 12.2 #3).
+
+    extra="ignore" — vendor 가 운영에서 누락 필드 추가 시 silent 무시 (plan § 12.4 H-3).
+    `inds_cd` length 응답 = 20 (Excel 명세) — 본 row 에는 없음 (root 응답에만 있음).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    cur_prc: Annotated[str, Field(max_length=32)] = ""
+    trde_qty: Annotated[str, Field(max_length=32)] = ""
+    dt: Annotated[str, Field(max_length=8)] = ""
+    open_pric: Annotated[str, Field(max_length=32)] = ""
+    high_pric: Annotated[str, Field(max_length=32)] = ""
+    low_pric: Annotated[str, Field(max_length=32)] = ""
+    trde_prica: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        sector_id: int,
+    ) -> NormalizedSectorDailyOhlcv:
+        """ka20006 row → NormalizedSectorDailyOhlcv.
+
+        100배 값은 그대로 BIGINT 저장 (centi-index 단위, plan § 12.2 #3).
+        빈 dt → trading_date=date.min. caller (Repository.upsert_many) 가 skip.
+        """
+        return NormalizedSectorDailyOhlcv(
+            sector_id=sector_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            open_index_centi=_to_int(self.open_pric),
+            high_index_centi=_to_int(self.high_pric),
+            low_index_centi=_to_int(self.low_pric),
+            close_index_centi=_to_int(self.cur_prc),
+            trade_volume=_to_int(self.trde_qty),
+            trade_amount=_to_int(self.trde_prica),
+        )
+
+
+class SectorChartResponse(BaseModel):
+    """ka20006 응답 — `inds_cd` 메아리 + `inds_dt_pole_qry` list 키 (D-1).
+
+    설계: endpoint-13-ka20006.md § 3.3 + § 12.4 H-3.
+
+    `inds_dt_pole_qry: list[SectorChartRow] | None` (Optional) — 운영 검증 미완 (plan
+    § 12.4 H-3) 강건성 확보. Pydantic 이 None 을 빈 list 로 자동 변환하진 않으므로
+    `default_factory=list` + `extra="ignore"` 로 안전 디폴트.
+
+    `inds_cd` length: 요청 3 vs 응답 20 (Excel 명세) — Pydantic 미제약 (plan § 12.4 H-9).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    inds_cd: Annotated[str, Field(max_length=32)] = ""
+    inds_dt_pole_qry: list[SectorChartRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedSectorDailyOhlcv:
+    """ka20006 정규화 도메인 — Repository 가 보는 형태 (D-1).
+
+    설계: endpoint-13-ka20006.md § 3.4 + § 12.2 #3.
+
+    `trading_date == date.min` 은 빈 응답 row 표식 — caller (Repository.upsert_many) 가
+    영속화 직전 skip. open/high/low/close_index_centi 는 응답값 그대로 (×100) 저장.
+    """
+
+    sector_id: int
+    trading_date: date
+    open_index_centi: int | None
+    high_index_centi: int | None
+    low_index_centi: int | None
+    close_index_centi: int | None
+    trade_volume: int | None
+    trade_amount: int | None
+
+    @property
+    def close_index(self) -> Decimal | None:
+        """centi BIGINT → Decimal — 사용자 친화 표시 (plan § 12.2 #3 read helper).
+
+        예: close_index_centi=252127 → close_index=Decimal("2521.27").
+        Decimal 산술은 정수 / 100 와 정확 일치 (float 부동소수 오차 회피).
+        """
+        if self.close_index_centi is None:
+            return None
+        return Decimal(self.close_index_centi) / Decimal(100)
+
+
 @dataclass(frozen=True, slots=True)
 class NormalizedDailyOhlcv:
     """ka10081 정규화 도메인 — Repository 가 보는 형태.
@@ -248,6 +343,11 @@ class KiwoomChartClient:
     YEARLY_API_ID = "ka10094"
     # 년봉은 30년 백필도 1 페이지 가정 (plan § 11.3 / 12.4 H-7). 안전 마진으로 2 cap.
     YEARLY_MAX_PAGES = 2
+
+    # D-1 — 업종 일봉 (ka20006). KRX only, NXT 미지원 (plan § 12.2 #4).
+    # 1 페이지 ~600 거래일 추정 (ka10081 와 동일 가정). 3년 백필 = 2 페이지 + 여유.
+    SECTOR_DAILY_API_ID = "ka20006"
+    SECTOR_DAILY_MAX_PAGES = 10
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
@@ -622,6 +722,86 @@ class KiwoomChartClient:
 
         return all_rows
 
+    async def fetch_sector_daily(
+        self,
+        inds_cd: str,
+        *,
+        base_date: date,
+        max_pages: int | None = None,
+    ) -> list[SectorChartRow]:
+        """ka20006 업종 일봉 OHLCV — fetch_daily/yearly 패턴 응용 (D-1).
+
+        설계: endpoint-13-ka20006.md § 6.1 + § 12.
+
+        Parameters:
+            inds_cd: 3자리 숫자 업종코드 ("001"/"101"/"201"/...). ka10101 sector_code 호환.
+            base_date: 기준일자 (이 날짜를 포함한 과거 시계열 응답).
+            max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 SECTOR_DAILY_MAX_PAGES (10).
+
+        Raises:
+            ValueError: inds_cd 가 3자리 숫자 외 (호출 차단).
+            KiwoomCredentialRejectedError: 401/403.
+            KiwoomBusinessError: 응답 return_code != 0.
+            KiwoomUpstreamError: 5xx · 네트워크 · 파싱 실패.
+            KiwoomResponseValidationError: Pydantic 검증 실패.
+
+        특징 (plan § 12):
+        - #4 NXT 미호출 — 본 메서드는 KRX only. UseCase 가드 (sector_id 입력)로 NXT 호출 차단
+        - sentinel break — 빈 응답 + cont-yn=Y 무한 루프 방어 (C-flow-empty-fix 1:1)
+        - H-4 upd_stkpc_tp 없음 — Body 미포함 (지수 자체 보정)
+        - H-9 inds_cd length — 응답 length 20 가능성 + 요청 3 보정 없음 (Pydantic 미제약)
+        """
+        # 사전 검증 — 3자리 숫자 외 거부 (호출 차단). _NX/_AL suffix 등도 거부.
+        if not (len(inds_cd) == 3 and inds_cd.isdigit()):
+            raise ValueError(
+                f"inds_cd 는 3자리 숫자만 허용 — 입력={inds_cd!r}"
+            )
+
+        body: dict[str, Any] = {
+            "inds_cd": inds_cd,
+            "base_dt": base_date.strftime("%Y%m%d"),
+        }
+
+        cap = max_pages if max_pages is not None else self.SECTOR_DAILY_MAX_PAGES
+        all_rows: list[SectorChartRow] = []
+
+        async for page in self._client.call_paginated(
+            api_id=self.SECTOR_DAILY_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=cap,
+        ):
+            # B-β 1R 2b-H2 패턴 — flag-then-raise-outside-except (__context__ 박힘 차단)
+            validation_failed = False
+            parsed: SectorChartResponse | None = None
+            try:
+                parsed = SectorChartResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(
+                    f"{self.SECTOR_DAILY_API_ID} 응답 검증 실패"
+                )
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+
+            if parsed.return_code != 0:
+                # message 는 attacker-influenced — 비식별 메타만 (B-α/B-β M-2 패턴).
+                raise KiwoomBusinessError(
+                    api_id=self.SECTOR_DAILY_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+
+            all_rows.extend(parsed.inds_dt_pole_qry)
+
+            # 빈 응답 가드 (fetch_daily/yearly 와 동일 — sentinel 무한 루프 방어, plan § 12.4 H-8).
+            if not parsed.inds_dt_pole_qry:
+                break
+
+        return all_rows
+
 
 __all__ = [
     "DailyChartResponse",
@@ -630,6 +810,9 @@ __all__ = [
     "MonthlyChartResponse",
     "MonthlyChartRow",
     "NormalizedDailyOhlcv",
+    "NormalizedSectorDailyOhlcv",
+    "SectorChartResponse",
+    "SectorChartRow",
     "WeeklyChartResponse",
     "WeeklyChartRow",
     "YearlyChartResponse",

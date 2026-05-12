@@ -31,6 +31,7 @@ from app.adapter.web._deps import (
     IngestDailyFlowUseCaseFactory,
     IngestDailyOhlcvUseCaseFactory,
     IngestPeriodicOhlcvUseCaseFactory,
+    IngestSectorDailyBulkUseCaseFactory,
     SyncSectorUseCaseFactory,
     SyncStockFundamentalUseCaseFactory,
     SyncStockMasterUseCaseFactory,
@@ -38,6 +39,7 @@ from app.adapter.web._deps import (
 from app.batch.daily_flow_job import fire_daily_flow_sync
 from app.batch.monthly_ohlcv_job import fire_monthly_ohlcv_sync
 from app.batch.ohlcv_daily_job import fire_ohlcv_daily_sync
+from app.batch.sector_daily_ohlcv_job import fire_sector_daily_sync
 from app.batch.sector_sync_job import fire_sector_sync
 from app.batch.stock_fundamental_job import fire_stock_fundamental_sync
 from app.batch.stock_master_job import fire_stock_master_sync
@@ -71,6 +73,9 @@ MONTHLY_OHLCV_SYNC_JOB_ID: Final[str] = "monthly_ohlcv_sync_monthly"
 
 YEARLY_OHLCV_SYNC_JOB_ID: Final[str] = "yearly_ohlcv_sync_yearly"
 """년봉 OHLCV sync job 의 고유 ID (C-4). KST 매년 1월 5일 03:00 — 직전 년 마감 + 새해 휴장 후 며칠 여유."""
+
+SECTOR_DAILY_SYNC_JOB_ID: Final[str] = "sector_daily_sync_daily"
+"""일간 sector daily OHLCV sync job 의 고유 ID (D-1). KST mon-fri 07:00 — § 35 일관."""
 
 
 class SectorSyncScheduler:
@@ -751,11 +756,100 @@ class YearlyOhlcvScheduler:
             self._started = False
 
 
+class SectorDailyOhlcvScheduler:
+    """일간 sector daily OHLCV sync cron job 1개를 관리하는 wrapper (D-1).
+
+    OhlcvDailyScheduler 패턴 1:1 응용. cron: KST **mon-fri 07:00** (plan § 12.2 #7,
+    § 35 NXT 마감 후 새벽 cron 일관). 06:00 ohlcv_daily + 06:30 daily_flow 직후.
+
+    plan § 12.4 H-5 — KRX rate limit 경합 가능성: 기존 KRX rate limit lock (asyncio.Lock)
+    으로 안전. 50~80 sector × 0.25s = 13~20초 추정.
+
+    enabled=False 시 start no-op (운영 실수 방어).
+    """
+
+    def __init__(
+        self,
+        *,
+        factory: IngestSectorDailyBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        """scheduler 가 시작됐고 아직 정지 안 됐는지 — 호출자 의도 기반."""
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        """등록된 job 수 — `enabled=False` 면 0."""
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._scheduler.get_job(job_id)
+
+    def start(self) -> None:
+        """scheduler 기동 + sector daily sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("sector daily scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("sector daily scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_sector_daily_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=7,
+                minute=0,
+                timezone=KST,
+            ),
+            id=SECTOR_DAILY_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "sector daily scheduler 시작 — job=%s alias=%s cron=mon-fri 07:00 KST",
+            SECTOR_DAILY_SYNC_JOB_ID,
+            self._alias,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        """scheduler 정지. 미기동 상태에서 호출돼도 안전."""
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001 — shutdown 모든 예외 swallow
+            logger.exception("sector daily scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
 __all__ = [
     "DAILY_FLOW_SYNC_JOB_ID",
     "KST",
     "MONTHLY_OHLCV_SYNC_JOB_ID",
     "OHLCV_DAILY_SYNC_JOB_ID",
+    "SECTOR_DAILY_SYNC_JOB_ID",
     "SECTOR_SYNC_JOB_ID",
     "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
@@ -764,6 +858,7 @@ __all__ = [
     "DailyFlowScheduler",
     "MonthlyOhlcvScheduler",
     "OhlcvDailyScheduler",
+    "SectorDailyOhlcvScheduler",
     "SectorSyncScheduler",
     "StockFundamentalScheduler",
     "StockMasterScheduler",

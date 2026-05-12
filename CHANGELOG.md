@@ -7,6 +7,76 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] feat(kiwoom): Phase D-1 — ka20006 sector daily OHLCV 풀 구현 (Migration 015, 12/25 endpoint)
+
+ted-run 풀 파이프라인 적용 — TDD 38 신규 → 구현 → 1R CONDITIONAL → PASS (CRITICAL 3 + HIGH 2 fix) → Verification 5관문 PASS → ADR § 39 → 커밋. Phase D 진입 chunk. ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지.
+
+### 1. 신규 / 갱신 파일
+
+**신규 코드 (7)**:
+- `migrations/versions/015_sector_price_daily.py` — sector_price_daily 테이블 (sector_id BIGINT FK / UNIQUE (sector_id, trading_date) / centi BIGINT 4 컬럼)
+- `app/adapter/out/persistence/models/sector_price_daily.py` — ORM
+- `app/adapter/out/persistence/repositories/sector_price.py` — `SectorPriceDailyRepository.upsert_many`
+- `app/application/dto/sector_ohlcv.py` — `IngestSectorDailyInput` / `SectorIngestOutcome` / `SectorBulkSyncResult` (skipped 카운터 1R HIGH #5 fix)
+- `app/application/service/sector_ohlcv_service.py` — `IngestSectorDailyUseCase` Single + Bulk + 3 가드 (NXT skip / sector_master_missing / sector_inactive)
+- `app/adapter/web/routers/sector_ohlcv.py` — sync 전체 + refresh 단건 (admin API key)
+- `app/batch/sector_daily_ohlcv_job.py` — `fire_sector_daily_sync` (skipped 로그 포함)
+
+**갱신 코드 (6)**:
+- `app/adapter/out/kiwoom/chart.py` — `SectorChartRow/Response/NormalizedSectorDailyOhlcv` (7 필드, extra="ignore") + `fetch_sector_daily` (sentinel break)
+- `app/adapter/web/_deps.py` — 2 factory + getter/setter/reset
+- `app/scheduler.py` — `SectorDailyOhlcvScheduler` + `SECTOR_DAILY_SYNC_JOB_ID` (mon-fri 07:00 KST)
+- `app/config/settings.py` — `scheduler_sector_daily_sync_alias`
+- `app/adapter/out/persistence/models/__init__.py` — `SectorPriceDaily` export
+- `app/main.py` — 1R CRITICAL #1~#3 fix (라우터 include + 2 factory 빌드 + scheduler 기동/종료 + alias fail-fast)
+- `docker-compose.yml` — `SCHEDULER_SECTOR_DAILY_SYNC_ALIAS: prod`
+
+**신규 테스트 (6) — 38 시나리오**:
+- `tests/test_migration_015.py` (5) / `tests/test_sector_price_repository.py` (6) / `tests/test_sector_ohlcv_service.py` (6) / `tests/test_sector_ohlcv_router.py` (6) / `tests/test_scheduler_sector_daily.py` (8) / `tests/test_kiwoom_chart_client.py` (sector_daily +7)
+
+**갱신 테스트 (2)**:
+- `tests/test_scheduler.py` / `tests/test_stock_master_scheduler.py` — `SCHEDULER_SECTOR_DAILY_SYNC_ALIAS` fixture 추가 (alias fail-fast 검증 통과)
+
+### 2. 9 결정 (ADR § 39.2)
+
+| # | 결정 |
+|---|------|
+| 1 | Migration 015 `015_sector_price_daily` (22 chars) |
+| 2 | sector_id FK = **BIGINT** (sector.id BIGSERIAL 일치, 1R HIGH #4 fix INTEGER → BIGINT) |
+| 3 | 100배 값 = centi BIGINT 4 컬럼 + read property |
+| 4 | NXT skip (`nxt_sector_not_supported`) — 코드만 추가 |
+| 5 | sector_master_missing 가드 (Single UseCase) |
+| 6 | 응답 7 필드 (pred_pre/pred_pre_sig/trde_tern_rt 부재 → None 영속화) |
+| 7 | cron = mon-fri 07:00 KST (§ 35 새벽 정책 일관, ohlcv_daily 06:00 + daily_flow 06:30 직후) |
+| 8 | 백필 윈도 3년 (CLI 별도 chunk) |
+| 9 | UseCase 입력 = sector_id (PK) |
+
+### 3. 1R 결과 — CONDITIONAL → PASS
+
+| 심각도 | 건수 | 처리 |
+|---|---|---|
+| CRITICAL | 3 | **fix 완료** — main.py 통합 누락 단일 원인 (라우터 include + factory 빌드 + scheduler 기동 + alias 검증) |
+| HIGH | 2 | **fix 완료** — #4 sector_id INTEGER→BIGINT / #5 SectorBulkSyncResult.skipped 카운터 분리 (sector_inactive 허위 경보 방지) |
+| MEDIUM | 2 | LOW 로 기록 — #6 inds_cd echo 검증 / #7 close_index Decimal 통일 (별도 chunk) |
+| LOW | 2 | 기록만 — #8 Repository dict 호환 / #9 date.today() 직접 호출 (기존 패턴) |
+
+### 4. Verification 5관문 (계약 변경 분류)
+
+- 3-1 컴파일 빌드 (mypy): ✅ PASS
+- 3-2 정적 분석 (ruff + mypy --strict): ✅ PASS (80 source files, 0 issues)
+- 3-3 테스트 + 커버리지: ✅ **1097 / 1097 (100%) green** / coverage **90%**
+- 3-4 보안 스캔: ⚪ 생략 (계약 변경 분류)
+- 3-5 런타임 smoke: ✅ PASS — 컨테이너 재기동 / alembic 014→015 자동 / 9 scheduler 활성 / /health OK / sector_price_daily 테이블
+
+### 5. 외부 영향
+
+- **신규 endpoint 2 path**: `POST /api/kiwoom/sectors/{id}/ohlcv/daily/refresh` + `POST /api/kiwoom/sectors/ohlcv/daily/sync`
+- **신규 scheduler 1**: `sector_daily_sync_daily` (mon-fri 07:00 KST). **5-13 (수) 07:00 KST 첫 발화 예정** (cron 첫 발화 검증 chunk 와 함께)
+- **DB**: `kiwoom.sector_price_daily` 신규 테이블. 기존 데이터 영향 0
+- **12 / 25 endpoint (48%)** — Phase D 진입 + D-1 종결. 다음 = Phase E 진입 (D-2 분봉은 마지막 연기)
+
+---
+
 ## [2026-05-12] docs(plan): Phase D-1 ka20006 plan doc § 12 + STATUS/HANDOFF 갱신 (ted-run 대기)
 
 § 38 Docker 배포 + § 39-prep secret 회전 절차서 작성 후 Phase D 진입. ka10080 분봉은 사용자 결정 (5-12) 으로 마지막 endpoint 로 연기 → ka20006 업종일봉 (가장 가벼운 endpoint) 이 Phase D 첫 chunk. 본 chunk 는 ted-run 진입 전 plan doc § 12 작성 + STATUS/HANDOFF 갱신.

@@ -36,7 +36,8 @@ services:
       KIWOOM_DEFAULT_ENV: prod
       TZ: Asia/Seoul
       # Scheduler — Settings 필드명 `scheduler_*` 는 env_prefix 없음 (필드명 그대로 매칭).
-      # .env.prod 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 는 무시됨 (extra="ignore"). 본 8 env 가 진실.
+      # .env.prod 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 는 무시됨 (extra="ignore"). 본 9 env 가 진실.
+      # D-1: SCHEDULER_SECTOR_DAILY_SYNC_ALIAS 추가 (mon-fri 07:00 KST sector_daily_sync_daily).
       SCHEDULER_ENABLED: "true"
       SCHEDULER_SECTOR_SYNC_ALIAS: prod
       SCHEDULER_STOCK_SYNC_ALIAS: prod
@@ -46,6 +47,7 @@ services:
       SCHEDULER_WEEKLY_OHLCV_SYNC_ALIAS: prod
       SCHEDULER_MONTHLY_OHLCV_SYNC_ALIAS: prod
       SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS: prod
+      SCHEDULER_SECTOR_DAILY_SYNC_ALIAS: prod
     depends_on:
       kiwoom-db:
         condition: service_healthy

@@ -2775,3 +2775,131 @@ yearly_ohlcv_sync_yearly   alias=prod  cron=매년 1월 5일 03:00 KST
 2. **(5-19 이후) § 36.5 1주 모니터 측정 채움** — 컨테이너 로그 기반 cron elapsed 추출
 3. **Mac 절전 정책 / 서버 이전** — 24/7 cron 안정성 위함
 4. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉
+
+---
+
+## 39. Phase D-1 — ka20006 업종일봉 OHLCV 풀 구현 (2026-05-12)
+
+### 39.1 배경
+
+Phase C 데이터 측면 종결 + § 38 Docker 컨테이너 배포 후 Phase D 진입.
+사용자 결정 (5-12): ka10080 분봉 (D-2) 은 데이터량 부담 (1100종목 × 380분 = 38만+ rows/일) 으로 마지막 endpoint 로 연기 → 가장 가벼운 **ka20006 업종일봉 (50~80 sector × 1 일봉)** 이 Phase D 첫 chunk.
+
+ka10081/82/83/94 (4 chart endpoint) 패턴 + ka10101 sector 마스터 매핑 확립된 상태 → 패턴 1:1 응용 + sector_id FK + NXT skip 단순화. plan doc § 12 (`endpoint-13-ka20006.md` line 953~) 의 9 결정 + 13 self-check + DoD 그대로 ted-run 풀 파이프라인 적용.
+
+### 39.2 결정 9건 (plan doc § 12.2 → 코드 반영 + 1R fix 후 확정)
+
+| # | 사안 | 결정 | 코드 위치 |
+|---|------|------|----------|
+| 1 | 마이그레이션 번호 | **015** (revision id `015_sector_price_daily`, 22 chars — VARCHAR(32) 안전) | `migrations/versions/015_sector_price_daily.py` |
+| 2 | sector 매핑 | **sector_id FK = BIGINT** (sector.py UNIQUE = `(market_code, sector_code)` 페어 → sector_code 단독 lookup 불가). 1R HIGH #4 fix: INTEGER → BIGINT (kiwoom.sector.id 가 BIGSERIAL) | Migration 015 + ORM `sector_price_daily.py` |
+| 3 | 100배 값 저장 | **centi BIGINT 4 컬럼** (`open/high/low/close_index_centi`) + read property `.close_index = close_index_centi / 100` | ORM `sector_price_daily.py` + `NormalizedSectorDailyOhlcv` (chart.py) |
+| 4 | NXT 호출 정책 | **skip** — `SectorIngestOutcome(skipped=True, reason="nxt_sector_not_supported")`. sector 도메인에 NXT 없어 본 chunk 비활성. 코드만 추가 | `sector_ohlcv_service.py` |
+| 5 | sector_master_missing 가드 | `SectorIngestOutcome(skipped=True, reason="sector_master_missing")` — sector_id repository lookup 결과 None 시 | Single UseCase |
+| 6 | 응답 7 필드 처리 | `cur_prc / trde_qty / dt / open_pric / high_pric / low_pric / trde_prica` (7개). `pred_pre / pred_pre_sig / trde_tern_rt` 부재 → Pydantic `extra="ignore"` + None 영속화 | `SectorChartRow` (chart.py) |
+| 7 | cron 시간 | **mon-fri 07:00 KST** (§ 35 새벽 cron 정책 일관, ohlcv_daily 06:00 + daily_flow 06:30 직후) | `SectorDailyOhlcvScheduler` |
+| 8 | 백필 윈도 | 3년 (CLI 별도 chunk — 본 chunk 는 코드만, `scripts/backfill_sector.py` 미작성) | — |
+| 9 | UseCase 입력 | **sector_id (PK) + base_date** | `IngestSectorDailyInput` |
+
+### 39.3 영향 범위 (12 코드 + 6 테스트 = 18 파일)
+
+**신규 코드 (7)**:
+- `migrations/versions/015_sector_price_daily.py` (88 lines)
+- `app/adapter/out/persistence/models/sector_price_daily.py` (101 lines)
+- `app/adapter/out/persistence/repositories/sector_price.py` (121 lines)
+- `app/application/dto/sector_ohlcv.py` (75 lines, +skipped 필드 1R HIGH #5 fix)
+- `app/application/service/sector_ohlcv_service.py` (250 lines, +skipped 카운터 분리)
+- `app/adapter/web/routers/sector_ohlcv.py` (237 lines)
+- `app/batch/sector_daily_ohlcv_job.py` (78 lines, +skipped 로그)
+
+**갱신 코드 (5)**:
+- `app/adapter/out/kiwoom/chart.py` (+182 lines — `SectorChartRow/Response/NormalizedSectorDailyOhlcv` + `fetch_sector_daily`)
+- `app/adapter/web/_deps.py` (+~100 lines — 2 factory + getter/setter/reset)
+- `app/scheduler.py` (+~100 lines — `SectorDailyOhlcvScheduler` + `SECTOR_DAILY_SYNC_JOB_ID`)
+- `app/config/settings.py` (+8 lines — `scheduler_sector_daily_sync_alias`)
+- `app/adapter/out/persistence/models/__init__.py` (+2 — `SectorPriceDaily` export)
+- `app/main.py` (+~80 lines — 1R CRITICAL #1~#3 fix: 라우터 include + factory 빌드 + scheduler 기동/종료 + alias fail-fast)
+- `docker-compose.yml` (+1 line — `SCHEDULER_SECTOR_DAILY_SYNC_ALIAS: prod`)
+
+**신규 테스트 (6)**:
+- `tests/test_migration_015.py` (5 시나리오) — 단일 014 → 015 / 컬럼 타입 / FK / UNIQUE / downgrade 가드 (row 존재 시 RAISE)
+- `tests/test_sector_price_repository.py` (6) — upsert idempotent / FK / UNIQUE 충돌
+- `tests/test_sector_ohlcv_service.py` (6) — Single + Bulk + NXT skip + sector_master_missing
+- `tests/test_sector_ohlcv_router.py` (6) — sync 전체 + refresh 단건 + admin API key
+- `tests/test_scheduler_sector_daily.py` (8) — job 등록 / CronTrigger mon-fri 07:00 KST / alias fail-fast / 콜백 / 실패율
+- `tests/test_kiwoom_chart_client.py` 추가 (7 sector_daily 시나리오) — mock 응답 / 페이지네이션 / sentinel break / 7 필드 / 5xx / 자격증명
+
+### 39.4 1R 결과 — CONDITIONAL → PASS (CRITICAL 3 + HIGH 2 fix 후)
+
+| 심각도 | 건수 | 처리 |
+|---|---|---|
+| **CRITICAL** | 3 | 모두 **fix 완료** — `app/main.py` 통합 (라우터/factory/scheduler/alias) 누락 단일 원인 |
+| **HIGH** | 2 | 모두 **fix 완료** — #4 sector_id INTEGER → BIGINT (kiwoom.sector.id 가 BIGSERIAL 일치) / #5 sector_inactive failed 집계 오류 → SectorBulkSyncResult 에 `skipped` 카운터 추가 |
+| **MEDIUM** | 2 | LOW 로 기록 — #6 inds_cd 응답 echo 검증 부재 (운영 검증 후 별도 chunk) / #7 close_index Decimal vs float 불일치 (별도 chunk) |
+| **LOW** | 2 | 기록만 — #8 Repository dict 호환 / #9 date.today() 직접 호출 (기존 패턴) |
+
+### 39.5 self-check H-1~H-13 매핑 (1R 사후 검증 ✅ 통과)
+
+| H | 위험 | 완화 코드 |
+|---|------|----------|
+| H-1 | sector 매핑 (market_code, sector_code) 페어 UNIQUE | UseCase 입력 = sector_id (PK). Bulk `sector_repo.list_all_active()` iterate |
+| H-2 | 100배 값 가정 운영 미검증 | centi BIGINT 저장. 운영 첫 호출 시 KOSPI 종합 응답값/100 ≈ 실제 KOSPI 검증 (§ 39.7 운영 모니터) |
+| H-3 | list key `inds_dt_pole_qry` 미검증 | `SectorChartResponse.inds_dt_pole_qry: list[SectorChartRow] = Field(default_factory=list)` + `extra="ignore"` |
+| H-4 | upd_stkpc_tp 없음 | Request body 미포함 |
+| H-5 | cron 07:00 KST KRX rate limit 경합 | 기존 KRX asyncio.Lock 직렬화 신뢰. 운영 검증 시 elapsed 측정 후 재검토 |
+| H-6 | sector_master_missing 가드 | `SectorIngestOutcome(skipped=True, reason="sector_master_missing")` |
+| H-7 | NXT skip 정책 정확성 | sector 도메인에 NXT 없음 — 코드만 추가, 본 chunk 비활성 |
+| H-8 | 페이지네이션 미정량 | cont-yn 패턴 + sentinel break `if not parsed.inds_dt_pole_qry: break` |
+| H-9 | inds_cd length 응답 vs 요청 | Pydantic `max_length=32` (Excel 명세 20 흡수) |
+| H-10 | 거래대금 단위 백만원 가정 | BIGINT 그대로 — 운영 검증 후 재정정 가능 |
+| H-11 | scheduler_enabled 정책 일관성 | `SectorDailyOhlcvScheduler.start()` 가드 (기존 8 scheduler 패턴 1:1) |
+| H-12 | Migration 015 비파괴 | CREATE TABLE + CREATE INDEX 만. DOWNGRADE_SQL 에 row 존재 시 RAISE 가드 |
+| H-13 | chart.py 통합 vs sect.py 분리 | chart.py 통합 결정 — `KiwoomChartClient.fetch_sector_daily` |
+
+### 39.6 Step 3 Verification 5관문 결과
+
+| 관문 | 결과 |
+|---|---|
+| 3-1 컴파일 빌드 (mypy) | ✅ PASS |
+| 3-2 정적 분석 (ruff + mypy --strict) | ✅ PASS — 80 source files, 0 issues |
+| 3-3 테스트 + 커버리지 | ✅ **1097 / 1097 (100%) green** — 1059 기존 + 38 신규. **coverage 90%** (목표 80% 초과, 91% → 90% 미세 감소 = 신규 일부 분기 운영 영역) |
+| 3-4 보안 스캔 | ⚪ 생략 (계약 변경 분류 자동 생략) |
+| 3-5 런타임 smoke | ✅ PASS — 컨테이너 재기동 후 alembic 014→015 자동 upgrade / 9 scheduler 활성 (sector_daily mon-fri 07:00 KST 추가) / /health OK / DB sector_price_daily 테이블 존재 |
+
+### 39.7 운영 모니터 (코드 외 — 다음 chunk 검증)
+
+D-1 컨테이너 재배포 완료. 다음 항목을 ADR § 39 운영 결과에 누적 (별도 chunk):
+
+- [ ] **첫 호출 (수동 trigger)**: `POST /api/kiwoom/sectors/{id}/ohlcv/daily/refresh?base_date=2026-05-09` — sector_id=1 (KOSPI 종합) 단건 호출 성공 + DB upsert 확인
+- [ ] **bulk sync (수동 trigger)**: `POST /api/kiwoom/sectors/ohlcv/daily/sync` — active sector 50~80개 일괄 sync 시간 + 0 failed
+- [ ] **100배 값 검증**: KOSPI 종합 응답값 / 100 ≈ 실제 KOSPI 지수 일치
+- [ ] **응답 필드 검증**: `inds_dt_pole_qry` list key 정확성 / 7 필드 가정 정확성
+- [ ] **페이지네이션 발생 빈도**: 3년 백필 시 page 수
+- [ ] **cron 07:00 KST 발화 (5-13 수)**: 06:30 daily_flow 와 KRX rate limit 경합 실측 (H-5)
+
+### 39.8 알려진 follow-up (본 chunk 외)
+
+| # | 항목 | 근거 | 결정 시점 |
+|---|------|------|-----------|
+| 1 | inds_cd 응답 echo 검증 추가 (cross-sector pollution 방어) | 1R MEDIUM #6 | 운영 첫 호출 응답 length 확인 후 별도 chunk |
+| 2 | `close_index` Decimal vs float 불일치 통일 | 1R MEDIUM #7 | 다음 D-1 follow-up chunk |
+| 3 | Repository dict 호환 제거 | 1R LOW #8 | 향후 cleanup chunk |
+| 4 | `scripts/backfill_sector.py` CLI 신규 | DoD § 10.1 / plan § 12.6 | 운영 첫 호출 검증 + base_date 백필 필요 시점 |
+
+### 39.9 결과
+
+- **신규**: 7 코드 + 6 테스트 + 1 docker-compose env override
+- **갱신**: 5 코드 (chart.py / _deps.py / scheduler.py / settings.py / main.py)
+- **빌드/기동**: 이미지 재빌드 PASS / alembic 014→015 자동 적용 / 9 scheduler 활성 / /health OK
+- **테스트**: 1059 + 38 = **1097 cases** / coverage 90% / ruff PASS / mypy strict PASS
+- **운영 인프라**: 11/25 → **12/25 endpoint** (48%)
+- **문서 변경**: ADR § 39 (본 §) + STATUS § 0/§ 1/§ 2/§ 5/§ 6 + HANDOFF + CHANGELOG
+
+### 39.10 다음 chunk
+
+1. **(5-13 06:00 발화 직후) cron 첫 발화 검증** (§ 38.10 #1 일관) — ohlcv_daily / daily_flow + 신규 sector_daily 의 5-13 06:00~07:00 cron 발화 확인
+2. **§ 39.7 운영 모니터** — sector_daily 첫 호출 + bulk sync + 100배 값 검증 + 페이지네이션 정량화
+3. **(5-19 이후) § 36.5 1주 모니터 측정 채움** — 9 scheduler elapsed
+4. **Phase D-2 진입 — ka10080 분봉 (마지막 endpoint)** — 대용량 파티션 결정 chunk 선행
+5. **Phase E** — ka10014 (공매도) / ka10068 (대차) / ka20068
+6. **(전체 개발 종결 후) secret 회전** — `docs/ops/secret-rotation-2026-05-12.md` 절차서

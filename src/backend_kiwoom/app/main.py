@@ -37,6 +37,8 @@ from app.adapter.web._deps import (
     reset_ingest_daily_flow_factory,
     reset_ingest_ohlcv_factory,
     reset_ingest_periodic_ohlcv_factory,
+    reset_ingest_sector_daily_factory,
+    reset_ingest_sector_single_factory,
     reset_lookup_stock_factory,
     reset_sync_fundamental_factory,
     reset_sync_sector_factory,
@@ -44,6 +46,8 @@ from app.adapter.web._deps import (
     set_ingest_daily_flow_factory,
     set_ingest_ohlcv_factory,
     set_ingest_periodic_ohlcv_factory,
+    set_ingest_sector_daily_factory,
+    set_ingest_sector_single_factory,
     set_lookup_stock_factory,
     set_revoke_use_case,
     set_sync_fundamental_factory,
@@ -56,12 +60,17 @@ from app.adapter.web.routers.daily_flow import router as daily_flow_router
 from app.adapter.web.routers.fundamentals import router as fundamentals_router
 from app.adapter.web.routers.ohlcv import router as ohlcv_router
 from app.adapter.web.routers.ohlcv_periodic import router as ohlcv_periodic_router
+from app.adapter.web.routers.sector_ohlcv import router as sector_ohlcv_router
 from app.adapter.web.routers.sectors import router as sectors_router
 from app.adapter.web.routers.stocks import router as stocks_router
 from app.application.constants import DailyMarketDisplayMode
 from app.application.service.daily_flow_service import IngestDailyFlowUseCase
 from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
 from app.application.service.ohlcv_periodic_service import IngestPeriodicOhlcvUseCase
+from app.application.service.sector_ohlcv_service import (
+    IngestSectorDailyBulkUseCase,
+    IngestSectorDailyUseCase,
+)
 from app.application.service.sector_service import SyncSectorMasterUseCase
 from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
@@ -79,6 +88,7 @@ from app.scheduler import (
     DailyFlowScheduler,
     MonthlyOhlcvScheduler,
     OhlcvDailyScheduler,
+    SectorDailyOhlcvScheduler,
     SectorSyncScheduler,
     StockFundamentalScheduler,
     StockMasterScheduler,
@@ -135,6 +145,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 ("scheduler_weekly_ohlcv_sync_alias", settings.scheduler_weekly_ohlcv_sync_alias),
                 ("scheduler_monthly_ohlcv_sync_alias", settings.scheduler_monthly_ohlcv_sync_alias),
                 ("scheduler_yearly_ohlcv_sync_alias", settings.scheduler_yearly_ohlcv_sync_alias),
+                (
+                    "scheduler_sector_daily_sync_alias",
+                    settings.scheduler_sector_daily_sync_alias,
+                ),
             )
             if not value
         ]
@@ -378,6 +392,62 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
     set_ingest_periodic_ohlcv_factory(_ingest_periodic_ohlcv_factory)
 
+    # D-1: IngestSectorDaily{Bulk,Single}UseCaseFactory — 1R CRITICAL #2 fix.
+    # Bulk = sync 전체 (active sector iterate) / Single = refresh 단건 (sector_id 지정).
+    # 두 factory 모두 동일 KiwoomClient 패턴 — 라우터/scheduler 각각의 진입점에서 사용.
+    @asynccontextmanager
+    async def _ingest_sector_daily_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestSectorDailyBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            chart = KiwoomChartClient(kiwoom_client)
+            yield IngestSectorDailyBulkUseCase(
+                session_provider=_session_provider,
+                chart_client=chart,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_sector_daily_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestSectorDailyUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            chart = KiwoomChartClient(kiwoom_client)
+            yield IngestSectorDailyUseCase(
+                session_provider=_session_provider,
+                chart_client=chart,
+            )
+        finally:
+            await kiwoom_client.close()
+
+    set_ingest_sector_daily_factory(_ingest_sector_daily_bulk_factory)
+    set_ingest_sector_single_factory(_ingest_sector_daily_single_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
     # alias fail-fast 검증은 lifespan 진입 직후로 이동 (B-γ-2 2R H-1) — set_*_factory 후
     # raise 시 cleanup 우회 차단.
@@ -437,11 +507,20 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     yearly_ohlcv_scheduler.start()
 
+    # D-1: SectorDailyOhlcvScheduler — mon-fri 07:00 KST. Bulk factory 사용 (active sector iterate).
+    sector_daily_scheduler = SectorDailyOhlcvScheduler(
+        factory=_ingest_sector_daily_bulk_factory,
+        alias=settings.scheduler_sector_daily_sync_alias,
+        enabled=settings.scheduler_enabled,
+    )
+    sector_daily_scheduler.start()
+
     try:
         yield
     finally:
-        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4: scheduler 먼저 정지 — 실행 중 cron
+        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4 / D-1: scheduler 먼저 정지 — 실행 중 cron
         # job 의 KiwoomClient 호출이 graceful token revoke 와 충돌하지 않도록 보장.
+        sector_daily_scheduler.shutdown(wait=True)
         yearly_ohlcv_scheduler.shutdown(wait=True)
         monthly_ohlcv_scheduler.shutdown(wait=True)
         weekly_ohlcv_scheduler.shutdown(wait=True)
@@ -451,8 +530,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
 
-        # 1R 2b M4: factory 싱글톤 unset — close 후 stale factory 가 라우터에 노출되지
+        # 1R 2b M4 / D-1: factory 싱글톤 unset — close 후 stale factory 가 라우터에 노출되지
         # 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 (factory 미초기화) 반환.
+        reset_ingest_sector_single_factory()
+        reset_ingest_sector_daily_factory()
         reset_ingest_periodic_ohlcv_factory()
         reset_ingest_daily_flow_factory()
         reset_ingest_ohlcv_factory()
@@ -507,6 +588,7 @@ def create_app() -> FastAPI:
     app.include_router(fundamentals_router)
     app.include_router(ohlcv_router)
     app.include_router(ohlcv_periodic_router)
+    app.include_router(sector_ohlcv_router)
     app.include_router(daily_flow_router)
 
     @app.get("/health")

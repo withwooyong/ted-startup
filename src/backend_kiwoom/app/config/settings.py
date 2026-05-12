@@ -143,6 +143,13 @@ class Settings(BaseSettings):
             "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
         ),
     )
+    scheduler_sector_daily_sync_alias: str = Field(
+        default="",
+        description=(
+            "일간 sector daily OHLCV (ka20006) sync cron job 이 사용할 키움 자격증명 alias (D-1 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast (운영 실수 방어)."
+        ),
+    )
 
 
 @lru_cache(maxsize=1)

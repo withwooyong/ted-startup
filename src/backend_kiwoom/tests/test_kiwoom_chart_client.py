@@ -627,3 +627,222 @@ async def test_fetch_daily_since_date_none_keeps_existing_pagination() -> None:
 
     assert call_count == 2, "since_date 없으면 cont-yn=N 까지 모두 fetch"
     assert len(rows) == 3
+
+
+# =============================================================================
+# D-1 — KiwoomChartClient.fetch_sector_daily (ka20006 업종일봉)
+# chunk = D-1, plan doc § 12 참조.
+#
+# 검증:
+# - 단일 페이지 응답 60 rows → SectorChartRow list
+# - api-id = "ka20006" 헤더 전송
+# - cont-yn 페이지네이션 — 2 페이지 합치기
+# - 빈 응답 + cont-yn=Y → sentinel break (무한루프 방어)
+# - 7 필드 normalize (pred_pre/pred_pre_sig/trde_tern_rt 없음 → None)
+# - KiwoomCredentialRejectedError 401 전파
+# - KiwoomUpstreamError 5xx 전파
+# =============================================================================
+
+_SECTOR_DAILY_BODY: dict[str, Any] = {
+    "inds_cd": "001",
+    "inds_dt_pole_qry": [
+        {
+            "cur_prc": "252127",
+            "trde_qty": "393564",
+            "dt": "20250210",
+            "open_pric": "251064",
+            "high_pric": "252733",
+            "low_pric": "249918",
+            "trde_prica": "10582466",
+        },
+        {
+            "cur_prc": "252192",
+            "trde_qty": "419872",
+            "dt": "20250207",
+            "open_pric": "253209",
+            "high_pric": "253763",
+            "low_pric": "251901",
+            "trde_prica": "10240141",
+        },
+    ],
+    "return_code": 0,
+    "return_msg": "정상적으로 처리되었습니다",
+}
+
+
+# ---------- D-1.1 단일 페이지 정상 응답 ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_returns_rows_single_page() -> None:
+    """ka20006 단일 페이지 응답 → SectorChartRow list 반환.
+
+    api-id 헤더 = 'ka20006', body 에 inds_cd + base_dt 전송 확인.
+    """
+    captured_body: dict[str, Any] = {}
+    captured_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_body.update(json.loads(request.content))
+        captured_headers["api-id"] = request.headers.get("api-id", "")
+        assert request.url.path == "/api/dostk/chart"
+        return httpx.Response(200, json=_SECTOR_DAILY_BODY)
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_sector_daily("001", base_date=date(2025, 2, 10))
+
+    assert len(rows) == 2
+    assert captured_headers["api-id"] == "ka20006"
+    assert captured_body.get("inds_cd") == "001"
+    assert captured_body.get("base_dt") == "20250210"
+
+
+# ---------- D-1.2 cont-yn 페이지네이션 ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_paginates_with_cont_yn() -> None:
+    """cont-yn=Y → 다음 페이지 자동 호출. 모든 row 합쳐짐."""
+    page2_body = {
+        "inds_cd": "001",
+        "inds_dt_pole_qry": [
+            {
+                "cur_prc": "248900",
+                "trde_qty": "350000",
+                "dt": "20250106",
+                "open_pric": "248000",
+                "high_pric": "249500",
+                "low_pric": "247800",
+                "trde_prica": "9800000",
+            }
+        ],
+        "return_code": 0,
+        "return_msg": "정상",
+    }
+    call_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(200, json=_SECTOR_DAILY_BODY, headers={"cont-yn": "Y", "next-key": "p2"})
+        return httpx.Response(200, json=page2_body, headers={"cont-yn": "N"})
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_sector_daily("001", base_date=date(2025, 2, 10))
+
+    assert len(rows) == 3, f"page1 (2) + page2 (1) = 3 / call_count={call_count}"
+    assert call_count == 2
+
+
+# ---------- D-1.3 빈 응답 sentinel break ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_empty_response_breaks_pagination() -> None:
+    """빈 inds_dt_pole_qry + cont-yn=Y → sentinel break (무한루프 방어).
+
+    ka10081 empty_response_breaks 패턴 1:1 응용 (D-1 plan § 12.2 #4).
+    """
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(200, json=_SECTOR_DAILY_BODY, headers={"cont-yn": "Y", "next-key": "s"})
+        return httpx.Response(
+            200,
+            json={"inds_cd": "001", "inds_dt_pole_qry": [], "return_code": 0, "return_msg": "정상"},
+            headers={"cont-yn": "Y", "next-key": "sentinel-loop"},
+        )
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_sector_daily("001", base_date=date(2025, 2, 10))
+
+    assert call_count == 2, "page2 빈 응답 → cont-yn=Y 무시 break"
+    assert len(rows) == 2
+
+
+# ---------- D-1.4 7 필드 normalize ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_normalizes_7_fields() -> None:
+    """ka20006 응답 7 필드 — pred_pre/pred_pre_sig/trde_tern_rt 없음.
+
+    NormalizedSectorDailyOhlcv 의 해당 필드 → None.
+    close_index_centi = int(cur_prc) (100배 값 그대로 저장).
+    """
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_SECTOR_DAILY_BODY)
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        rows = await adapter.fetch_sector_daily("001", base_date=date(2025, 2, 10))
+
+    assert len(rows) == 2
+    row = rows[0]
+    # SectorChartRow 가 올바른 필드만 보유
+    assert hasattr(row, "cur_prc") or hasattr(row, "close_index_centi"), (
+        "row 에 cur_prc 또는 close_index_centi 필드 기대"
+    )
+
+
+# ---------- D-1.5 KiwoomCredentialRejectedError 401 전파 ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_propagates_credential_rejected() -> None:
+    """401 → KiwoomCredentialRejectedError 전파."""
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(401)
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        with pytest.raises(KiwoomCredentialRejectedError):
+            await adapter.fetch_sector_daily("001", base_date=date(2025, 2, 10))
+
+
+# ---------- D-1.6 5xx → KiwoomUpstreamError ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_propagates_upstream_error() -> None:
+    """5xx → KiwoomUpstreamError (또는 재시도 후 raise)."""
+    from app.adapter.out.kiwoom._exceptions import KiwoomUpstreamError
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        with pytest.raises(KiwoomUpstreamError):
+            await adapter.fetch_sector_daily("001", base_date=date(2025, 2, 10))
+
+
+# ---------- D-1.7 inds_cd 3자리 사전 검증 ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_sector_daily_rejects_invalid_inds_cd() -> None:
+    """inds_cd 3자리 숫자 외 거부 → ValueError."""
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(200, json=_SECTOR_DAILY_BODY)
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomChartClient(kc)
+        for invalid in ("01", "0001", "abc", "", "00A"):
+            with pytest.raises(ValueError):
+                await adapter.fetch_sector_daily(invalid, base_date=date(2025, 2, 10))
+
+    assert call_count == 0

@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-12 (Phase D-1 ka20006 plan doc § 12 작성 — Migration 015 + 인프라 + 자동화 통합 chunk § 9 결정 + 13 self-check + DoD / ted-run 대기 / 코드 변경 0)
+> **마지막 갱신**: 2026-05-12 (Phase D-1 ka20006 풀 구현 완료 — Migration 015 + 인프라 + 자동화. 1R PASS / Verification 5관문 PASS / 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint / ADR § 39)
 
 ---
 
@@ -11,12 +11,12 @@
 
 | 항목 | 값 |
 |------|-----|
-| 진행 Phase | **Phase D 진입** (D-1 ka20006 plan doc 작성 완료 / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기) |
-| 마지막 완료 chunk | **Phase D-1 ka20006 plan doc § 12** — Migration 015 + 인프라 + 자동화 통합 chunk § 추가 (9 결정 / 13 self-check / DoD 10 코드 6 테스트). 코드 변경 0 — ted-run 대기 |
-| 다음 chunk | **(사용자 결정) D-1 ted-run 진행** 또는 plan doc chunk 종결 후 별도 작업. **(5-13 06:30 이후) cron 첫 발화 검증** 병행 |
-| 25 Endpoint 진행 | **11 / 25 완료** (44%). ka20006 = 다음 chunk (plan doc § 12 완성) |
-| 누적 chunk | 46 commits (D-1 plan doc chunk 추가) |
-| 테스트 | 1059 cases / coverage 91% (앱 코드 변경 0 — plan doc chunk) |
+| 진행 Phase | **Phase D-1 종결** (ka20006 풀 구현 완료) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 |
+| 마지막 완료 chunk | **Phase D-1 ka20006 풀 구현** — Migration 015 + 인프라 + 자동화. 7 신규 + 5 갱신 코드 + 6 신규 테스트. 1R CONDITIONAL → PASS (CRITICAL 3 + HIGH 2 fix) / Verification 5관문 PASS / 컨테이너 재배포 OK (9 scheduler 활성) / ADR § 39 |
+| 다음 chunk | **(5-13 06:00 발화 직후) cron 첫 발화 검증** (§ 38.10 #1) + **§ 39.7 운영 모니터** (sector_daily 100배 값 / 페이지네이션 정량화) |
+| 25 Endpoint 진행 | **12 / 25 완료** (48%). ka20006 → ✅ |
+| 누적 chunk | 47 commits (D-1 풀 구현 chunk 추가) |
+| 테스트 | **1097 cases** (1059 + 38) / coverage **90%** / ruff PASS / mypy strict PASS |
 | 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. **kiwoom-app 컨테이너** — Up healthy / 8 scheduler 활성 / 5-13 06:00 첫 발화 준비 |
 
 ---
@@ -28,7 +28,7 @@
 | **A — 기반 인프라** | Settings/Cipher/structlog/Migration 001/Auth/KiwoomClient/Scheduler | ✅ **완료** | A1 / 보안PR / A2-α/β / A3-α/β/γ + F1 (8) | au10001, au10002, ka10101 |
 | **B — 종목 마스터** | stock + nxt_enable / 단건 조회 / 펀더멘털 | ✅ **완료** | B-α / B-β / B-γ-1 / B-γ-2 (4) | ka10099, ka10100, ka10001 |
 | **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 + 영숫자 호환성 | ✅ **종결 (데이터 측면 100%)** | C-1α/β / C-2α/β/γ/δ / R1/R2 / C-3α/β / C-backfill / C-4 / chart 영숫자 Chunk 1/2 / 영숫자 백필 (16) | 모두 ✅ / scheduler 활성만 남음 |
-| **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | 🔄 **진행** | D-1 plan doc ✅ (5-12) / D-1 ted-run ⏳ / D-2 ka10080 분봉 마지막으로 연기 | ka10079, ka10080, **ka20006 (D-1)** |
+| **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | 🔄 **진행** | **D-1 풀 구현 ✅** (`a1e20e0` plan doc + `<this commit>` 구현) / D-2 ka10080 분봉 마지막 / ka10079 (P3) | ka10079, ka10080, **ka20006 ✅ (D-1)** |
 | **E — 시그널 보강** | 공매도 / 대차거래 | ⏳ 대기 | — | ka10014, ka10068, ka20068 |
 | **F — 순위** | 등락률/거래량/거래대금 5종 통합 | ⏳ 대기 | — | ka10027, ka10030, ka10031, ka10032, ka10023 |
 | **G — 투자자별** | 일별 매매 / 종목별 / 연속매매 | ⏳ 대기 | — | ka10058, ka10059, ka10131 |
@@ -40,7 +40,7 @@
 
 ## 2. 25 Endpoint 카탈로그 (진척별)
 
-### 2.1 완료 (11 / 25)
+### 2.1 완료 (12 / 25)
 
 | # | API | 명 | Phase | chunk | 커밋 |
 |---|-----|----|-------|-------|------|
@@ -54,13 +54,12 @@
 | 8 | ka10101 | 업종코드 리스트 | A3-α/β | KiwoomClient 공통 + sector 영속화 | `cce855c` / `6cd4371` |
 | 9 | ka10082 | 주식주봉차트 | C-3α/β | 인프라 + 자동화 (UseCase + Router 4 path + Scheduler 금 19:30) | `8fcabe4` / (C-3β) |
 | 10 | ka10083 | 주식월봉차트 | C-3α/β | ka10082 와 동일 chunk (Period dispatch) — Scheduler 매월 1일 03:00 | `8fcabe4` / (C-3β) |
-| **11** | **ka10094** | **주식년봉차트** | **C-4** | Migration 014 + UseCase YEARLY 분기 활성 + Router 2 path + Scheduler 매년 1월 5일 03:00. KRX only (NXT skip) | (this commit) |
+| **11** | **ka10094** | **주식년봉차트** | **C-4** | Migration 014 + UseCase YEARLY 분기 활성 + Router 2 path + Scheduler 매년 1월 5일 03:00. KRX only (NXT skip) | `b75334c` |
+| **12** | **ka20006** | **업종일봉조회** | **D-1** | Migration 015 + ORM + Pydantic 3 + DTO 2 + KiwoomChartClient.fetch_sector_daily + SectorPriceDailyRepository + UseCase Single+Bulk + Router 2 path + Scheduler mon-fri 07:00 KST. centi BIGINT + sector_id FK + NXT skip + 7 필드 응답. 9 scheduler 활성 | (this commit) |
 
-### 2.2 진행중 / 다음 (1)
+### 2.2 진행중 / 다음 (0)
 
-| # | API | 명 | Phase | 상태 | 비고 |
-|---|-----|----|-------|------|------|
-| 13 | `ka20006` | 업종일봉조회 | **D-1** | 🔄 plan doc ✅ / ted-run 대기 | Migration 015 + 인프라 + 자동화 통합 chunk. KRX only, NXT skip, centi BIGINT, mon-fri 07:00 KST cron. plan doc § 12 (9 결정 + 13 self-check) `endpoint-13-ka20006.md` |
+ka20006 → ✅ 완료 (2.1 #12). 다음 endpoint = ka10080 (D-2, 마지막 endpoint 로 사용자 결정) 또는 Phase E (ka10014 / ka10068).
 
 ### 2.3 대기 (14 / 25)
 
@@ -151,14 +150,15 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **Phase D-1 ka20006 ted-run** | plan doc § 12 완료. Migration 015 + ORM + Pydantic + Client + Repo + UseCase + Router + Scheduler + Settings — 10 코드 + 6 테스트 (DoD § 12.5) | 풀 ted-run (TDD → 구현 → 1R → Verification → ADR § 39 → 커밋) |
-| 2 | (5-13 06:30 이후) cron 첫 발화 검증 | § 38 다음 chunk (`docker compose logs` + DB SQL) | 검증 SQL 만, 코드 0 |
-| 3 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 scheduler (D-1 적용 후) elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
-| 4 | Phase D-2 ka10080 분봉 (**마지막 endpoint**) | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |
-| 5 | Phase E / F / G (공매도/대차/순위/투자자별) | 신규 endpoint wave | 각 chunk 별 신규 |
-| 6 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
-| 7 | 영숫자 daily_flow (ka10086) 백필 | OHLCV 와 별개. cron 자연 수집 가능 | 사용자 결정 |
-| 8 | (전체 개발 종결 후) secret 회전 | ADR § 38.8 #6/#7 / `docs/ops/secret-rotation-2026-05-12.md` 절차서 | 사용자 직접 (회전 진행) + 검증 SQL |
+| **1** | **(5-13 06:00 발화 직후) cron 첫 발화 검증** + **§ 39.7 운영 모니터** | § 38.10 #1 + § 39.7 (sector_daily 첫 호출 + 100배 값 + 페이지네이션) | 검증 SQL 만, 코드 0 |
+| 2 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
+| 3 | Phase E — ka10014 (공매도) / ka10068 (대차) / ka20068 wave | 신규 endpoint wave (Phase D-2 분봉은 마지막으로 연기) | 3 endpoint × Phase B/C 패턴 |
+| 4 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |
+| 5 | Phase F / G / H (순위/투자자별/통합) | 신규 endpoint wave | 각 chunk 별 신규 |
+| 6 | D-1 follow-up: inds_cd echo 검증 / close_index Decimal 통일 / backfill_sector CLI | ADR § 39.8 1R MEDIUM/LOW | 운영 첫 호출 후 결정 |
+| 7 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
+| 8 | 영숫자 daily_flow (ka10086) 백필 | OHLCV 와 별개. cron 자연 수집 가능 | 사용자 결정 |
+| 9 | (전체 개발 종결 후) secret 회전 | ADR § 38.8 #6/#7 / `docs/ops/secret-rotation-2026-05-12.md` 절차서 | 사용자 직접 (회전 진행) + 검증 SQL |
 | ~~※~~ | ~~(실측 결과 의존) NUMERIC 마이그레이션~~ | ✅ 해소 — § 34.5 영숫자 max < 35% cap 확인. 마이그레이션 불필요 | — |
 
 ---
@@ -218,7 +218,8 @@ P3 (선택):
 - **5-11 NXT 보완 백필** (§ 35.8 별도 chunk) — `backfill_ohlcv.py --period daily --start-date 2026-05-11 --end-date 2026-05-11` (--resume 미사용). NXT 74 → 628 / KRX 4373 success (DB 4370 = 5-7/8 대비 -2 신규/정지) / 0 failed / 21m 6s / 5003 calls (영숫자 nxt_enable=false 호출 skip). § 35 cron shift 데이터 정합성 확정 + § 36.5.2 1주 모니터 SQL 깨끗 진행 / 코드 변경 0 / 검증 SQL 4건 PASS / ADR § 37 / `00ac3b0`
 - **Docker 컨테이너 배포 (kiwoom-app)** — Dockerfile (multi-stage builder+runtime, python:3.12-slim, uv --frozen, non-root uid 1001, tzdata Asia/Seoul, HEALTHCHECK) + scripts/entrypoint.py (alembic upgrade → uvicorn workers=1) + uv.lock 87 packages + docker-compose.yml kiwoom-app service (env_file=../../.env.prod, SCHEDULER_* 8 env override, depends_on=kiwoom-db healthy, restart=unless-stopped) + .dockerignore + README Docker 섹션. **빌드 hang 2건 해결**: credsStore desktop→osxkeychain, syntax directive 제거. **env_prefix 불일치 발견** (.env.prod 의 KIWOOM_SCHEDULER_* 잘못 → compose environment 의 SCHEDULER_* 로 override). 이미지 264MB / 5초 기동 / 8 scheduler 활성 / /health OK / TZ KST / 5-13 06:00 첫 발화 준비. 코드 변경 0 (app/ 무변, scripts/entrypoint.py 신규) / ADR § 38 / `550bee5`
 - **secret 회전 절차서 + 회전 시점 결정** (5-12) — `docs/ops/secret-rotation-2026-05-12.md` 신규 230줄 + ADR § 38.8 #6/#7 시점 "전체 개발 완료 후" 로 통일. KIWOOM_APPKEY/SECRETKEY + Fernet 마스터키 + Docker Hub PAT 회전 절차 (4 단계 + 백업 + 롤백 + 완료 체크리스트). 사용자 결정 — `.env.prod` 편집 / DB 재암호화 운영 영향 큼 → 개발 종결 후 일괄. 코드 변경 0 / ADR § 38.8 갱신 / HANDOFF Pending #2 갱신 / `39ca7a3`
-- **Phase D-1 ka20006 plan doc § 12** (5-12) — `endpoint-13-ka20006.md` 의 § 12 신규 (Migration 015 + 인프라 + 자동화 통합 chunk). 9 결정 (Migration 015 / sector_id FK / centi BIGINT / NXT skip / sector_master_missing 가드 / cron mon-fri 07:00 KST / 백필 3년 / UseCase 입력 sector_id / chart.py 통합) + 13 self-check (sector 매핑 / 100배 값 / inds_dt_pole_qry list key / cron KRX rate limit 경합 / NXT skip / Migration 비파괴 등) + DoD 10 코드 6 테스트. ted-run 진행 대기. 코드 변경 0 / `<this commit>`
+- **Phase D-1 ka20006 plan doc § 12** (5-12) — `endpoint-13-ka20006.md` 의 § 12 신규 (Migration 015 + 인프라 + 자동화 통합 chunk). 9 결정 + 13 self-check + DoD. 코드 변경 0 / `a1e20e0`
+- **Phase D-1 ka20006 풀 구현** (5-12) — Migration 015 (sector_price_daily, sector_id BIGINT FK, UNIQUE (sector_id, trading_date), centi BIGINT 4 컬럼) + ORM + Pydantic 3 (SectorChartRow 7 필드 / Response / NormalizedSectorDailyOhlcv) + DTO 2 (Input / Outcome / BulkResult with skipped) + KiwoomChartClient.fetch_sector_daily (sentinel break) + SectorPriceDailyRepository (upsert_many) + IngestSectorDailyUseCase Single+Bulk (NXT skip + sector_master_missing + sector_inactive 3 가드) + Router 2 path (admin API key) + Scheduler mon-fri 07:00 KST + Settings alias + main.py lifespan 통합. 1R CONDITIONAL → PASS (CRITICAL 3 main.py 통합 누락 + HIGH 2 sector_id INTEGER→BIGINT/skipped 분리 fix). Verification 5관문 PASS. 컨테이너 재배포 (alembic 014→015 자동 적용 / 9 scheduler 활성 / /health OK). 7 신규 + 5 갱신 코드 + 6 신규 테스트 = **1097 tests / coverage 90%** / ruff PASS / mypy strict PASS / 12/25 endpoint. ADR § 39 / `<this commit>`
 
 ---
 

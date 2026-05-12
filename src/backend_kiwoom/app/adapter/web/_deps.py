@@ -25,6 +25,10 @@ from fastapi import Depends, Header, HTTPException, status
 from app.application.service.daily_flow_service import IngestDailyFlowUseCase
 from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
 from app.application.service.ohlcv_periodic_service import IngestPeriodicOhlcvUseCase
+from app.application.service.sector_ohlcv_service import (
+    IngestSectorDailyBulkUseCase,
+    IngestSectorDailyUseCase,
+)
 from app.application.service.sector_service import SyncSectorMasterUseCase
 from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
@@ -83,6 +87,23 @@ C-1β factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient + KiwoomCh
 period 분기 (WEEKLY/MONTHLY) 는 caller 가 execute(period=...) 인자로 결정.
 """
 
+IngestSectorDailyBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestSectorDailyBulkUseCase]
+]
+"""alias → AsyncContextManager[IngestSectorDailyBulkUseCase] factory (D-1 추가).
+
+C-1β factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient + KiwoomChartClient 빌드.
+plan § 12.2 #4 — KRX only (sector 도메인에 NXT 없음).
+"""
+
+IngestSectorDailySingleUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestSectorDailyUseCase]
+]
+"""alias → AsyncContextManager[IngestSectorDailyUseCase] factory (D-1 추가).
+
+bulk factory 와 동일 패턴 — 단건 refresh 라우터 전용. plan § 12.2 #9 UseCase 입력 = sector_id.
+"""
+
 
 def get_settings_dep() -> Settings:
     return get_settings()
@@ -122,6 +143,8 @@ _sync_fundamental_factory: SyncStockFundamentalUseCaseFactory | None = None
 _ingest_ohlcv_factory: IngestDailyOhlcvUseCaseFactory | None = None
 _ingest_daily_flow_factory: IngestDailyFlowUseCaseFactory | None = None
 _ingest_periodic_ohlcv_factory: IngestPeriodicOhlcvUseCaseFactory | None = None
+_ingest_sector_daily_factory: IngestSectorDailyBulkUseCaseFactory | None = None
+_ingest_sector_single_factory: IngestSectorDailySingleUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -268,6 +291,38 @@ def set_ingest_periodic_ohlcv_factory(factory: IngestPeriodicOhlcvUseCaseFactory
     _ingest_periodic_ohlcv_factory = factory
 
 
+def get_ingest_sector_daily_factory() -> IngestSectorDailyBulkUseCaseFactory:
+    """alias → AsyncContextManager[IngestSectorDailyBulkUseCase] factory (D-1). lifespan 에서 set."""
+    if _ingest_sector_daily_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sector daily UseCase factory 미초기화",
+        )
+    return _ingest_sector_daily_factory
+
+
+def set_ingest_sector_daily_factory(factory: IngestSectorDailyBulkUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — KiwoomClient + KiwoomChartClient 빌드 + Bulk UseCase 결합 (D-1)."""
+    global _ingest_sector_daily_factory
+    _ingest_sector_daily_factory = factory
+
+
+def get_ingest_sector_single_factory() -> IngestSectorDailySingleUseCaseFactory:
+    """alias → AsyncContextManager[IngestSectorDailyUseCase] factory (D-1, refresh 단건). lifespan 에서 set."""
+    if _ingest_sector_single_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sector daily single UseCase factory 미초기화",
+        )
+    return _ingest_sector_single_factory
+
+
+def set_ingest_sector_single_factory(factory: IngestSectorDailySingleUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — 단건 refresh 라우터 전용 (D-1)."""
+    global _ingest_sector_single_factory
+    _ingest_sector_single_factory = factory
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋."""
     global \
@@ -279,7 +334,9 @@ def reset_token_manager() -> None:
         _sync_fundamental_factory, \
         _ingest_ohlcv_factory, \
         _ingest_daily_flow_factory, \
-        _ingest_periodic_ohlcv_factory
+        _ingest_periodic_ohlcv_factory, \
+        _ingest_sector_daily_factory, \
+        _ingest_sector_single_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
@@ -289,6 +346,8 @@ def reset_token_manager() -> None:
     _ingest_ohlcv_factory = None
     _ingest_daily_flow_factory = None
     _ingest_periodic_ohlcv_factory = None
+    _ingest_sector_daily_factory = None
+    _ingest_sector_single_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -333,10 +392,24 @@ def reset_ingest_periodic_ohlcv_factory() -> None:
     _ingest_periodic_ohlcv_factory = None
 
 
+def reset_ingest_sector_daily_factory() -> None:
+    """lifespan teardown + 테스트 — sector daily bulk factory 만 리셋 (D-1, 1R 2b M4 fail-closed)."""
+    global _ingest_sector_daily_factory
+    _ingest_sector_daily_factory = None
+
+
+def reset_ingest_sector_single_factory() -> None:
+    """lifespan teardown + 테스트 — sector daily single factory 만 리셋 (D-1, 1R 2b M4 fail-closed)."""
+    global _ingest_sector_single_factory
+    _ingest_sector_single_factory = None
+
+
 __all__ = [
     "IngestDailyFlowUseCaseFactory",
     "IngestDailyOhlcvUseCaseFactory",
     "IngestPeriodicOhlcvUseCaseFactory",
+    "IngestSectorDailyBulkUseCaseFactory",
+    "IngestSectorDailySingleUseCaseFactory",
     "LookupStockUseCaseFactory",
     "SyncSectorUseCaseFactory",
     "SyncStockFundamentalUseCaseFactory",
@@ -344,6 +417,8 @@ __all__ = [
     "get_ingest_daily_flow_factory",
     "get_ingest_ohlcv_factory",
     "get_ingest_periodic_ohlcv_factory",
+    "get_ingest_sector_daily_factory",
+    "get_ingest_sector_single_factory",
     "get_lookup_stock_factory",
     "get_revoke_use_case",
     "get_settings_dep",
@@ -355,6 +430,8 @@ __all__ = [
     "reset_ingest_daily_flow_factory",
     "reset_ingest_ohlcv_factory",
     "reset_ingest_periodic_ohlcv_factory",
+    "reset_ingest_sector_daily_factory",
+    "reset_ingest_sector_single_factory",
     "reset_lookup_stock_factory",
     "reset_sync_fundamental_factory",
     "reset_sync_sector_factory",
@@ -363,6 +440,8 @@ __all__ = [
     "set_ingest_daily_flow_factory",
     "set_ingest_ohlcv_factory",
     "set_ingest_periodic_ohlcv_factory",
+    "set_ingest_sector_daily_factory",
+    "set_ingest_sector_single_factory",
     "set_lookup_stock_factory",
     "set_revoke_use_case",
     "set_sync_fundamental_factory",
