@@ -7,6 +7,69 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-13] feat(kiwoom): Phase E — ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 (Migration 016, 15/25 endpoint 60%)
+
+ted-run 풀 파이프라인 적용 — Step 0 TDD 89 신규 (sub-agent 3 sonnet 병렬) → Step 1 구현 25 파일 (sub-agent 3 opus 병렬) → Step 2 이중 리뷰 CONDITIONAL (1R CRITICAL 6 + HIGH 10) → fix 10건 → PASS → Step 3 Verification 5관문 → ADR § 40 → 커밋. Phase E 종결 (3 endpoint 통합 1 chunk 사용자 결정 5-12). 12/25 → 15/25 endpoint.
+
+### 1. 신규 / 갱신 파일 (25 파일)
+
+**신규 코드 (15)**:
+- `migrations/versions/016_short_lending.py` — 2 테이블 (short_selling_kw + lending_balance_kw) + UNIQUE + partial unique 2 + CHECK `chk_lending_scope` + 5 INDEX (2 partial)
+- ORM 2: `models/short_selling_kw.py` / `lending_balance_kw.py`
+- Adapter 2: `kiwoom/shsa.py` (KiwoomShortSellingClient.fetch_trend) / `kiwoom/slb.py` (KiwoomLendingClient.fetch_market_trend + fetch_stock_trend)
+- Repository 2: `repositories/short_selling.py` / `lending_balance.py`
+- DTO 2: `dto/short_selling.py` / `dto/lending.py`
+- Service 2: `service/short_selling_service.py` (Single + Bulk) / `service/lending_service.py` (Market + Stock Single + Stock Bulk)
+- Router 2: `routers/short_selling.py` / `routers/lending.py`
+- Batch job 3: `batch/short_selling_job.py` / `lending_market_job.py` / `lending_stock_job.py`
+- CLI 3: `scripts/backfill_short.py` / `backfill_lending.py` / `backfill_lending_stock.py`
+
+**갱신 코드 (10)**:
+- `_records.py` — 9 Pydantic + 2 enum (ShortSelling 3 + Lending 6 + ShortSellingTimeType + LendingScope)
+- `models/__init__.py` — 2 export
+- `settings.py` — 6 env (3 enabled + 3 alias)
+- `scheduler.py` — 3 Scheduler 클래스 + 3 JOB_ID + `_PhaseEJobView` (misfire_grace_time timedelta proxy)
+- `main.py` — 라우터 2 + 5 factory + 3 scheduler lifespan + 3 alias fail-fast (개별 enabled AND, 1R fix 2a-H-1)
+- `_deps.py` — 5 factory
+- `tests/test_scheduler.py` / `test_stock_master_scheduler.py` / `test_migration_015.py` — Phase E 호환 보존
+
+**신규 테스트 (8 — 89 시나리오)**:
+- `test_migration_016.py` (7) / `test_kiwoom_shsa_client.py` (15) / `test_kiwoom_slb_client.py` (14) / `test_short_selling_service.py` (12) / `test_lending_service.py` (12) / `test_short_selling_repository.py` (8) / `test_lending_repository.py` (8) / `test_scheduler_phase_e.py` (13)
+
+### 2. 10 결정 (ADR § 40.2)
+
+1. Migration 016 (`016_short_lending`) — 2 테이블 1 마이그레이션 통합
+2. lending scope 분기 = partial unique 2 + CHECK constraint
+3. NXT 정책: ka10014=시도 / ka10068=미적용 (시장) / ka20068=KRX only (Length=6)
+4. cron § 35 일관: short 07:30 / market 07:45 / stock 08:00 KST mon-fri
+5. sync 윈도 1주 / 백필 윈도 3년 (3 CLI 신규)
+6. 3 enabled env + 3 alias env (fail-fast 가 개별 enabled=False 시 alias 빈 값 허용 — 1R fix)
+7. ka10014 NXT 빈 응답 정상 처리 (warning 안 함)
+8. partial 5%/15% 분모 = KRX outcomes only (NXT 빈 응답 silent failure 회피 — 1R fix 2b-C-2)
+
+### 3. 1R CRITICAL 6 + HIGH 10건 fix (§ 40.4)
+
+CRITICAL: 2a-C-1 (getattr key mismatch) / 2b-C-1 (slb.py ValidationError 정보 누설) / 2b-C-2 (partial 분모 silent failure) / 2b-C-3 (lending_stock 100분 single transaction → BATCH=50 commit) / 2b-C-4 (`_batch_commit` 의도 docstring) / 2b-C-5 (factory begin — C-3 partial commit 으로 처리).
+HIGH: 2a-H-1 (fail-fast 개별 enabled) / 2a-H-2 (= 2b-C-4) / 2b-H-1 (bulk KiwoomBusinessError 핸들러) / 2b-H-3 (alias log injection pattern) / 2b-H-6 (bulk list DoS max_length).
+Defer (MEDIUM/LOW 별도 chunk): § 40.8.
+
+### 4. Step 3 Verification 5관문 PASS (§ 40.6)
+
+- mypy --strict: 95 source files no issues
+- ruff check: All passed
+- pytest: **1186/1186** (1097 → +89) / **coverage 86.30%** (≥80%)
+- bandit + pip-audit: 본 chunk 0 issues (기존 코드 B324/B613 + urllib3 CVE 별도)
+- create_app(): 41 routes / startup OK
+
+### 5. 다음 chunk
+
+1. **(5-13 06:00 발화 직후) cron 첫 발화 검증** + § 40.7 운영 모니터 (ka10014/ka10068/ka20068 첫 호출)
+2. (5-19 이후) § 36.5 1주 모니터 측정 (9 → 12 scheduler)
+3. Phase F (순위 5종) — ka10027/30/31/32/23 신규 endpoint wave
+4. Phase D-2 ka10080 분봉 (마지막 endpoint)
+
+---
+
 ## [2026-05-12] docs(plan): Phase E 통합 chunk plan doc § 12 — ka10014 + ka10068 + ka20068 (ted-run 대기)
 
 사용자 결정 (5-12): 3 endpoint (공매도 + 시장 대차 + 종목 대차) **통합 1 chunk** 로 동시 ted-run. D-1 ka20006 종결 후 매도 측 시그널 wave (Phase E) 진입. 본 chunk 는 ted-run 진입 직전 plan doc § 12 작성 + 메타 3종 갱신 단계 (코드 0).

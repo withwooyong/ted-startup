@@ -232,9 +232,9 @@ Tier 7 (투자자별 매매)                   3개  │ Phase G
 | 12 | `ka10080` | 주식분봉차트 | `/api/dostk/chart` | ★ | P2 | ka10099 |
 | 13 | `ka20006` | 업종일봉조회 | `/api/dostk/chart` | (참고) | P2 | ka10101 |
 | 14 | `ka10101` | 업종코드 리스트 | `/api/dostk/stkinfo` | — | P1 | au10001 |
-| 15 | `ka10014` | 공매도 추이 | `/api/dostk/shsa` | ★ | P1 | ka10099 |
-| 16 | `ka10068` | 대차거래 추이 | `/api/dostk/slb` | (참고) | P1 | au10001 |
-| 17 | `ka20068` | 대차거래 추이(종목별) | `/api/dostk/slb` | (참고) | P2 | ka10099 |
+| 15 | `ka10014` | 공매도 추이 ✅ Phase E | `/api/dostk/shsa` | ★ | P1 | ka10099 |
+| 16 | `ka10068` | 대차거래 추이 ✅ Phase E (scope=MARKET) | `/api/dostk/slb` | (참고) | P1 | au10001 |
+| 17 | `ka20068` | 대차거래 추이(종목별) ✅ Phase E (scope=STOCK KRX only) | `/api/dostk/slb` | (참고) | P2 | ka10099 |
 | 18 | `ka10027` | 전일대비 등락률 상위 | `/api/dostk/rkinfo` | mrkt_tp 1/2/3 | P2 | au10001 |
 | 19 | `ka10030` | 당일 거래량 상위 | `/api/dostk/rkinfo` | mrkt_tp 1/2/3 | P2 | au10001 |
 | 20 | `ka10031` | 전일 거래량 상위 | `/api/dostk/rkinfo` | mrkt_tp 1/2/3 | P3 | au10001 |

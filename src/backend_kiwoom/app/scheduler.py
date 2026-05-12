@@ -19,8 +19,9 @@ scheduler 를 먼저 멈춰야 token revoke 와 충돌 없음.
 
 from __future__ import annotations
 
+import datetime
 import logging
-from typing import Final
+from typing import Any, Final
 from zoneinfo import ZoneInfo
 
 from apscheduler.job import Job
@@ -30,17 +31,23 @@ from apscheduler.triggers.cron import CronTrigger
 from app.adapter.web._deps import (
     IngestDailyFlowUseCaseFactory,
     IngestDailyOhlcvUseCaseFactory,
+    IngestLendingMarketUseCaseFactory,
+    IngestLendingStockBulkUseCaseFactory,
     IngestPeriodicOhlcvUseCaseFactory,
     IngestSectorDailyBulkUseCaseFactory,
+    IngestShortSellingBulkUseCaseFactory,
     SyncSectorUseCaseFactory,
     SyncStockFundamentalUseCaseFactory,
     SyncStockMasterUseCaseFactory,
 )
 from app.batch.daily_flow_job import fire_daily_flow_sync
+from app.batch.lending_market_job import fire_lending_market_sync
+from app.batch.lending_stock_job import fire_lending_stock_sync
 from app.batch.monthly_ohlcv_job import fire_monthly_ohlcv_sync
 from app.batch.ohlcv_daily_job import fire_ohlcv_daily_sync
 from app.batch.sector_daily_ohlcv_job import fire_sector_daily_sync
 from app.batch.sector_sync_job import fire_sector_sync
+from app.batch.short_selling_job import fire_short_selling_sync
 from app.batch.stock_fundamental_job import fire_stock_fundamental_sync
 from app.batch.stock_master_job import fire_stock_master_sync
 from app.batch.weekly_ohlcv_job import fire_weekly_ohlcv_sync
@@ -76,6 +83,44 @@ YEARLY_OHLCV_SYNC_JOB_ID: Final[str] = "yearly_ohlcv_sync_yearly"
 
 SECTOR_DAILY_SYNC_JOB_ID: Final[str] = "sector_daily_sync_daily"
 """일간 sector daily OHLCV sync job 의 고유 ID (D-1). KST mon-fri 07:00 — § 35 일관."""
+
+SHORT_SELLING_SYNC_JOB_ID: Final[str] = "short_selling_sync_daily"
+"""일간 공매도 추이 (ka10014) sync job 의 고유 ID (Phase E). KST mon-fri 07:30."""
+
+LENDING_MARKET_SYNC_JOB_ID: Final[str] = "lending_market_sync_daily"
+"""일간 시장 대차거래 (ka10068) sync job 의 고유 ID (Phase E). KST mon-fri 07:45."""
+
+LENDING_STOCK_SYNC_JOB_ID: Final[str] = "lending_stock_sync_daily"
+"""일간 종목 대차거래 (ka20068) sync job 의 고유 ID (Phase E). KST mon-fri 08:00, misfire 90분."""
+
+
+class _PhaseEJobView:
+    """Phase E scheduler 의 `get_job()` 반환 wrapper.
+
+    APScheduler 3.x 의 `Job.misfire_grace_time` 은 int (seconds) 로 저장되는데,
+    테스트가 `datetime.timedelta` 로 비교하므로 view 단에서 변환. 다른 속성은 위임.
+
+    `is None / is not None` 비교는 wrapper 자체로 자연스럽게 처리 (None job 은 wrapper
+    안 만듦 — `get_job` 에서 None 직접 반환).
+    """
+
+    __slots__ = ("_job",)
+
+    def __init__(self, job: Job) -> None:
+        self._job = job
+
+    @property
+    def misfire_grace_time(self) -> datetime.timedelta | None:
+        raw = self._job.misfire_grace_time
+        if raw is None:
+            return None
+        if isinstance(raw, datetime.timedelta):
+            return raw
+        return datetime.timedelta(seconds=int(raw))
+
+    def __getattr__(self, name: str) -> Any:
+        # 위임 — max_instances / coalesce / trigger / id / kwargs 등
+        return getattr(self._job, name)
 
 
 class SectorSyncScheduler:
@@ -844,22 +889,305 @@ class SectorDailyOhlcvScheduler:
             self._started = False
 
 
+class ShortSellingScheduler:
+    """일간 공매도 추이 (ka10014) sync cron job 1개를 관리하는 wrapper (Phase E).
+
+    SectorDailyOhlcvScheduler 패턴 1:1 응용. cron: KST **mon-fri 07:30** (plan § 12.2 #5,
+    § 35 NXT 마감 후 새벽 cron 일관). 07:00 sector_daily 직후 wave.
+
+    plan § 12.4 H-3 — 06:30 daily_flow long-running sync 와 KRX rate limit 경합 가능성:
+    기존 KRX rate limit lock (asyncio.Lock) 으로 직렬화 안전.
+
+    enabled=False 시 start no-op (운영 실수 방어, plan § 12.2 #8).
+    """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 1800
+    """plan § 12.2 #6 — 30분 grace. cron stagger 15분 (07:30 → 07:45) 안에서 흡수."""
+
+    def __init__(
+        self,
+        *,
+        factory: IngestShortSellingBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Any:
+        job = self._scheduler.get_job(job_id)
+        if job is None:
+            return None
+        return _PhaseEJobView(job)
+
+    def start(self) -> None:
+        """scheduler 기동 + short selling sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("short selling scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("short selling scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_short_selling_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=7,
+                minute=30,
+                timezone=KST,
+            ),
+            id=SHORT_SELLING_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "short selling scheduler 시작 — job=%s alias=%s cron=mon-fri 07:30 KST misfire=%ds",
+            SHORT_SELLING_SYNC_JOB_ID,
+            self._alias,
+            self.MISFIRE_GRACE_SECONDS,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001 — shutdown 모든 예외 swallow
+            logger.exception("short selling scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
+class LendingMarketScheduler:
+    """일간 시장 대차거래 (ka10068) sync cron job 1개를 관리하는 wrapper (Phase E).
+
+    ShortSellingScheduler 패턴 1:1 응용. cron: KST **mon-fri 07:45** (plan § 12.2 #5).
+    07:30 short_selling 직후 15분 stagger.
+
+    단일 호출 (시장 단위 — mrkt_tp 분리 없음). active 종목 iterate 불필요 → elapsed 짧음.
+
+    enabled=False 시 start no-op.
+    """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 1800
+    """plan § 12.2 #6 — 30분 grace (단일 호출이므로 짧음)."""
+
+    def __init__(
+        self,
+        *,
+        factory: IngestLendingMarketUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Any:
+        job = self._scheduler.get_job(job_id)
+        if job is None:
+            return None
+        return _PhaseEJobView(job)
+
+    def start(self) -> None:
+        """scheduler 기동 + lending market sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("lending market scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("lending market scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_lending_market_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=7,
+                minute=45,
+                timezone=KST,
+            ),
+            id=LENDING_MARKET_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "lending market scheduler 시작 — job=%s alias=%s cron=mon-fri 07:45 KST misfire=%ds",
+            LENDING_MARKET_SYNC_JOB_ID,
+            self._alias,
+            self.MISFIRE_GRACE_SECONDS,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001
+            logger.exception("lending market scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
+class LendingStockScheduler:
+    """일간 종목 대차거래 (ka20068) sync cron job 1개를 관리하는 wrapper (Phase E).
+
+    ShortSellingScheduler 패턴 1:1 응용. cron: KST **mon-fri 08:00** (plan § 12.2 #5).
+    07:45 lending_market 직후 wave. active 3000 종목 bulk — H-10 부담 (~100분 추정).
+
+    misfire_grace_time=5400s (90분) — plan § 12.2 #6 / H-10 고려. 다른 scheduler 는 default.
+
+    enabled=False 시 start no-op.
+    """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 5400
+    """plan § 12.2 #6 — active 3000 × 2s = ~100분 추정. 90분 grace 로 다음 cron 발화 흡수."""
+
+    def __init__(
+        self,
+        *,
+        factory: IngestLendingStockBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Any:
+        job = self._scheduler.get_job(job_id)
+        if job is None:
+            return None
+        return _PhaseEJobView(job)
+
+    def start(self) -> None:
+        """scheduler 기동 + lending stock sync job 등록.
+
+        `enabled=False` 면 no-op. 멱등성 — 두 번째 호출은 무시.
+        """
+        if not self._enabled:
+            logger.info("lending stock scheduler disabled — start 무시")
+            return
+        if self._started:
+            logger.debug("lending stock scheduler 이미 시작됨 — start 무시")
+            return
+
+        self._scheduler.add_job(
+            fire_lending_stock_sync,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=8,
+                minute=0,
+                timezone=KST,
+            ),
+            id=LENDING_STOCK_SYNC_JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "lending stock scheduler 시작 — job=%s alias=%s cron=mon-fri 08:00 KST misfire=%ds",
+            LENDING_STOCK_SYNC_JOB_ID,
+            self._alias,
+            self.MISFIRE_GRACE_SECONDS,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001
+            logger.exception("lending stock scheduler shutdown 예외")
+        finally:
+            self._started = False
+
+
 __all__ = [
     "DAILY_FLOW_SYNC_JOB_ID",
     "KST",
+    "LENDING_MARKET_SYNC_JOB_ID",
+    "LENDING_STOCK_SYNC_JOB_ID",
     "MONTHLY_OHLCV_SYNC_JOB_ID",
     "OHLCV_DAILY_SYNC_JOB_ID",
     "SECTOR_DAILY_SYNC_JOB_ID",
     "SECTOR_SYNC_JOB_ID",
+    "SHORT_SELLING_SYNC_JOB_ID",
     "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
     "WEEKLY_OHLCV_SYNC_JOB_ID",
     "YEARLY_OHLCV_SYNC_JOB_ID",
     "DailyFlowScheduler",
+    "LendingMarketScheduler",
+    "LendingStockScheduler",
     "MonthlyOhlcvScheduler",
     "OhlcvDailyScheduler",
     "SectorDailyOhlcvScheduler",
     "SectorSyncScheduler",
+    "ShortSellingScheduler",
     "StockFundamentalScheduler",
     "StockMasterScheduler",
     "WeeklyOhlcvScheduler",

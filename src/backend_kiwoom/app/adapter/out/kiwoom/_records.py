@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -174,9 +175,247 @@ class NormalizedDailyFlow:
     foreign_holdings: int | None
 
 
+# =============================================================================
+# Phase E — ka10014 공매도 + ka10068/ka20068 대차거래 (매도 측 시그널 wave)
+# =============================================================================
+
+
+class ShortSellingTimeType(StrEnum):
+    """ka10014 `tm_tp` 시간구분 (Phase E).
+
+    설계: endpoint-15-ka10014.md § 11.2.
+
+    - START_ONLY ("0"): 시작일 단독 — 응답이 strt_dt 부근만
+    - PERIOD ("1"): 기간 — 응답 기간 보장 (plan § 12.2 H-4 디폴트, endpoint-15 권장)
+    """
+
+    START_ONLY = "0"
+    PERIOD = "1"
+
+
+class LendingScope(StrEnum):
+    """대차거래 적재 범위 — `lending_balance_kw` 의 row 분기 (Phase E).
+
+    설계: endpoint-16-ka10068.md § 3.3.
+
+    - MARKET (ka10068): 시장 단위 — stock_id NULL
+    - STOCK (ka20068): 종목 단위 — stock_id FK
+    """
+
+    MARKET = "MARKET"
+    STOCK = "STOCK"
+
+
+# ---------------------------------------------------------------------------
+# ka10014 공매도 추이 — ShortSellingRow / Response / NormalizedShortSelling
+# ---------------------------------------------------------------------------
+
+
+class ShortSellingRow(BaseModel):
+    """ka10014 응답 row — 11 필드.
+
+    B-γ-1 2R A-H1 패턴 — 모든 string max_length 강제 (vendor 거대 string DataError 차단).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    dt: Annotated[str, Field(max_length=8)] = ""
+    close_pric: Annotated[str, Field(max_length=32)] = ""
+    pred_pre_sig: Annotated[str, Field(max_length=4)] = ""
+    pred_pre: Annotated[str, Field(max_length=32)] = ""
+    flu_rt: Annotated[str, Field(max_length=32)] = ""
+    trde_qty: Annotated[str, Field(max_length=32)] = ""
+    shrts_qty: Annotated[str, Field(max_length=32)] = ""
+    ovr_shrts_qty: Annotated[str, Field(max_length=32)] = ""
+    trde_wght: Annotated[str, Field(max_length=32)] = ""
+    shrts_trde_prica: Annotated[str, Field(max_length=32)] = ""
+    shrts_avg_pric: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        stock_id: int,
+        exchange: ExchangeType,
+    ) -> NormalizedShortSelling:
+        """ka10014 row → NormalizedShortSelling.
+
+        빈 dt → date.min (Repository skip 안전망). DailyMarketRow.to_normalized 패턴 일관.
+        """
+        return NormalizedShortSelling(
+            stock_id=stock_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            exchange=exchange,
+            close_price=_to_int(self.close_pric),
+            prev_compare_amount=_to_int(self.pred_pre),
+            prev_compare_sign=self.pred_pre_sig or None,
+            change_rate=_to_decimal(self.flu_rt),
+            trade_volume=_to_int(self.trde_qty),
+            short_volume=_to_int(self.shrts_qty),
+            cumulative_short_volume=_to_int(self.ovr_shrts_qty),
+            short_trade_weight=_to_decimal(self.trde_wght),
+            short_trade_amount=_to_int(self.shrts_trde_prica),
+            short_avg_price=_to_int(self.shrts_avg_pric),
+        )
+
+
+class ShortSellingResponse(BaseModel):
+    """ka10014 응답 wrapper — `shrts_trnsn` list."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    shrts_trnsn: list[ShortSellingRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedShortSelling:
+    """ka10014 정규화 도메인 — Repository 가 보는 형태.
+
+    `trading_date == date.min` 은 빈 응답 row 표식 — caller 가 영속화 직전 skip.
+    """
+
+    stock_id: int
+    trading_date: date
+    exchange: ExchangeType
+    close_price: int | None
+    prev_compare_amount: int | None
+    prev_compare_sign: str | None
+    change_rate: Decimal | None
+    trade_volume: int | None
+    short_volume: int | None
+    cumulative_short_volume: int | None
+    short_trade_weight: Decimal | None
+    short_trade_amount: int | None
+    short_avg_price: int | None
+
+
+# ---------------------------------------------------------------------------
+# ka10068 시장 대차 / ka20068 종목 대차 — LendingMarketRow / LendingStockRow / Response 2
+# ---------------------------------------------------------------------------
+
+
+class LendingMarketRow(BaseModel):
+    """ka10068 응답 row (시장 단위) — 6 필드.
+
+    plan § 3.1 (endpoint-16) 응답 필드명:
+    - dt / dbrt_trde_cntrcnt / dbrt_trde_rpy / dbrt_trde_irds / rmnd / remn_amt
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    dt: Annotated[str, Field(max_length=8)] = ""
+    dbrt_trde_cntrcnt: Annotated[str, Field(max_length=32)] = ""
+    dbrt_trde_rpy: Annotated[str, Field(max_length=32)] = ""
+    dbrt_trde_irds: Annotated[str, Field(max_length=32)] = ""
+    rmnd: Annotated[str, Field(max_length=32)] = ""
+    remn_amt: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(self, *, scope: LendingScope) -> NormalizedLendingMarket:
+        """ka10068 row → NormalizedLendingMarket (scope=MARKET, stock_id=None).
+
+        plan § 3.3 (endpoint-16) 시그니처 1:1. 시장 단위 — stock_id 는 항상 None
+        (CHECK constraint 보장).
+        빈 dt → date.min (Repository skip 안전망).
+        """
+        return NormalizedLendingMarket(
+            scope=scope,
+            stock_id=None,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            contracted_volume=_to_int(self.dbrt_trde_cntrcnt),
+            repaid_volume=_to_int(self.dbrt_trde_rpy),
+            delta_volume=_to_int(self.dbrt_trde_irds),
+            balance_volume=_to_int(self.rmnd),
+            balance_amount=_to_int(self.remn_amt),
+        )
+
+
+class LendingStockRow(BaseModel):
+    """ka20068 응답 row (종목 단위) — schema 는 ka10068 의 LendingMarketRow 와 동일.
+
+    plan § 3.3 (endpoint-17). `to_normalized` 시그니처가 다르므로 (scope vs stock_id)
+    별도 클래스로 정의 — 상속 시 시그니처 변경은 LSP 위반.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    dt: Annotated[str, Field(max_length=8)] = ""
+    dbrt_trde_cntrcnt: Annotated[str, Field(max_length=32)] = ""
+    dbrt_trde_rpy: Annotated[str, Field(max_length=32)] = ""
+    dbrt_trde_irds: Annotated[str, Field(max_length=32)] = ""
+    rmnd: Annotated[str, Field(max_length=32)] = ""
+    remn_amt: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(self, *, stock_id: int) -> NormalizedLendingMarket:
+        """ka20068 row → NormalizedLendingMarket (scope=STOCK, stock_id=int).
+
+        plan § 3.3 (endpoint-17) 시그니처 1:1. 종목 단위 — stock_id FK 필수
+        (CHECK constraint 보장).
+        빈 dt → date.min (Repository skip 안전망).
+        """
+        return NormalizedLendingMarket(
+            scope=LendingScope.STOCK,
+            stock_id=stock_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            contracted_volume=_to_int(self.dbrt_trde_cntrcnt),
+            repaid_volume=_to_int(self.dbrt_trde_rpy),
+            delta_volume=_to_int(self.dbrt_trde_irds),
+            balance_volume=_to_int(self.rmnd),
+            balance_amount=_to_int(self.remn_amt),
+        )
+
+
+class LendingMarketResponse(BaseModel):
+    """ka10068 응답 wrapper — `dbrt_trde_trnsn` list."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    dbrt_trde_trnsn: list[LendingMarketRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+class LendingStockResponse(BaseModel):
+    """ka20068 응답 wrapper — `dbrt_trde_trnsn` list (LendingStockRow)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    dbrt_trde_trnsn: list[LendingStockRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedLendingMarket:
+    """ka10068 / ka20068 정규화 도메인 — Repository 가 보는 형태.
+
+    `lending_balance_kw` 테이블 1행에 대응. scope 컬럼으로 MARKET/STOCK 분기.
+    `trading_date == date.min` 은 빈 응답 row 표식 — caller 가 영속화 직전 skip.
+    """
+
+    scope: LendingScope
+    stock_id: int | None
+    trading_date: date
+    contracted_volume: int | None
+    repaid_volume: int | None
+    delta_volume: int | None
+    balance_volume: int | None
+    balance_amount: int | None
+
+
 __all__ = [
     "DailyMarketResponse",
     "DailyMarketRow",
+    "LendingMarketResponse",
+    "LendingMarketRow",
+    "LendingScope",
+    "LendingStockResponse",
+    "LendingStockRow",
     "NormalizedDailyFlow",
+    "NormalizedLendingMarket",
+    "NormalizedShortSelling",
+    "ShortSellingResponse",
+    "ShortSellingRow",
+    "ShortSellingTimeType",
     "_strip_double_sign_int",
 ]

@@ -333,6 +333,9 @@ async def test_lifespan_starts_both_schedulers_with_valid_aliases(
     monkeypatch.setenv("SCHEDULER_MONTHLY_OHLCV_SYNC_ALIAS", "monthly-alias")  # C-3β
     monkeypatch.setenv("SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS", "yearly-alias")  # C-4
     monkeypatch.setenv("SCHEDULER_SECTOR_DAILY_SYNC_ALIAS", "sector-daily-alias")  # D-1
+    monkeypatch.setenv("SCHEDULER_SHORT_SELLING_SYNC_ALIAS", "short-selling-alias")  # Phase E
+    monkeypatch.setenv("SCHEDULER_LENDING_MARKET_SYNC_ALIAS", "lending-market-alias")  # Phase E
+    monkeypatch.setenv("SCHEDULER_LENDING_STOCK_SYNC_ALIAS", "lending-stock-alias")  # Phase E
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
 

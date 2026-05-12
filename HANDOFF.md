@@ -1,19 +1,18 @@
 # Session Handoff
 
-> Last updated: 2026-05-12 (KST) — Phase E 통합 chunk plan doc § 12 작성 완료 (ted-run 대기).
-> Branch: `master` → `origin/master` 동기화 (직전 `3954185`)
-> Latest commit (작성중): Phase E plan doc § 12 + 메타 3종 갱신 — 본 turn 에서 commit 예정 (push 는 사용자 명시 요청 시)
-> 미푸시 commit: 본 turn commit 1건 예상
+> Last updated: 2026-05-13 (KST) — Phase E 풀 구현 완료 (ted-run 풀 파이프라인).
+> Branch: `master` → 직전 `ac6a941` (Phase E plan doc § 12). 본 turn 에서 commit 예정 (push 는 사용자 명시 요청 시).
+> 미푸시 commit: 본 turn commit 1건 (Phase E 풀 구현)
 
 ## Current Status
 
-**Phase E 진입 — 통합 chunk plan doc § 12 작성 완료**. 사용자 결정 (5-12): ka10014 (공매도) + ka10068 (시장 대차) + ka20068 (종목 대차) 3 endpoint 통합 1 chunk 동시 ted-run. D-1 § 12 패턴 1:1 — 10 결정 + 13 self-check + DoD (15 코드 + 8 테스트). Migration 016 (short_selling_kw + lending_balance_kw 2 테이블) / cron § 35 새벽 일관 (07:30 / 07:45 / 08:00 KST). 본 chunk 자체는 plan doc + 메타 갱신만 (코드 0) — ted-run 대기.
+**Phase E 풀 구현 완료** — ted-run 풀 파이프라인 적용: Step 0 TDD 89 시나리오 (sonnet 3 병렬) → Step 1 구현 25 파일 (opus 3 병렬) → Step 2 이중 리뷰 CONDITIONAL (1R CRITICAL 6 + HIGH 10) → fix 10건 → PASS → Step 3 Verification 5관문 모두 PASS → ADR § 40 신규. Migration 016 + 매도 측 시그널 wave (ka10014 공매도 + ka10068 시장 대차 + ka20068 종목 대차). 3 신규 cron (07:30/07:45/08:00 KST mon-fri) — 컨테이너 재배포 후 활성.
 
 **현재 상태**:
-- kiwoom-app container: **Up (healthy)** / 9 scheduler 활성 / 5-13 (수) 06:00 / 06:30 / 07:00 cron 첫 발화 예정 그대로
-- 테스트 1097 cases (Phase E ted-run 후 ~1175~1200 예상) / coverage **90%** / ruff PASS / mypy strict PASS
-- **12 / 25 endpoint (48%)** — Phase E ted-run 종결 후 → **15/25 (60%)**
-- plan doc 3건 갱신 — endpoint-15-ka10014.md § 12 신규 / endpoint-16-ka10068.md + endpoint-17-ka20068.md § 12 cross-ref
+- kiwoom-app container: 직전 9 scheduler 활성 (D-1 sector_daily 포함). Phase E 3 신규 scheduler 는 컨테이너 재배포 후 12 활성
+- 테스트 **1186 cases** (1097 + 89 신규) / coverage **86.30%** / ruff PASS / mypy strict PASS
+- **15 / 25 endpoint (60%)** — Phase E 종결 + 다음 Phase F (순위 5종) 또는 D-2 (분봉 마지막)
+- 5-13 (수) 06:00 OhlcvDaily + 06:30 DailyFlow + 07:00 SectorDaily cron 첫 발화 예정 그대로
 
 ## Completed This Session
 
@@ -26,14 +25,15 @@
 | 5 | 작업 방향 재정렬 (§11 정의 명확화) — 사용자 피드백 수용 후 기존 작업방식 유지 결정 | 메모리 3건 추가 (운영 변경 후행/추천 자제/기존 방식 유지) | 0 (메모리만) |
 | 6 | Phase D-1 ka20006 plan doc § 12 작성 + STATUS/HANDOFF 갱신 + commit | Migration 015 + 인프라 + 자동화 통합 chunk § (9 결정 + 13 self-check + DoD 10 코드 6 테스트) | 3 / `a1e20e0` |
 | 7 | **Phase D-1 ka20006 풀 구현 (ted-run)** — TDD 38 신규 / 구현 10 파일 / 1R CONDITIONAL → PASS / Verification 5관문 PASS / 컨테이너 재배포 / ADR § 39 / 메타 갱신 | 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint | 16 / `249c277` |
-| 8 | **Phase E 통합 chunk plan doc § 12 작성** — endpoint-15-ka10014.md 본문 끝에 § 12 (12.1~12.7) 신규 / endpoint-16/17 cross-ref / STATUS / HANDOFF / CHANGELOG 갱신 | 10 결정 + 13 self-check + DoD 15 코드 8 테스트 — ted-run 대기 | 6 / (this commit) |
+| 8 | **Phase E 통합 chunk plan doc § 12 작성** — endpoint-15-ka10014.md 본문 끝에 § 12 (12.1~12.7) 신규 / endpoint-16/17 cross-ref / STATUS / HANDOFF / CHANGELOG 갱신 | 10 결정 + 13 self-check + DoD 15 코드 8 테스트 — ted-run 대기 | 6 / `ac6a941` |
+| 9 | **Phase E 풀 구현 (ted-run)** — TDD 89 sonnet 3 병렬 → 구현 25 파일 opus 3 병렬 → 1R CONDITIONAL → fix 10건 (CRITICAL 6 + HIGH 10) → PASS → Verification 5관문 → ADR § 40 / 메타 3종 / master.md 3 row | 1186 tests / coverage 86.30% / ruff + mypy strict PASS / 15/25 endpoint (60%) | 28 / (this commit) |
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| **1** | **Phase E ted-run 풀 파이프라인** — endpoint-15-ka10014.md § 12 input | **다음 chunk 1순위** | 3 endpoint 통합 (ka10014 + ka10068 + ka20068) 동시 ted-run. Migration 016 + 매도 측 시그널 wave + 15/25 endpoint. TDD ~80 시나리오 → 구현 15 파일 → 1R → Verification → ADR § 40 |
-| **2** | (5-13 06:00 발화 직후) cron 첫 발화 검증 + § 39.7 운영 모니터 | **병행 가능** (ted-run 과 독립) | OhlcvDaily 06:00 + DailyFlow 06:30 + SectorDaily 07:00 5-13 화 첫 발화. § 39.7: sector_daily 첫 호출 + 100배 값 + 페이지네이션 정량화 |
+| **1** | **(5-13 06:00 발화 직후) cron 첫 발화 검증 + § 39.7 / § 40.7 운영 모니터** | **다음 chunk 1순위** | OhlcvDaily 06:00 + DailyFlow 06:30 + SectorDaily 07:00 5-13 화 첫 발화. § 39.7: sector_daily 100배 값 + 페이지네이션. § 40.7: Phase E ka10014/ka10068/ka20068 첫 호출 (tm_tp / NXT 공매도 / 시장 분리 / Length=6 NXT / delta_volume 부호 / balance_amount 단위) |
+| **2** | **컨테이너 재배포 — Phase E 3 신규 cron 활성** | 운영 결정 | short_selling 07:30 / lending_market 07:45 / lending_stock 08:00 KST mon-fri. 재배포 시점 사용자 결정 (즉시 vs 운영 모니터 후) |
 | **3** | **노출된 secret 4건 회전** | **전체 개발 완료 후** | API_KEY/SECRET revoke + Fernet 마스터키 회전 + DB 재암호화 + Docker Hub PAT revoke (ADR § 38.8 #6/#7). 시점 연기: 5-12 사용자 결정. **절차서**: [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) |
 | **4** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 정리 + `SCHEDULER_SECTOR_DAILY_SYNC_ALIAS` 추가 | 전체 개발 완료 후 | compose env override 로 우회 완료. `.env.prod` 편집은 secret 회전 chunk 와 동일 시점 일괄 |
 | **5** | (5-19 이후) § 36.5 1주 모니터 측정 채움 | 대기 | 컨테이너 로그 기반 9 scheduler elapsed / NXT 정상 / failed / 알람 |

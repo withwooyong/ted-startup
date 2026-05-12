@@ -151,6 +151,51 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Scheduler — Phase E (ka10014 / ka10068 / ka20068 매도 측 시그널 wave) ----
+    scheduler_short_selling_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "공매도 추이 (ka10014) sync cron job 활성 여부 (Phase E 추가). "
+            "scheduler_enabled=True 가 전체 게이트 — 본 env 가 False 면 short_selling job 미등록 "
+            "(다른 scheduler 는 영향 없음). cron: mon-fri KST 07:30."
+        ),
+    )
+    scheduler_short_selling_sync_alias: str = Field(
+        default="",
+        description=(
+            "공매도 추이 (ka10014) sync cron job 이 사용할 키움 자격증명 alias (Phase E 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast (운영 실수 방어)."
+        ),
+    )
+    scheduler_lending_market_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "시장 대차거래 (ka10068) sync cron job 활성 여부 (Phase E 추가). "
+            "cron: mon-fri KST 07:45."
+        ),
+    )
+    scheduler_lending_market_sync_alias: str = Field(
+        default="",
+        description=(
+            "시장 대차거래 (ka10068) sync cron job 이 사용할 키움 자격증명 alias (Phase E 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_lending_stock_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "종목 대차거래 (ka20068) sync cron job 활성 여부 (Phase E 추가). "
+            "cron: mon-fri KST 08:00 (active 3000 종목 bulk). misfire_grace_time=5400s (90분)."
+        ),
+    )
+    scheduler_lending_stock_sync_alias: str = Field(
+        default="",
+        description=(
+            "종목 대차거래 (ka20068) sync cron job 이 사용할 키움 자격증명 alias (Phase E 추가). "
+            "scheduler_enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -395,6 +395,9 @@ async def test_lifespan_startup_and_shutdown_cycle_with_scheduler_enabled(
     monkeypatch.setenv("SCHEDULER_MONTHLY_OHLCV_SYNC_ALIAS", "smoke-test-alias")  # C-3β: monthly 도 필수
     monkeypatch.setenv("SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS", "smoke-test-alias")  # C-4: yearly 도 필수
     monkeypatch.setenv("SCHEDULER_SECTOR_DAILY_SYNC_ALIAS", "smoke-test-alias")  # D-1: sector_daily 도 필수
+    monkeypatch.setenv("SCHEDULER_SHORT_SELLING_SYNC_ALIAS", "smoke-test-alias")  # Phase E: short_selling 도 필수
+    monkeypatch.setenv("SCHEDULER_LENDING_MARKET_SYNC_ALIAS", "smoke-test-alias")  # Phase E: lending_market 도 필수
+    monkeypatch.setenv("SCHEDULER_LENDING_STOCK_SYNC_ALIAS", "smoke-test-alias")  # Phase E: lending_stock 도 필수
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings

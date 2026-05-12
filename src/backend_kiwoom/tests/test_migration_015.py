@@ -159,7 +159,11 @@ def test_migration_015_downgrade_with_data_raises(database_url: str) -> None:
 
 
 def test_migration_015_downgrade_then_upgrade(database_url: str) -> None:
-    """빈 테이블에서 015 → 014 downgrade → head upgrade 라운드트립 — 멱등성."""
+    """빈 테이블에서 015 → 014 downgrade → head upgrade 라운드트립 — 멱등성.
+
+    Phase E (016) 추가 이후: `-1` 은 016→015 가 되어 sector_price_daily 가 그대로 남음.
+    `014_stock_price_yearly` 타깃으로 명시 — 015 가 정말 제거되는지 검증.
+    """
     import sqlalchemy as sa
 
     alembic_cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
@@ -167,7 +171,7 @@ def test_migration_015_downgrade_then_upgrade(database_url: str) -> None:
 
     sync_engine = sa.create_engine(database_url.replace("+asyncpg", "+psycopg2"))
     try:
-        command.downgrade(alembic_cfg, "-1")
+        command.downgrade(alembic_cfg, "014_stock_price_yearly")
 
         with sync_engine.connect() as conn:
             insp = inspect(conn)

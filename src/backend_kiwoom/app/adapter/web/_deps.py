@@ -23,6 +23,11 @@ from contextlib import AbstractAsyncContextManager
 from fastapi import Depends, Header, HTTPException, status
 
 from app.application.service.daily_flow_service import IngestDailyFlowUseCase
+from app.application.service.lending_service import (
+    IngestLendingMarketUseCase,
+    IngestLendingStockBulkUseCase,
+    IngestLendingStockUseCase,
+)
 from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
 from app.application.service.ohlcv_periodic_service import IngestPeriodicOhlcvUseCase
 from app.application.service.sector_ohlcv_service import (
@@ -30,6 +35,10 @@ from app.application.service.sector_ohlcv_service import (
     IngestSectorDailyUseCase,
 )
 from app.application.service.sector_service import SyncSectorMasterUseCase
+from app.application.service.short_selling_service import (
+    IngestShortSellingBulkUseCase,
+    IngestShortSellingUseCase,
+)
 from app.application.service.stock_fundamental_service import SyncStockFundamentalUseCase
 from app.application.service.stock_master_service import (
     LookupStockUseCase,
@@ -104,6 +113,49 @@ IngestSectorDailySingleUseCaseFactory = Callable[
 bulk factory 와 동일 패턴 — 단건 refresh 라우터 전용. plan § 12.2 #9 UseCase 입력 = sector_id.
 """
 
+IngestShortSellingUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestShortSellingUseCase]
+]
+"""alias → AsyncContextManager[IngestShortSellingUseCase] factory (Phase E, ka10014).
+
+D-1 sector factory 와 동일 패턴 — 매 호출마다 새 KiwoomClient + KiwoomShortSellingClient 빌드.
+plan § 12.2 결정 #4 — KRX + NXT (nxt_enable 게이팅).
+"""
+
+IngestShortSellingBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestShortSellingBulkUseCase]
+]
+"""alias → AsyncContextManager[IngestShortSellingBulkUseCase] factory (Phase E, ka10014).
+
+single factory 와 동일 패턴 — bulk sync 라우터 전용.
+"""
+
+IngestLendingMarketUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestLendingMarketUseCase]
+]
+"""alias → AsyncContextManager[IngestLendingMarketUseCase] factory (Phase E, ka10068).
+
+C-1β factory 패턴 1:1 — 매 호출마다 새 KiwoomClient + KiwoomLendingClient 빌드.
+단일 호출 (시장 단위 — mrkt_tp 분리 없음). 라우터 + scheduler 공용.
+"""
+
+IngestLendingStockUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestLendingStockUseCase]
+]
+"""alias → AsyncContextManager[IngestLendingStockUseCase] factory (Phase E, ka20068).
+
+종목 단건 — 라우터 POST /lending/stock/{code} 진입점 전용.
+"""
+
+IngestLendingStockBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestLendingStockBulkUseCase]
+]
+"""alias → AsyncContextManager[IngestLendingStockBulkUseCase] factory (Phase E, ka20068).
+
+active 종목 bulk — scheduler `LendingStockScheduler` + router POST /lending/stock/sync 공용.
+~3000 종목 × 2s = ~100분 추정 (plan § 12.2 H-10).
+"""
+
 
 def get_settings_dep() -> Settings:
     return get_settings()
@@ -145,6 +197,11 @@ _ingest_daily_flow_factory: IngestDailyFlowUseCaseFactory | None = None
 _ingest_periodic_ohlcv_factory: IngestPeriodicOhlcvUseCaseFactory | None = None
 _ingest_sector_daily_factory: IngestSectorDailyBulkUseCaseFactory | None = None
 _ingest_sector_single_factory: IngestSectorDailySingleUseCaseFactory | None = None
+_ingest_short_selling_single_factory: IngestShortSellingUseCaseFactory | None = None
+_ingest_short_selling_bulk_factory: IngestShortSellingBulkUseCaseFactory | None = None
+_ingest_lending_market_factory: IngestLendingMarketUseCaseFactory | None = None
+_ingest_lending_stock_single_factory: IngestLendingStockUseCaseFactory | None = None
+_ingest_lending_stock_bulk_factory: IngestLendingStockBulkUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -323,6 +380,96 @@ def set_ingest_sector_single_factory(factory: IngestSectorDailySingleUseCaseFact
     _ingest_sector_single_factory = factory
 
 
+def get_ingest_short_selling_single_factory() -> IngestShortSellingUseCaseFactory:
+    """alias → AsyncContextManager[IngestShortSellingUseCase] factory (Phase E, ka10014). lifespan 에서 set."""
+    if _ingest_short_selling_single_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="short_selling single UseCase factory 미초기화",
+        )
+    return _ingest_short_selling_single_factory
+
+
+def set_ingest_short_selling_single_factory(
+    factory: IngestShortSellingUseCaseFactory,
+) -> None:
+    """lifespan 시작 시 호출 — 단건 refresh 라우터 전용 (Phase E, ka10014)."""
+    global _ingest_short_selling_single_factory
+    _ingest_short_selling_single_factory = factory
+
+
+def get_ingest_short_selling_bulk_factory() -> IngestShortSellingBulkUseCaseFactory:
+    """alias → AsyncContextManager[IngestShortSellingBulkUseCase] factory (Phase E, ka10014). lifespan 에서 set."""
+    if _ingest_short_selling_bulk_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="short_selling bulk UseCase factory 미초기화",
+        )
+    return _ingest_short_selling_bulk_factory
+
+
+def set_ingest_short_selling_bulk_factory(
+    factory: IngestShortSellingBulkUseCaseFactory,
+) -> None:
+    """lifespan 시작 시 호출 — bulk sync 라우터 전용 (Phase E, ka10014)."""
+    global _ingest_short_selling_bulk_factory
+    _ingest_short_selling_bulk_factory = factory
+
+
+def get_ingest_lending_market_factory() -> IngestLendingMarketUseCaseFactory:
+    """alias → AsyncContextManager[IngestLendingMarketUseCase] factory (Phase E, ka10068). lifespan 에서 set."""
+    if _ingest_lending_market_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="lending_market UseCase factory 미초기화",
+        )
+    return _ingest_lending_market_factory
+
+
+def set_ingest_lending_market_factory(
+    factory: IngestLendingMarketUseCaseFactory,
+) -> None:
+    """lifespan 시작 시 호출 — 시장 단위 단일 호출 라우터 전용 (Phase E, ka10068)."""
+    global _ingest_lending_market_factory
+    _ingest_lending_market_factory = factory
+
+
+def get_ingest_lending_stock_single_factory() -> IngestLendingStockUseCaseFactory:
+    """alias → AsyncContextManager[IngestLendingStockUseCase] factory (Phase E, ka20068). lifespan 에서 set."""
+    if _ingest_lending_stock_single_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="lending_stock single UseCase factory 미초기화",
+        )
+    return _ingest_lending_stock_single_factory
+
+
+def set_ingest_lending_stock_single_factory(
+    factory: IngestLendingStockUseCaseFactory,
+) -> None:
+    """lifespan 시작 시 호출 — 종목 단건 라우터 전용 (Phase E, ka20068)."""
+    global _ingest_lending_stock_single_factory
+    _ingest_lending_stock_single_factory = factory
+
+
+def get_ingest_lending_stock_bulk_factory() -> IngestLendingStockBulkUseCaseFactory:
+    """alias → AsyncContextManager[IngestLendingStockBulkUseCase] factory (Phase E, ka20068). lifespan 에서 set."""
+    if _ingest_lending_stock_bulk_factory is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="lending_stock bulk UseCase factory 미초기화",
+        )
+    return _ingest_lending_stock_bulk_factory
+
+
+def set_ingest_lending_stock_bulk_factory(
+    factory: IngestLendingStockBulkUseCaseFactory,
+) -> None:
+    """lifespan 시작 시 호출 — active 종목 bulk sync 라우터/scheduler 공용 (Phase E, ka20068)."""
+    global _ingest_lending_stock_bulk_factory
+    _ingest_lending_stock_bulk_factory = factory
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋."""
     global \
@@ -336,7 +483,12 @@ def reset_token_manager() -> None:
         _ingest_daily_flow_factory, \
         _ingest_periodic_ohlcv_factory, \
         _ingest_sector_daily_factory, \
-        _ingest_sector_single_factory
+        _ingest_sector_single_factory, \
+        _ingest_short_selling_single_factory, \
+        _ingest_short_selling_bulk_factory, \
+        _ingest_lending_market_factory, \
+        _ingest_lending_stock_single_factory, \
+        _ingest_lending_stock_bulk_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
@@ -348,6 +500,11 @@ def reset_token_manager() -> None:
     _ingest_periodic_ohlcv_factory = None
     _ingest_sector_daily_factory = None
     _ingest_sector_single_factory = None
+    _ingest_short_selling_single_factory = None
+    _ingest_short_selling_bulk_factory = None
+    _ingest_lending_market_factory = None
+    _ingest_lending_stock_single_factory = None
+    _ingest_lending_stock_bulk_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -404,21 +561,61 @@ def reset_ingest_sector_single_factory() -> None:
     _ingest_sector_single_factory = None
 
 
+def reset_ingest_short_selling_single_factory() -> None:
+    """lifespan teardown + 테스트 — short_selling single factory 만 리셋 (Phase E, 1R 2b M4 fail-closed)."""
+    global _ingest_short_selling_single_factory
+    _ingest_short_selling_single_factory = None
+
+
+def reset_ingest_short_selling_bulk_factory() -> None:
+    """lifespan teardown + 테스트 — short_selling bulk factory 만 리셋 (Phase E, 1R 2b M4 fail-closed)."""
+    global _ingest_short_selling_bulk_factory
+    _ingest_short_selling_bulk_factory = None
+
+
+def reset_ingest_lending_market_factory() -> None:
+    """lifespan teardown + 테스트 — lending_market factory 만 리셋 (Phase E, 1R 2b M4 fail-closed)."""
+    global _ingest_lending_market_factory
+    _ingest_lending_market_factory = None
+
+
+def reset_ingest_lending_stock_single_factory() -> None:
+    """lifespan teardown + 테스트 — lending_stock single factory 만 리셋 (Phase E, 1R 2b M4 fail-closed)."""
+    global _ingest_lending_stock_single_factory
+    _ingest_lending_stock_single_factory = None
+
+
+def reset_ingest_lending_stock_bulk_factory() -> None:
+    """lifespan teardown + 테스트 — lending_stock bulk factory 만 리셋 (Phase E, 1R 2b M4 fail-closed)."""
+    global _ingest_lending_stock_bulk_factory
+    _ingest_lending_stock_bulk_factory = None
+
+
 __all__ = [
     "IngestDailyFlowUseCaseFactory",
     "IngestDailyOhlcvUseCaseFactory",
+    "IngestLendingMarketUseCaseFactory",
+    "IngestLendingStockBulkUseCaseFactory",
+    "IngestLendingStockUseCaseFactory",
     "IngestPeriodicOhlcvUseCaseFactory",
     "IngestSectorDailyBulkUseCaseFactory",
     "IngestSectorDailySingleUseCaseFactory",
+    "IngestShortSellingBulkUseCaseFactory",
+    "IngestShortSellingUseCaseFactory",
     "LookupStockUseCaseFactory",
     "SyncSectorUseCaseFactory",
     "SyncStockFundamentalUseCaseFactory",
     "SyncStockMasterUseCaseFactory",
     "get_ingest_daily_flow_factory",
+    "get_ingest_lending_market_factory",
+    "get_ingest_lending_stock_bulk_factory",
+    "get_ingest_lending_stock_single_factory",
     "get_ingest_ohlcv_factory",
     "get_ingest_periodic_ohlcv_factory",
     "get_ingest_sector_daily_factory",
     "get_ingest_sector_single_factory",
+    "get_ingest_short_selling_bulk_factory",
+    "get_ingest_short_selling_single_factory",
     "get_lookup_stock_factory",
     "get_revoke_use_case",
     "get_settings_dep",
@@ -428,20 +625,30 @@ __all__ = [
     "get_token_manager",
     "require_admin_key",
     "reset_ingest_daily_flow_factory",
+    "reset_ingest_lending_market_factory",
+    "reset_ingest_lending_stock_bulk_factory",
+    "reset_ingest_lending_stock_single_factory",
     "reset_ingest_ohlcv_factory",
     "reset_ingest_periodic_ohlcv_factory",
     "reset_ingest_sector_daily_factory",
     "reset_ingest_sector_single_factory",
+    "reset_ingest_short_selling_bulk_factory",
+    "reset_ingest_short_selling_single_factory",
     "reset_lookup_stock_factory",
     "reset_sync_fundamental_factory",
     "reset_sync_sector_factory",
     "reset_sync_stock_factory",
     "reset_token_manager",
     "set_ingest_daily_flow_factory",
+    "set_ingest_lending_market_factory",
+    "set_ingest_lending_stock_bulk_factory",
+    "set_ingest_lending_stock_single_factory",
     "set_ingest_ohlcv_factory",
     "set_ingest_periodic_ohlcv_factory",
     "set_ingest_sector_daily_factory",
     "set_ingest_sector_single_factory",
+    "set_ingest_short_selling_bulk_factory",
+    "set_ingest_short_selling_single_factory",
     "set_lookup_stock_factory",
     "set_revoke_use_case",
     "set_sync_fundamental_factory",
