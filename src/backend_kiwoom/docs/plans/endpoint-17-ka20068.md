@@ -670,3 +670,11 @@ ka10068 동일 + stock 미존재 시 LookupStockUseCase 가 ka10100 호출로 la
 ---
 
 _Phase E 의 세 번째이자 마지막 endpoint. ka10068 (시장) 의 종목별 분리. 같은 URL / 같은 응답 schema / 같은 테이블 — 본 계획서가 차이점만 짧게 기술. ka10014 (공매도) 와 결합으로 매도 압력 시그널 종합 분석 가능._
+
+---
+
+## 12. Phase E 통합 chunk (cross-ref)
+
+> **본 endpoint 의 ted-run 진입 chunk 는 `endpoint-15-ka10014.md` § 12 (Phase E — Migration 016 + 매도 측 시그널 3 endpoint 통합) 참조** — 2026-05-12 추가.
+>
+> ka10014 (공매도) + ka10068 (시장 대차) + ka20068 (본 endpoint, 종목 대차) 3 endpoint 를 사용자 결정으로 통합 1 chunk 로 동시 ted-run. 결정 사항 (Migration 016 / scope 분기 / cron 시간 08:00 KST / NXT 정책 KRX only / scheduler_enabled / partial 임계치 등) 과 self-check (H-1~H-13) 와 DoD 는 모두 `endpoint-15-ka10014.md` § 12 에 단일 진실 출처로 작성됨. 본 endpoint 의 § 1~11 본문은 그대로 ted-run 입력.

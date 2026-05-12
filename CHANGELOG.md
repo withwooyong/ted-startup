@@ -7,6 +7,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] docs(plan): Phase E 통합 chunk plan doc § 12 — ka10014 + ka10068 + ka20068 (ted-run 대기)
+
+사용자 결정 (5-12): 3 endpoint (공매도 + 시장 대차 + 종목 대차) **통합 1 chunk** 로 동시 ted-run. D-1 ka20006 종결 후 매도 측 시그널 wave (Phase E) 진입. 본 chunk 는 ted-run 진입 직전 plan doc § 12 작성 + 메타 3종 갱신 단계 (코드 0).
+
+### 1. 신규 / 갱신 파일
+
+**plan doc**:
+- `src/backend_kiwoom/docs/plans/endpoint-15-ka10014.md` § 12 신규 (12.1 배경 / 12.2 결정 10 / 12.3 영향 범위 15 코드 + 8 테스트 / 12.4 self-check 13 / 12.5 DoD / 12.6 다음 chunk / 12.7 운영 모니터) — D-1 § 12 패턴 1:1
+- `src/backend_kiwoom/docs/plans/endpoint-16-ka10068.md` § 12 cross-ref 노트 (Phase E 통합 chunk = endpoint-15 § 12 참조)
+- `src/backend_kiwoom/docs/plans/endpoint-17-ka20068.md` § 12 cross-ref 노트 (동상)
+
+**메타**:
+- `src/backend_kiwoom/STATUS.md` — § 0 (Phase E 진입 / 다음 chunk = ted-run / 48 commits) / § 1 (Phase E 🔄 진입) / § 5 (다음 chunk 1순위 재조정)
+- `HANDOFF.md` — Current Status + Pending #1 갱신
+
+### 2. 10 결정 (ADR § 40 신규 예정)
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | 마이그레이션 번호 | 016 (`016_short_lending`) — 015 직후 |
+| 2 | 신규 테이블 통합 | 2 테이블 (short_selling_kw + lending_balance_kw) 1 마이그레이션 |
+| 3 | lending 의 scope 분기 | partial unique index 2 + CHECK constraint |
+| 4 | NXT 정책 (3 endpoint 별) | ka10014=시도 / ka10068=미적용 (시장) / ka20068=KRX only (Length=6) |
+| 5 | cron 시간 (§ 35 일관) | short_selling 07:30 / lending_market 07:45 / lending_stock 08:00 KST |
+| 6 | sync 윈도 | 1주 (T-7 ~ T) 통일 |
+| 7 | 백필 윈도 | 3년 통일 (3 CLI 신규) |
+| 8 | scheduler_enabled 활성 보류 | 3 enabled env (§ 36 정책) |
+| 9 | ka10014 NXT 빈 응답 처리 | 정상 처리 (warning 안 함) |
+| 10 | partial 실패 임계치 | short_selling 5%/15% / lending_market N/A / lending_stock 5%/15% |
+
+### 3. self-check 13건 (H-1~H-13)
+
+- H-1 partial unique PostgreSQL 호환성 / H-2 NXT 정책 3 endpoint 분기 누락 / H-3 cron 누적 부담 / H-4 ka10014 tm_tp 미확정 / H-5 ovr_shrts_qty 누적 의미 / H-6 ka10068 시장 분리 미확정 / H-7 ka20068 Length=6 NXT 거부 / H-8 delta_volume 부호 일관성 / H-9 NXT 공매도 응답 가능 여부 / H-10 9 + 3 = 12 scheduler 부담 / H-11 코드 양 1.5배 / H-12 Migration 016 destructive / H-13 1R 통합 누락 (D-1 패턴)
+
+### 4. DoD 요약 (Phase E)
+
+- Migration 016 + ORM 2 + Pydantic 9 + DTO 10 + Adapter 2 + Repository 2 + UseCase 5 + Router 2 + Scheduler 3 job + Settings 6 env
+- 테스트 8 신규 (1097 → ~1175~1200, coverage ≥ 89%)
+- 1R PASS / ADR § 40 / STATUS / HANDOFF / CHANGELOG / master.md / endpoint-16/17 cross-ref
+
+### 5. 다음 chunk
+
+1. **Phase E ted-run 풀 파이프라인** (1순위) — plan doc § 12 input
+2. (5-13 06:00 직후) cron 첫 발화 검증 + § 39.7 운영 모니터 (병행)
+3. (5-19 이후) § 36.5 1주 모니터 측정
+
+---
+
 ## [2026-05-12] feat(kiwoom): Phase D-1 — ka20006 sector daily OHLCV 풀 구현 (Migration 015, 12/25 endpoint)
 
 ted-run 풀 파이프라인 적용 — TDD 38 신규 → 구현 → 1R CONDITIONAL → PASS (CRITICAL 3 + HIGH 2 fix) → Verification 5관문 PASS → ADR § 39 → 커밋. Phase D 진입 chunk. ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지.

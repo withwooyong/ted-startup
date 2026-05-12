@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-12 (Phase D-1 ka20006 풀 구현 완료 — Migration 015 + 인프라 + 자동화. 1R PASS / Verification 5관문 PASS / 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint / ADR § 39)
+> **마지막 갱신**: 2026-05-12 (Phase E 통합 chunk plan doc § 12 작성 — ka10014 + ka10068 + ka20068 매도 측 시그널 wave / Migration 016 / 10 결정 + 13 self-check + DoD 15 코드 8 테스트. ted-run 대기)
 
 ---
 
@@ -11,11 +11,11 @@
 
 | 항목 | 값 |
 |------|-----|
-| 진행 Phase | **Phase D-1 종결** (ka20006 풀 구현 완료) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 |
-| 마지막 완료 chunk | **Phase D-1 ka20006 풀 구현** — Migration 015 + 인프라 + 자동화. 7 신규 + 5 갱신 코드 + 6 신규 테스트. 1R CONDITIONAL → PASS (CRITICAL 3 + HIGH 2 fix) / Verification 5관문 PASS / 컨테이너 재배포 OK (9 scheduler 활성) / ADR § 39 |
-| 다음 chunk | **(5-13 06:00 발화 직후) cron 첫 발화 검증** (§ 38.10 #1) + **§ 39.7 운영 모니터** (sector_daily 100배 값 / 페이지네이션 정량화) |
-| 25 Endpoint 진행 | **12 / 25 완료** (48%). ka20006 → ✅ |
-| 누적 chunk | 47 commits (D-1 풀 구현 chunk 추가) |
+| 진행 Phase | **Phase E 진입** (통합 chunk plan doc § 12 작성 완료, ted-run 대기) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
+| 마지막 완료 chunk | **Phase E 통합 chunk plan doc § 12** — ka10014 (공매도) + ka10068 (시장 대차) + ka20068 (종목 대차) 3 endpoint 통합 1 chunk (사용자 결정). Migration 016 + 매도 측 시그널 wave. 10 결정 + 13 self-check + DoD 15 코드 + 8 테스트. cron 시간 § 35 새벽 cron 일관 (07:30/07:45/08:00 KST). ted-run 대기 |
+| 다음 chunk | **Phase E ted-run 풀 파이프라인** — plan doc § 12 input. TDD 80+ 시나리오 → 구현 15 파일 → 1R → Verification 5관문 → ADR § 40 (병행: 5-13 06:00 발화 직후 cron 첫 발화 검증 + § 39.7 운영 모니터) |
+| 25 Endpoint 진행 | **12 / 25 완료** (48%). Phase E ted-run 종결 후 → 15/25 (60%) |
+| 누적 chunk | 48 commits (Phase E plan doc § 12 chunk 추가) |
 | 테스트 | **1097 cases** (1059 + 38) / coverage **90%** / ruff PASS / mypy strict PASS |
 | 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. **kiwoom-app 컨테이너** — Up healthy / 8 scheduler 활성 / 5-13 06:00 첫 발화 준비 |
 
@@ -29,7 +29,7 @@
 | **B — 종목 마스터** | stock + nxt_enable / 단건 조회 / 펀더멘털 | ✅ **완료** | B-α / B-β / B-γ-1 / B-γ-2 (4) | ka10099, ka10100, ka10001 |
 | **C — OHLCV 백테스팅** | KRX/NXT 일봉 + 일별 수급 + 주/월/년봉 + 백필 + 영숫자 호환성 | ✅ **종결 (데이터 측면 100%)** | C-1α/β / C-2α/β/γ/δ / R1/R2 / C-3α/β / C-backfill / C-4 / chart 영숫자 Chunk 1/2 / 영숫자 백필 (16) | 모두 ✅ / scheduler 활성만 남음 |
 | **D — 보강 시계열** | 분봉 / 틱 / 업종 일봉 | 🔄 **진행** | **D-1 풀 구현 ✅** (`a1e20e0` plan doc + `249c277` 구현) / D-2 ka10080 분봉 마지막 / ka10079 (P3) | ka10079, ka10080, **ka20006 ✅ (D-1)** |
-| **E — 시그널 보강** | 공매도 / 대차거래 | ⏳ 대기 | — | ka10014, ka10068, ka20068 |
+| **E — 시그널 보강** | 공매도 / 대차거래 | 🔄 **진입** | **통합 chunk plan doc § 12 ✅** (this commit) / ted-run 대기 | ka10014, ka10068, ka20068 |
 | **F — 순위** | 등락률/거래량/거래대금 5종 통합 | ⏳ 대기 | — | ka10027, ka10030, ka10031, ka10032, ka10023 |
 | **G — 투자자별** | 일별 매매 / 종목별 / 연속매매 | ⏳ 대기 | — | ka10058, ka10059, ka10131 |
 | **H — 통합** | 백테스팅 view, 데이터 품질 리포트, README/SPEC, Grafana | ⏳ 대기 | — | (인프라 only) |
@@ -150,9 +150,9 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **(5-13 06:00 발화 직후) cron 첫 발화 검증** + **§ 39.7 운영 모니터** | § 38.10 #1 + § 39.7 (sector_daily 첫 호출 + 100배 값 + 페이지네이션) | 검증 SQL 만, 코드 0 |
-| 2 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
-| 3 | Phase E — ka10014 (공매도) / ka10068 (대차) / ka20068 wave | 신규 endpoint wave (Phase D-2 분봉은 마지막으로 연기) | 3 endpoint × Phase B/C 패턴 |
+| **1** | **Phase E ted-run 풀 파이프라인** — endpoint-15 § 12 input (통합 chunk = ka10014 + ka10068 + ka20068) | 통합 1 chunk 사용자 결정 (5-12) / Migration 016 + 매도 측 시그널 wave + 15/25 endpoint | 15 코드 + 8 테스트 / 풀 ted-run 사이클 |
+| **2** | **(5-13 06:00 발화 직후) cron 첫 발화 검증** + **§ 39.7 운영 모니터** | § 38.10 #1 + § 39.7 (sector_daily 첫 호출 + 100배 값 + 페이지네이션) — 병행 가능 | 검증 SQL 만, 코드 0 |
+| 3 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 4 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |
 | 5 | Phase F / G / H (순위/투자자별/통합) | 신규 endpoint wave | 각 chunk 별 신규 |
 | 6 | D-1 follow-up: inds_cd echo 검증 / close_index Decimal 통일 / backfill_sector CLI | ADR § 39.8 1R MEDIUM/LOW | 운영 첫 호출 후 결정 |

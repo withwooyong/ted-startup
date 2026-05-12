@@ -698,3 +698,11 @@ scheduler.add_job(
 ---
 
 _Phase E 의 두 번째 endpoint. ka10014 (종목 공매도) 의 거시 보완. 시장 단위라 호출 부담 작음 — 단일 호출 일 1회. ka20068 (종목별) 와 같은 URL 공유, 같은 테이블 적재 (scope 컬럼 분기)._
+
+---
+
+## 12. Phase E 통합 chunk (cross-ref)
+
+> **본 endpoint 의 ted-run 진입 chunk 는 `endpoint-15-ka10014.md` § 12 (Phase E — Migration 016 + 매도 측 시그널 3 endpoint 통합) 참조** — 2026-05-12 추가.
+>
+> ka10014 (공매도) + ka10068 (본 endpoint, 시장 대차) + ka20068 (종목 대차) 3 endpoint 를 사용자 결정으로 통합 1 chunk 로 동시 ted-run. 결정 사항 (Migration 016 / scope 분기 / cron 시간 07:45 KST / NXT 정책 / scheduler_enabled / partial 임계치 등) 과 self-check (H-1~H-13) 와 DoD 는 모두 `endpoint-15-ka10014.md` § 12 에 단일 진실 출처로 작성됨. 본 endpoint 의 § 1~11 본문은 그대로 ted-run 입력.

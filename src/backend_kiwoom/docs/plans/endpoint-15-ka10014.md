@@ -1067,3 +1067,165 @@ async def test_real_ka10014():
 ---
 
 _Phase E 의 첫 endpoint, 그리고 매도 측 시그널의 raw source. 본 endpoint 가 안정 작동하면 ka10068 (대차) + ka10086 (신용) 와 결합한 종합 매도 압력 시그널 분석 가능. ka10068/ka20068 은 본 계획서의 패턴 복제 (시장 단위 / 종목 단위 차이만)._
+
+---
+
+## 12. Phase E — Migration 016 + 매도 측 시그널 3 endpoint 통합 (통합 chunk)
+
+> **추가일**: 2026-05-12 (KST) — Phase D-1 ka20006 (`249c277`) + 메타 갱신 (`3954185`) 종결 후
+> **분류**: feat (3 endpoint 신규 + Migration 1 — 2 테이블)
+> **선행 조건**: Phase D-1 종결 / 9 scheduler 활성 / 12/25 endpoint
+> **scheduler_enabled 상태**: env override 로 활성 보류 가능 (§ 36 정책 일관 — `SCHEDULER_SHORT_SELLING_SYNC_ENABLED` / `SCHEDULER_LENDING_MARKET_SYNC_ENABLED` / `SCHEDULER_LENDING_STOCK_SYNC_ENABLED` 3 env 신규)
+
+### 12.1 배경 (Phase E 진입)
+
+12 endpoint 완료 (Phase D-1 ka20006 종결) 후 **매도 측 시그널 wave** (Phase E) 진입. 사용자 결정 (2026-05-12): 통합 1 chunk — ka10014 (공매도) + ka10068 (시장 대차) + ka20068 (종목 대차) 동시 ted-run.
+
+3 endpoint 의 공통점:
+- **카테고리 = 매도 측 시그널** (공매도 raw + 대차 거시 + 대차 종목별) — derived feature 종합 매도 압력
+- **Migration 1건** (`short_selling_kw` + `lending_balance_kw` 2 테이블 동시) — endpoint-15/16/17 § 5.1 의 "Migration 006" 의도 그대로, 본 chunk 에서 016 으로 발번
+- **Adapter 2 클라이언트** — `KiwoomShortSellingClient` (`/api/dostk/shsa`) + `KiwoomLendingClient` (`/api/dostk/slb`) — ka10068/ka20068 동일 클래스 (다른 메서드)
+- **scope 분기 패턴** — lending_balance_kw 의 `scope=MARKET/STOCK` partial unique index 2 + CHECK constraint — endpoint-16 § 5.1 의 결정
+
+### 12.2 결정 (ADR-0001 § 40 신규 예정)
+
+| # | 사안 | 결정 | 근거 |
+|---|------|------|------|
+| 1 | 마이그레이션 번호 | **016** (015 sector_price_daily 직후). revision id = `016_short_lending` (15 chars — VARCHAR(32) 안전) | 015 마지막 + endpoint-15/16/17 § 5.1 모두 "Migration 006" → 본 chunk 통합 016 |
+| 2 | 신규 테이블 통합 | **2 테이블 (short_selling_kw + lending_balance_kw) 1 마이그레이션** — 015 단일 테이블과 다른 패턴. 두 테이블 의미상 동일 wave (매도 측 시그널) 라 통합 합리 | endpoint-15 § 5.1 + endpoint-16 § 5.1 (lending 은 scope=MARKET/STOCK 단일 테이블) |
+| 3 | lending 의 scope 분기 | **partial unique index 2 + CHECK constraint** — `uq_lending_market_date (scope, trading_date) WHERE scope='MARKET'` / `uq_lending_stock_date (scope, stock_id, trading_date) WHERE scope='STOCK'` + `chk_lending_scope` | endpoint-16 § 5.1 결정 그대로 |
+| 4 | NXT 정책 (3 endpoint 별) | ka10014=**시도** (Length=20, 빈 응답 정상) / ka10068=**미적용** (시장 단위, mrkt_tp 없음) / ka20068=**KRX only** (Length=6 명세, NXT 시도 운영 검증 후 재검토) | endpoint-15 § 4 / endpoint-16 § 4 / endpoint-17 § 4 종합. ka20068 NXT skip = 본 chunk 디폴트 |
+| 5 | cron 시간 (3 job 신규) | **§ 35 새벽 cron 정책 일관** — short_selling_sync_daily=**평일 07:30 KST** / lending_market_sync_daily=**평일 07:45 KST** / lending_stock_sync_daily=**평일 08:00 KST** | plan doc 의 19:45 / 20:00 / 20:30 안 (시간외 마감 직후) 은 § 35 (2026-05-12) NXT 마감 후 새벽 cron 일관 정책과 충돌 → 본 chunk 에서 변경. sector_daily 07:00 직후 wave |
+| 6 | sync 윈도 | 3 endpoint 모두 **1주** (T-7 ~ T) | endpoint-15 / 16 / 17 § 11.1 default |
+| 7 | 백필 윈도 | **3년** 통일 — `scripts/backfill_short.py` + `scripts/backfill_lending.py` + `scripts/backfill_lending_stock.py` 3 CLI 신규 (본 chunk 는 코드만, 실 백필은 별도 운영 chunk) | ka10081 / ka20006 통일 |
+| 8 | scheduler_enabled 활성 보류 | env override 로 보호 — 3 env 신규 (§ 36 fail-fast 정책 일관) | § 36 정책 + sector_daily 패턴 |
+| 9 | ka10014 NXT 빈 응답 처리 | **정상 처리** (warning 안 함) — NXT 공매도 미지원 가능성 (endpoint-15 § 11.2). partial 실패율 임계치는 NXT 빈 응답 제외 | master.md § 6.4 NXT 정책 일관 |
+| 10 | partial 실패 임계치 | short_selling: **5%/15%** (warning/error) / lending_market: **N/A** (단일 호출) / lending_stock: **5%/15%** | endpoint-15 § 8.1 / endpoint-17 § 8 기본값 |
+
+### 12.3 영향 범위 (15 코드 + 8 테스트)
+
+**코드 (15 files)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `migrations/versions/016_short_lending.py` (신규) | short_selling_kw (UNIQUE stock_id+trading_date+exchange + idx_short_selling_kw_weight_high partial) + lending_balance_kw (partial unique 2 + CHECK constraint + scope 컬럼 + idx_lending_*) — 2 테이블 1 마이그레이션 |
+| 2 | `app/adapter/out/persistence/models/short_selling_kw.py` (신규) | ORM (stock_id FK + exchange + close/prev_compare/change_rate + short_volume / cumulative / weight Numeric / amount / avg_price BIGINT) |
+| 3 | `app/adapter/out/persistence/models/lending_balance_kw.py` (신규) | ORM (scope + stock_id NULL 가능 + contracted/repaid/delta/balance volume + balance_amount BIGINT + partial unique index 2 + CHECK constraint) |
+| 4 | `app/adapter/out/persistence/models/__init__.py` | export 2건 추가 |
+| 5 | `app/adapter/out/kiwoom/shsa.py` (신규) | `KiwoomShortSellingClient.fetch_trend` (ka10014, `/api/dostk/shsa`, KRX + NXT) + 빈 응답 sentinel break |
+| 6 | `app/adapter/out/kiwoom/slb.py` (신규) | `KiwoomLendingClient.fetch_market_trend` (ka10068) + `fetch_stock_trend` (ka20068) — 동일 클래스 2 메서드 (`/api/dostk/slb`) |
+| 7 | `app/adapter/out/kiwoom/_records.py` | ka10014: `ShortSellingRow` / `Response` / `NormalizedShortSelling` / `ShortSellingTimeType` enum + ka10068/ka20068: `LendingMarketRow` / `LendingStockRow` / 2 Response / `NormalizedLendingMarket` / `LendingScope` enum (총 9 신규) |
+| 8 | `app/adapter/out/persistence/repositories/short_selling.py` (신규) | `ShortSellingKwRepository.upsert_many` + `get_high_weight` 시그널 추출 |
+| 9 | `app/adapter/out/persistence/repositories/lending_balance.py` (신규) | `LendingBalanceKwRepository.upsert_market` + `upsert_stock` + `get_market_range` + `get_stock_range` |
+| 10 | `app/application/service/short_selling_service.py` (신규) | `IngestShortSellingUseCase` + `IngestShortSellingBulkUseCase` (KRX + NXT 분기 + nxt_enable 게이팅 + partial 임계치 + NXT 빈 응답 warning skip) |
+| 11 | `app/application/service/lending_service.py` (신규) | `IngestLendingMarketUseCase` (단일 호출) + `IngestLendingStockUseCase` + `IngestLendingStockBulkUseCase` (active 종목 iterate + lookup_use_case lazy fetch) |
+| 12 | `app/adapter/web/routers/short_selling.py` (신규) | POST refresh 단건 + POST sync bulk + GET range + admin API key 보호 |
+| 13 | `app/adapter/web/routers/lending.py` (신규) | POST market + POST stock/{code} + POST stock/sync + GET 2 + admin API key 보호 |
+| 14 | `app/scheduler.py` | 3 job 신규 — short_selling_sync_daily (07:30) / lending_market_sync_daily (07:45) / lending_stock_sync_daily (08:00) KST mon-fri. lifespan alias 3건 |
+| 15 | `app/config/settings.py` + `app/main.py` | settings 6 env (3 enabled + 3 alias) + main 라우터 include 2건 + factory + scheduler alias 3건 |
+
+**테스트 (8 신규)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `tests/test_migration_016.py` (신규) | 015 패턴 1:1 — short_selling_kw + lending_balance_kw 2 테이블 / 컬럼 타입 / FK / partial unique / CHECK constraint / 인덱스 |
+| 2 | `tests/test_kiwoom_shsa_client.py` (신규) | ka10014 — 정상 / 페이지네이션 / 빈 list / return_code != 0 / 401 / stk_cd invalid / NXT build / tm_tp 분기 / 부호 포함 / 페이지 폭주 |
+| 3 | `tests/test_kiwoom_slb_client.py` (신규) | ka10068 / ka20068 — 시장 / 종목 메서드 분리 / 정상 / 페이지네이션 / 빈 / return_code != 0 / Length=6 차단 / 부호 / 페이지 폭주 |
+| 4 | `tests/test_short_selling_service.py` (신규) | UseCase — INSERT / UPDATE 멱등성 / KRX+NXT 분리 적재 / nxt_enable=false skip / 빈 응답 warning 안 함 / Bulk 50 batch / partial 임계치 |
+| 5 | `tests/test_lending_service.py` (신규) | UseCase — MARKET INSERT / UPDATE / STOCK INSERT / UPDATE / MARKET+STOCK 분리 / CHECK constraint 위반 / Bulk 50 batch |
+| 6 | `tests/test_short_selling_repository.py` (신규) | upsert_many 멱등성 / ON CONFLICT / exchange 컬럼 분리 / idx_short_selling_kw_weight_high partial index 검증 |
+| 7 | `tests/test_lending_repository.py` (신규) | upsert_market (stock_id NULL) / upsert_stock (FK) / partial unique 충돌 분리 / CHECK constraint / get_market_range / get_stock_range |
+| 8 | `tests/test_scheduler_phase_e.py` (신규 또는 기존 통합) | 3 job 등록 / CronTrigger 시간 검증 / 3 enabled env / 3 alias fail-fast |
+
+**DTO + Settings (보조)**:
+- `app/application/dto/short_selling.py` (신규) — `IngestShortSellingInput` / `ShortSellingIngestOutcome` / `ShortSellingBulkResult`
+- `app/application/dto/lending.py` (신규) — `IngestLendingMarketInput` / `IngestLendingStockInput` / 2 Outcome / Bulk
+- `app/main.py` — short_selling / lending 라우터 include + factory dependency injection
+
+**문서**:
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 40 신규 (Phase E 결과)
+- `CHANGELOG.md` / `STATUS.md` § 0 / § 1 / § 2 / § 5 / § 6 / `HANDOFF.md` / 본 doc § 12 (자기 참조)
+- `src/backend_kiwoom/docs/plans/endpoint-16-ka10068.md` + `endpoint-17-ka20068.md` 끝에 cross-ref 노트 ("Phase E 통합 chunk = endpoint-15 § 12 참조")
+- `src/backend_kiwoom/docs/plans/master.md` 의 ka10014 / ka10068 / ka20068 row 갱신
+
+### 12.4 적대적 이중 리뷰 — 사전 self-check (ted-run 진입 전)
+
+| # | 위험 | 완화 |
+|---|------|------|
+| H-1 | scope 분기 partial unique 의 PostgreSQL 호환성 (Migration 016) | `postgresql_where=text(...)` 패턴. testcontainers PG16 에서 검증. CHECK constraint 도 동일. endpoint-16 § 5.2 의 ORM 패턴 그대로 |
+| H-2 | NXT 정책 3 endpoint 별 다른 — UseCase 분기 누락 시 잘못된 호출 발생 | ka10014 = `should_call_nxt(stock)` 체크 (기존 nxt_enable 게이팅 재사용) / ka10068 = NXT 분기 자체 없음 (시장 단위) / ka20068 = `if env == "prod" and stock.nxt_enable:` 가드 + Length=6 명세 → 본 chunk 디폴트 KRX only |
+| H-3 | cron 시간 07:30 / 07:45 / 08:00 — 06:30 daily_flow 의 long-running sync (~3시간 추정) 와 KRX rate limit (2초/호출) 경합 | sector_daily (07:00) 와 동일 가정 — 기존 KRX lock 으로 직렬화. 단, **3 신규 cron 누적 → 30~120분 sync × 3** 부담. 운영 첫 발화 시 elapsed 실측 후 재검토. 옵션 (b) — cron 추가 분산 (예: 09:00 / 09:30) |
+| H-4 | ka10014 의 `tm_tp` 의미 미확정 (endpoint-15 § 11.2) — START_ONLY (0) vs PERIOD (1) | 본 chunk 디폴트 PERIOD (응답 기간 보장 + endpoint-15 권장). 운영 검증 후 ADR § 40 운영 결과에 분포 기록. mock 테스트는 두 값 모두 시나리오 |
+| H-5 | ka10014 `ovr_shrts_qty` 누적 의미 — 응답 기간 누적인지 종목 전체 누적인지 | UNIQUE (stock_id, trading_date, exchange) ON CONFLICT UPDATE — 마지막 호출의 strt_dt 기준 누적값. 백테스팅 일관성을 위해 **항상 fixed strt_dt** (예: 그 종목의 최초 상장일 또는 1년 백필 base) 사용. cron 의 1주 윈도는 시그널 추세 측정용 (누적값 자체가 시그널이 아님) |
+| H-6 | ka10068 시장 분리 응답 가능 여부 (KOSPI / KOSDAQ) 운영 검증 미완 | 본 chunk 는 단일 응답 가정 (Excel 명세상 mrkt_tp 없음). 운영 첫 호출 시 KOSPI / KOSDAQ 분리 응답 확인 — 분리 가능 시 별도 chunk (market_code 컬럼 추가). 본 chunk 의 lending_balance_kw 스키마는 market_code 추가 가능성 차단하지 않음 |
+| H-7 | ka20068 stk_cd Length=6 → NXT 호출 시 8자리 (`005930_NX`) 거부 가능 | endpoint-17 § 11.2 — 본 chunk 디폴트 KRX only. UseCase 에서 `should_call_nxt(stock)` 항상 False 반환. NXT 시도 운영 검증 별도 chunk |
+| H-8 | `delta_volume` (체결-상환) 부호 일관성 ka10068 vs ka20068 | 본 chunk 의 ORM 은 BIGINT signed. Excel 예시 `-13717978` (음수 = 상환 > 체결). 정규화 후 ASC ORDER BY 강제. mock 테스트로 부호 일관성 검증 |
+| H-9 | NXT 공매도 데이터 운영 검증 미완 (ka10014) — NXT 거래소 공매도 지원 여부 | NXT 호출 시도 + 빈 응답 / `return_code != 0` 정상 처리 (warning 안 함). partial 임계치는 NXT 빈 응답 제외 (결정 #9) |
+| H-10 | scheduler 9 + 3 = 12 활성 — 가장 많은 cron 부담. KRX rate limit 직렬화 + 06:00 / 06:30 / 07:00 직후 07:30 / 07:45 / 08:00 일관 | 본 chunk 디폴트 활성. env override 로 활성 보류 가능 (결정 #8). 운영 1주 모니터 후 누적 elapsed 측정 — 8시간 (예: 06:00 + 06:30 sync 2~3시간 = 09:30 종료) 초과 시 cron 재배치 |
+| H-11 | 코드 양 — 15 파일 + 8 테스트 (D-1 의 10 파일 + 6 테스트 대비 1.5배) | ted-run scaffolding pass 1회 + domain pass 3회 (3 endpoint) + integration pass 1회 = 5회. 1R CONDITIONAL 가능성 높음 — 2R 진입 가정 (D-1 도 1R CONDITIONAL → PASS 패턴). 풀 ted-run 사이클 견적 ~6~10시간 |
+| H-12 | Migration 016 destructive 가능성 | 신규 테이블 2 + FK + CHECK constraint — 비파괴. entrypoint 자동 마이그레이션 (§ 38.8 #2) 정책 그대로 안전 |
+| H-13 | 1R 통과 후 CRITICAL 누락 가능성 (D-1 의 main.py 통합 라우터 / factory / scheduler / alias 누락 1R CRITICAL 3건 패턴) | self-check 12.3 영향 범위 #15 (`app/main.py`) + #14 (`app/scheduler.py`) + alias 3건 명시. ted-run 1R 시 reviewer 가 통합 누락 검증 우선 |
+
+### 12.5 DoD (Phase E)
+
+**코드**:
+- [ ] Migration 016 (short_selling_kw + lending_balance_kw 2 테이블)
+- [ ] ORM 2 (ShortSellingKw + LendingBalanceKw)
+- [ ] Pydantic 9 (ka10014 3 + ka10068 / ka20068 6) + 2 enum (ShortSellingTimeType + LendingScope)
+- [ ] DTO (short_selling 3 + lending 7)
+- [ ] Adapter 2 (KiwoomShortSellingClient + KiwoomLendingClient 2 메서드)
+- [ ] Repository 2 (ShortSellingKwRepository + LendingBalanceKwRepository 4 메서드)
+- [ ] UseCase 5 (ShortSelling Single + Bulk + Lending Market + LendingStock Single + Bulk)
+- [ ] Router 2 (short_selling.py + lending.py)
+- [ ] Scheduler 3 job + 3 alias + 3 enabled env (KST mon-fri 07:30 / 07:45 / 08:00, scheduler_enabled 정책)
+- [ ] Settings 6 env (3 enabled + 3 alias) + main 라우터 include 2건 + factory
+
+**테스트** (목표: 1097 → ~1175~1200 cases / coverage 유지 ≥ 89%):
+- [ ] `test_migration_016.py` 신규
+- [ ] `test_kiwoom_shsa_client.py` 신규
+- [ ] `test_kiwoom_slb_client.py` 신규
+- [ ] `test_short_selling_service.py` 신규
+- [ ] `test_lending_service.py` 신규
+- [ ] `test_short_selling_repository.py` 신규
+- [ ] `test_lending_repository.py` 신규
+- [ ] `test_scheduler_phase_e.py` 신규 (또는 통합)
+- [ ] `ruff check` + `mypy --strict` PASS
+
+**이중 리뷰**:
+- [ ] 1R PASS (Reviewer: Migration 016 partial unique / scope CHECK + UseCase NXT 분기 3 endpoint 차이 + cron 시간 3 신규 + main 라우터 / factory / scheduler / alias 통합 누락 검증 — D-1 1R CRITICAL 패턴 사전 차단)
+
+**문서**:
+- [ ] ADR-0001 § 40 추가 (Phase E 결과 + H-1~H-13 self-check 반영)
+- [ ] STATUS.md § 0 / § 1 / § 2 / § 5 / § 6 갱신 (Phase E 진입 + ka10014 / ka10068 / ka20068 → 완료 + 15/25 endpoint)
+- [ ] CHANGELOG: `feat(kiwoom): Phase E — ka10014 + ka10068 + ka20068 매도 측 시그널 wave (Migration 016, 15/25 endpoint)`
+- [ ] HANDOFF.md 갱신
+- [ ] endpoint-16-ka10068.md + endpoint-17-ka20068.md cross-ref 노트
+- [ ] master.md § 3 endpoint 카탈로그 갱신 (ka10014 / ka10068 / ka20068 row)
+
+### 12.6 다음 chunk (Phase E 이후)
+
+1. **(5-13 06:00 발화 직후) cron 첫 발화 검증** — D-1 의 06:00 / 06:30 / 07:00 cron. 본 chunk 의 07:30 / 07:45 / 08:00 cron 은 첫 발화 = ted-run 종결 후 platform 활성화 시점 결정
+2. **(Phase E 종결 + 운영 첫 호출 후) ADR § 40 운영 결과 채움** — ka10014 tm_tp 분기 / NXT 공매도 응답 / ovr_shrts_qty 누적 / ka10068 시장 분리 / ka20068 NXT Length=6
+3. **Phase F / G / H (순위 / 투자자별 / 통합)** — 신규 endpoint wave (남은 7 endpoint = 25 - 15 - 1 ka10080 보류 - 2 미정)
+4. **(5-19 이후) § 36.5 1주 모니터 측정 채움** — 9 + 3 = 12 scheduler 운영 누적 elapsed
+5. **Phase D-2 ka10080 분봉 (마지막 endpoint)** — Phase F / G / H 완주 후. 대용량 파티션 결정 chunk 선행
+6. **(전체 개발 종결 후) secret 회전** — `docs/ops/secret-rotation-2026-05-12.md` 절차서
+
+### 12.7 운영 모니터 (코드 외, 본 chunk 직후 사용자 확인)
+
+Phase E ted-run 완료 + 컨테이너 재배포 후 다음 항목을 ADR § 40 운영 결과에 누적:
+
+- [ ] **첫 호출 ka10014 (수동 trigger)**: `POST /api/kiwoom/short-selling/stock/{code}/refresh?start=&end=` — 005930 단건 호출 성공 + DB upsert 확인
+- [ ] **첫 호출 ka10068 (수동 trigger)**: `POST /api/kiwoom/lending/market?start=&end=` — 단일 호출 성공 + scope=MARKET row upsert
+- [ ] **첫 호출 ka20068 (수동 trigger)**: `POST /api/kiwoom/lending/stock/{code}?start=&end=` — 005930 단건 호출 성공 + scope=STOCK row upsert
+- [ ] **ka10014 tm_tp 의미 확정**: START_ONLY (0) vs PERIOD (1) 응답 차이 (row 수 / 일자 분포)
+- [ ] **ka10014 NXT 공매도 응답 가능 여부**: NXT 거래소 공매도 데이터 존재 / `return_code != 0` 빈도
+- [ ] **ka10068 시장 분리 응답**: KOSPI / KOSDAQ 분리 응답 vs 통합 응답
+- [ ] **ka20068 NXT Length=6 vs 8 처리**: `005930_NX` 시도 응답 — 거부 시 본 chunk 의 KRX only 유지 / 허용 시 별도 chunk
+- [ ] **ovr_shrts_qty 누적 의미** (ka10014): 같은 일자 row 의 strt_dt 다른 호출 결과 비교
+- [ ] **delta_volume 부호 일관성** (ka10068 vs ka20068)
+- [ ] **balance_amount 단위 확정** (ka10068 / ka20068): 백만원 vs 원
+- [ ] **cron 07:30 / 07:45 / 08:00 KST 발화 (별도 활성 chunk 후)**: 06:00 / 06:30 / 07:00 직후 KRX rate limit 경합 elapsed 실측 (H-3 / H-10)
+- [ ] **active 3000 종목 sync 실측 시간** (ka10014 + ka20068 각각): 30~60분 추정 정확성
+
+---
