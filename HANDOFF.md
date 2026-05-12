@@ -1,53 +1,52 @@
 # Session Handoff
 
-> Last updated: 2026-05-12 (KST, /handoff) — Docker 컨테이너 배포 (kiwoom-app, ADR § 38).
+> Last updated: 2026-05-12 (KST) — Phase D 진입 / ka20006 plan doc § 12 작성 (D-1 chunk).
 > Branch: `master`
-> Latest commit: `550bee5` (Docker 배포 — Dockerfile / entrypoint / uv.lock / compose / ADR § 38)
-> 미푸시 commit: **3 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `550bee5` Docker 배포 — 사용자 명시 요청 시 push)
+> Latest commit: `<this commit>` (Phase D-1 ka20006 plan doc § 12 + STATUS/HANDOFF 갱신)
+> 미푸시 commit: **5 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `550bee5` Docker 배포 + `39ca7a3` secret 회전 절차서 + `<this commit>` D-1 plan doc — 사용자 명시 요청 시 push)
 
 ## Current Status
 
-**kiwoom-app 컨테이너 운영 진입** — § 36 scheduler 활성 후 사용자 앱 재시작 필요했으나 backend_kiwoom 의 운영 인프라가 미완성 상태였음. 본 chunk 에서 Dockerfile + entrypoint + uv.lock + compose service 일괄 구축 + 빌드 + 기동 검증.
+**Phase D 진입** — Phase C 데이터 측면 종결 + § 38 Docker 컨테이너 배포 + § 39-prep secret 회전 절차서 정리 후 Phase D 첫 endpoint 진입. 사용자 결정 (5-12): ka10080 분봉은 데이터량 부담으로 마지막 endpoint 로 연기 → ka20006 업종일봉 (가장 가벼움) 이 Phase D 첫 chunk.
 
 **현재 상태**:
-- kiwoom-app container: **Up (healthy)** / 이미지 264MB
-- 8 scheduler 활성 (sector / stock_master / fundamental / ohlcv_daily / daily_flow / weekly / monthly / yearly) — cron 시각 모두 정확
-- /health: `{"status":"ok"}` / TZ: Asia/Seoul (KST 정확)
-- **5-13 (수) 06:00 KST OhlcvDaily 첫 발화 예정**
+- kiwoom-app container: **Up (healthy)** / 이미지 264MB / 8 scheduler 활성
+- 5-13 (수) 06:00 KST OhlcvDaily 첫 발화 예정 (cron 발화 검증과 D-1 ted-run 병행 가능)
+- **ka20006 plan doc § 12**: 9 결정 + 13 self-check + DoD 10 코드 6 테스트 = ted-run 진행 대기
+- 코드 변경 0 (plan doc chunk) / 1059 tests 그대로 / coverage 91% 그대로
 
 ## Completed This Session
 
 | # | Task | 결과 | Files |
 |---|------|------|-------|
 | 1 | 5-11 NXT 보완 백필 + 검증 + ADR § 37 + commit | NXT 74 → 628 / 0 failed / 21m 6s | 4 / `00ac3b0` + `bdc6aef` |
-| 2 | 다음작업 분석 → 앱 재시작 → Docker 인프라 결정 (옵션 C) | 7 follow-up 옵션 비교 + 컨테이너 인프라 chunk 선택 | 0 |
-| 3 | Phase 1 — 사전 분석 + plan doc | pyproject 의존성 / lifespan / Settings env_file / DB hostname 영향 면 | 1 (plan doc) |
-| 4 | Phase 2 — Dockerfile + .dockerignore + entrypoint + uv.lock + compose | multi-stage builder+runtime / non-root / tzdata / SCHEDULER_* env override | 5 |
-| 5 | Phase 3 — 빌드 hang 2건 진단 + 해결 + 기동 + 검증 | credsStore osxkeychain fix / syntax directive 제거 / README COPY 추가 / 264MB / 8 scheduler 활성 | 2 ($HOME/.docker/config.json 외) |
-| 6 | Phase 4 — ADR § 38 + STATUS § 0/§ 4/§ 6 + CHANGELOG + HANDOFF + commit | 본 commit | 4 |
+| 2 | Docker 컨테이너 배포 (kiwoom-app) — Dockerfile/entrypoint/uv.lock/compose/README + ADR § 38 | 이미지 264MB / 8 scheduler 활성 / /health OK / 5-13 06:00 첫 발화 준비 | 7 / `550bee5` |
+| 3 | 5-12 검증 chunk (docker logs + DB row count) | 컨테이너 healthy / 0 ERROR / 5-12 row=0 (cron 미발화 expected — § 35 새벽 cron 정책) | 0 (검증만) |
+| 4 | secret 회전 절차서 작성 + 회전 시점 = 전체 개발 완료 후 (사용자 결정) | 230줄 절차서 + ADR § 38.8 #6/#7 시점 통일 + HANDOFF Pending #2 갱신 | 4 / `39ca7a3` |
+| 5 | 작업 방향 재정렬 (§11 정의 명확화) — 사용자 피드백 수용 후 기존 작업방식 유지 결정 | 메모리 3건 추가 (운영 변경 후행/추천 자제/기존 방식 유지) | 0 (메모리만) |
+| 6 | Phase D-1 ka20006 plan doc § 12 작성 + STATUS/HANDOFF 갱신 + commit | Migration 015 + 인프라 + 자동화 통합 chunk § (9 결정 + 13 self-check + DoD 10 코드 6 테스트) | 3 / `<this commit>` |
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| **1** | **(5-13 06:00 발화 직후) cron 발화 결과 즉시 검증** | **다음 chunk 1순위** | `docker compose logs kiwoom-app` + DB SQL — 5-13 NXT trading_date row count 등 |
-| **2** | **노출된 secret 4건 회전** | **전체 개발 완료 후** | API_KEY/SECRET revoke + Fernet 마스터키 회전 + DB 재암호화 + Docker Hub PAT revoke (ADR § 38.8 #6/#7). **시점 연기**: 2026-05-12 사용자 결정 — `.env.prod` / DB 재암호화 영향이 커서 개발/테스트/검증 종결 후 일괄. **절차서**: [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) |
-| **3** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 정리 | 사용자 직접 | compose env override 로 우회 완료. .env.prod 정리는 별도 |
-| **4** | (5-19 이후) § 36.5 1주 모니터 측정 채움 | 대기 | 컨테이너 로그 기반 cron elapsed / NXT 정상 / failed / 알람 |
-| **5** | Mac 절전 시 컨테이너 중단 → cron 누락 위험 | 사용자 환경 결정 | 절전 차단 또는 서버 이전 (ADR § 38.8 #1) |
-| 6 | Phase D — ka10080 분봉 / ka20006 업종일봉 | 대기 | 대용량 파티션 결정 선행 |
-| 7 | 공휴일 calendar / NXT scheduler 분리 | 대기 | 1주 모니터 후 |
-| 8 | §11 포트폴리오·AI 리포트 (P10~P15) | 대기 | CLAUDE.md next priority |
+| **1** | **Phase D-1 ka20006 ted-run** | **다음 chunk 1순위** | plan doc § 12 완료 (5-12). Migration 015 + ORM + Pydantic + Client + Repo + UseCase + Router + Scheduler + Settings — 10 코드 + 6 테스트. 사용자 검토 + ted-run 진행 결정 |
+| **2** | (5-13 06:30 KST 이후) cron 첫 발화 검증 | 다음 chunk 와 병행 가능 | § 38 다음 chunk (`docker compose logs` + DB SQL) — 검증 SQL 만, 코드 0 |
+| **3** | **노출된 secret 4건 회전** | **전체 개발 완료 후** | API_KEY/SECRET revoke + Fernet 마스터키 회전 + DB 재암호화 + Docker Hub PAT revoke (ADR § 38.8 #6/#7). 시점 연기: 5-12 사용자 결정. **절차서**: [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) |
+| **4** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 정리 | 전체 개발 완료 후 | compose env override 로 우회 완료. `.env.prod` 편집은 secret 회전 chunk 와 동일 시점 일괄 |
+| **5** | (5-19 이후) § 36.5 1주 모니터 측정 채움 | 대기 | 컨테이너 로그 기반 cron elapsed / NXT 정상 / failed / 알람 |
+| **6** | Mac 절전 시 컨테이너 중단 → cron 누락 위험 | 사용자 환경 결정 | 절전 차단 또는 서버 이전 (ADR § 38.8 #1) |
+| 7 | Phase D-2 ka10080 분봉 (**마지막 endpoint**) | 대기 | 사용자 결정 (5-12) — 데이터량 부담. 대용량 파티션 결정 동반 |
+| 8 | 공휴일 calendar / NXT scheduler 분리 | 대기 | 1주 모니터 후 |
+| 9 | §11 포트폴리오·AI 리포트 (P10~P15) | 대기 | CLAUDE.md next priority — KIS + DART + OpenAI 기반. backend_kiwoom 의 §11 본업 진입은 25 endpoint 완주 또는 사용자 명시 결정 후 |
 
 ## Key Decisions Made
 
-1. **Docker 인프라 신규 구축 (옵션 C)** — 단순 "재시작" 이 아니라 backend_kiwoom 앱 운영 인프라 신규 구축. plan doc + Dockerfile + entrypoint + uv.lock + compose service + README 전부 작성.
-2. **builder + runtime 2-stage Dockerfile** — python:3.12-slim + uv `--frozen` + non-root uid 1001 + tzdata Asia/Seoul. 이미지 264MB.
-3. **자동 alembic 마이그레이션 (entrypoint)** — 014 까지 idempotent + 비파괴 → 기동마다 자동 적용 안전. destructive migration 도입 시 분리 (§ 38.8 #2).
-4. **uvicorn `--workers 1`** — APScheduler 중복 발화 방지. 처리량 한계 도달 시 외부 scheduler 별도 chunk.
-5. **DB hostname compose environment override** — `.env.prod` 의 `localhost:5433` 은 호스트 스크립트용 유지 + 컨테이너는 `kiwoom-db:5432` override. pydantic-settings 우선순위 (OS env > .env > .env.prod) 활용.
-6. **credsStore osxkeychain** — Docker Desktop credential helper hang 회피. 사용자 `~/.docker/config.json` 갱신.
-7. **`.env.prod` env_prefix 불일치 우회** — compose `environment:` 에 `SCHEDULER_*` 8 env 명시. `.env.prod` 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 는 `extra="ignore"` 로 무시. 사용자 정리는 별도 (§ 38.8 #5).
+1. **secret 회전 시점 = 전체 개발 완료 후** (5-12 사용자 결정) — `.env.prod` 편집 + Fernet 마스터키 교체 + DB 재암호화 + 컨테이너 재기동 운영 영향 큼. 절차서 작성 후 연기. [[feedback-ops-changes-after-dev]] 첫 적용.
+2. **기존 작업 방식 유지** (5-12 사용자 결정) — backend_kiwoom 25 endpoint 풀 카탈로그 + ted-run 풀 파이프라인 + ADR/STATUS/HANDOFF/CHANGELOG 3종 갱신. 사용자 답답함 표현 후에도 "느리더라도 이대로". [[feedback-keep-existing-workflow]]
+3. **Phase D-2 ka10080 분봉 = 마지막 endpoint** (5-12 사용자 결정) — 데이터량 부담 (1100종목 × 380분 = 38만+ rows/일). Phase E/F/G/H 의 모든 endpoint 완주 후 마지막에. 대용량 파티션 결정 동반 chunk 로 분리.
+4. **Phase D 첫 endpoint = ka20006 (가장 가벼움)** — 50~80 sector × 1 일봉. ka10081/82/83/94 chart 패턴 1:1 응용 + sector_id FK + NXT skip 단순화.
+5. **ka20006 9개 결정** (plan doc § 12.2) — Migration 015 / sector_id FK (UNIQUE = `(market_code, sector_code)` 페어 발견) / centi BIGINT / NXT skip / sector_master_missing 가드 / cron mon-fri 07:00 KST (§ 35 새벽 cron 일관) / 백필 3년 / UseCase 입력 sector_id / chart.py 통합.
 
 ## Known Issues
 
@@ -56,9 +55,11 @@
 | 13 | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 → § 36 / § 38 | 🔄 활성 완료 — 5-13 첫 발화 / 5-19 이후 측정 |
 | 20 | NXT 우선주 sentinel 빈 row 1개 detection | § 32.3 + § 33.6 | LOW — 운영 영향 0 |
 | ~~21~~ | ~~5-11 NXT 74 rows 보완~~ | § 35.8 | ✅ 해소 (`00ac3b0`) |
-| **22** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 잘못된 prefix | § 38.6.2' | 사용자 직접 (compose env override 로 우회) |
+| **22** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 잘못된 prefix | § 38.6.2' | **전체 개발 완료 후** (5-12) — secret 회전 chunk 와 동일 시점 일괄 (`.env.prod` 편집 운영 영향) |
 | **23** | 노출된 secret 4건 회전 | § 38.8 #6/#7 | **전체 개발 완료 후** (5-12 사용자 결정) — 절차서 [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) 작성됨 |
 | **24** | Mac 절전 시 컨테이너 중단 → cron 누락 | § 38.8 #1 | 사용자 환경 결정 |
+| **25** | ka20006 cron 07:00 KST vs 06:30 daily_flow KRX rate limit 경합 | D-1 plan doc § 12.4 H-5 | ted-run 시 기존 KRX lock 으로 직렬화 안전 가정. 운영 첫 발화 시 elapsed 실측 후 재검토 |
+| **26** | ka20006 100배 값 가정 운영 검증 미완 | D-1 plan doc § 12.4 H-2 + § 11.2 | ted-run 후 첫 호출 시 KOSPI 종합 응답값 / 100 ≈ 실제 KOSPI 지수 일치 확인. ADR § 39 운영 결과 § 에 기록 |
 
 ## Context for Next Session
 

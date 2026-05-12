@@ -7,6 +7,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] docs(plan): Phase D-1 ka20006 plan doc § 12 + STATUS/HANDOFF 갱신 (ted-run 대기)
+
+§ 38 Docker 배포 + § 39-prep secret 회전 절차서 작성 후 Phase D 진입. ka10080 분봉은 사용자 결정 (5-12) 으로 마지막 endpoint 로 연기 → ka20006 업종일봉 (가장 가벼운 endpoint) 이 Phase D 첫 chunk. 본 chunk 는 ted-run 진입 전 plan doc § 12 작성 + STATUS/HANDOFF 갱신.
+
+### 1. 신규 / 갱신 파일
+
+- **갱신** `src/backend_kiwoom/docs/plans/endpoint-13-ka20006.md` — § 12 신규 (Migration 015 + 인프라 + 자동화 통합 chunk). 953 → ~1160줄. 9 결정 + 13 self-check + DoD 10 코드 6 테스트 + 다음 chunk + 운영 모니터
+- **갱신** `src/backend_kiwoom/STATUS.md` — § 0 (Phase D 진입 / 마지막 chunk / 다음 chunk) / § 1 (Phase D 진척 🔄 + D-1 plan doc ✅) / § 2.2 (ka20006 진행중 1건 추가) / § 2.3 (ka10080 연기 표기) / § 5 (D-1 ted-run 1순위) / § 6 (chunk 2건 추가 — secret 회전 절차서 + 본 plan doc)
+- **갱신** `HANDOFF.md` — Last updated / Current Status (Phase D 진입) / Completed 6건 (5-11 NXT 보완 / Docker 배포 / 5-12 검증 / secret 절차서 / 방향 재정렬 / 본 chunk) / Pending 9건 재구성 (D-1 ted-run 1순위) / Key Decisions 5건 / Known Issues 2건 추가 (#25 KRX rate limit 경합 / #26 100배 값 가정)
+
+### 2. 핵심 결정 9건 (plan doc § 12.2)
+
+| # | 결정 |
+|---|------|
+| 1 | Migration **015** (`015_sector_price_daily`, 22 chars) |
+| 2 | sector 매핑 = **`sector_id` FK** (sector.py L31 의 UNIQUE `(market_code, sector_code)` 페어 발견 → `inds_cd` 단독 lookup 불가) |
+| 3 | 100배 값 = **centi BIGINT** + read property (KRX 정수 단위 일관) |
+| 4 | NXT 호출 = **skip** (`nxt_sector_not_supported`) |
+| 5 | sector_master_missing 가드 (gap-filler 미적용) |
+| 6 | 응답 7 필드 (pred_pre / pred_pre_sig / trde_tern_rt 부재 → None 영속화) |
+| 7 | cron = **mon-fri 07:00 KST** (§ 35 새벽 cron 정책 일관, ohlcv_daily 06:00 + daily_flow 06:30 직후) |
+| 8 | 백필 윈도 = **3년** (`scripts/backfill_sector.py` CLI 신규) |
+| 9 | UseCase 입력 = **sector_id** (PK) — sector_code 단독 충돌 가능성 차단 |
+
+### 3. 적대적 self-check 13건 (plan doc § 12.4)
+
+H-1 sector 매핑 정확성 / H-2 100배 값 가정 운영 미검증 / H-3 list key `inds_dt_pole_qry` 미검증 / H-4 upd_stkpc_tp 부재 자체 보정 가정 / H-5 cron 07:00 KRX rate limit 경합 / H-6 sector_master_missing 가드 / H-7 NXT skip 정책 정확성 / H-8 페이지네이션 미정량화 / H-9 inds_cd length 응답 vs 요청 / H-10 거래대금 단위 백만원 가정 / H-11 scheduler_enabled 정책 일관성 / H-12 Migration 015 비파괴 / H-13 chart.py 통합 vs sect.py 분리
+
+### 4. 영향
+
+- 코드 변경 0 (plan doc / 갱신 문서만)
+- 테스트 1059 그대로 / coverage 91% 그대로
+- 다음 chunk = D-1 ted-run 풀 파이프라인 (TDD → 구현 → 1R → Verification → ADR § 39 → 커밋)
+
+---
+
 ## [2026-05-12] docs(ops): secret 회전 절차서 + 회전 시점 = 전체 개발 완료 후 (사용자 결정)
 
 § 38 Docker 배포 후 새벽 검증 전 chunk 결정. ADR § 38.8 #6 (노출 secret 4건) + #7 (Docker Hub PAT) 의 회전 절차서를 작성하면서, 회전 실행 시점은 사용자 결정에 따라 "전체 개발 / 테스트 / 검증 종료 후" 로 연기.

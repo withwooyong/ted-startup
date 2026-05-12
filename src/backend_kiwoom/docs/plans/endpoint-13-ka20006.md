@@ -951,3 +951,145 @@ async def sync_all_sector_ohlcv(session: AsyncSession, base_date: date) -> None:
 ---
 
 _Phase D 의 세 번째이자 마지막 endpoint. 가장 가벼운 호출 부담 + 가장 단순한 로직. 단, 100배 값 / sector 매핑 / NXT 지수 처리 의 세 결정이 본 endpoint 의 운영 검증 1순위. 백테스팅 엔진의 시장 비교 / 베타 계산 / 섹터 회전 시그널의 입력._
+
+---
+
+## 12. Phase D-1 — Migration 015 + ka20006 인프라 + 자동화 (통합 chunk)
+
+> **추가일**: 2026-05-12 (Docker 배포 § 38 / secret 회전 가이드 § 39-prep 직후, Phase D 진입 chunk)
+> **선행 조건**: Phase C 종결 (C-4 `00ac3b0` + Docker 배포 `550bee5`) + ka10101 sector 마스터 운영 (A-3α/β `cce855c`/`6cd4371`)
+> **분류**: feat (신규 endpoint 도입 + Migration 1 + 응답 DTO 신규). 신규 도메인 (sector daily) — KRX only, NXT skip
+> **scheduler_enabled 상태**: 사용자 결정으로 활성 보류 — Scheduler job 등록 코드만, 실 가동은 모든 작업 완료 후 일괄 활성
+
+### 12.1 배경 (Phase D 진입)
+
+11 endpoint (au 2 + ka 9) 완료 후 Phase C 데이터 측면 종결 + § 38 Docker 컨테이너 배포로 운영 인프라 안착. Phase D 의 3 endpoint 중 사용자 결정 (2026-05-12):
+
+- **ka10080 분봉 (D-2)**: 데이터량 많음 (1100종목 × 380분 = 38만+ rows/일) → **마지막 endpoint 로 연기**. 대용량 파티션 결정 동반 필요
+- **ka20006 업종일봉 (D-1)**: 가장 가벼움 (50~80 sector × 1 = 50~80 rows/일) → **본 chunk 가 Phase D 첫 진입**
+
+ka10081/82/83/94 (4 chart endpoint) 패턴 + ka10101 sector 마스터 매핑이 모두 확립된 상태 → Phase C 기반의 패턴 복제 + 응답 7 필드 (10 → 7) + sector_id FK + NXT skip 만 핵심 차이.
+
+### 12.2 결정 (ADR-0001 § 39 신규 예정)
+
+| # | 사안 | 결정 | 근거 |
+|---|------|------|------|
+| 1 | 마이그레이션 번호 | **015** (014 yearly 직후). revision id = `015_sector_price_daily` (22 chars — VARCHAR(32) 안전) | 014 마지막 + naming 일관 |
+| 2 | sector 매핑 정책 | **`sector_id` FK** (sector.id) — § 11.1 #2 옵션의 발전형. 운영 검증 결과 sector UNIQUE = `(market_code, sector_code)` 페어 → `inds_cd` (sector_code) 단독으론 매핑 불가 | sector.py L31 `uq_sector_market_code (market_code, sector_code)` |
+| 3 | 100배 값 저장 형식 | **centi BIGINT** (`open_index_centi` / `high_index_centi` / `low_index_centi` / `close_index_centi`) + read property (`.close_index = close_index_centi / 100`) | § 11.1 #1 옵션 (a). KRX 정수 단위와 일관 (`stock_price_krx` 의 BIGINT 패턴) |
+| 4 | NXT 호출 정책 | **skip** (KRX only) — UseCase 에서 `SectorIngestOutcome(skipped=True, reason="nxt_sector_not_supported")` 반환. NXT 별도 지수 산출 여부 미확정 + Excel 명세 R10 "모의투자 KRX 만" | § 11.1 #4 옵션 (a) — 운영 검증 후 재검토 |
+| 5 | sector 마스터 ka10101 응답에 본 endpoint 호출 대상 sector 가 부재한 경우 | UseCase 에서 `SectorIngestOutcome(skipped=True, reason="sector_master_missing")` 반환 + 경고 로그. gap-filler 호출 안 함 (ka10100 같은 종목 단위 패턴 미적용 — sector 는 마스터 sync 가 선행) | sync 흐름 자연 보장 (cron 시각 19:15 vs ka10101 sync 18:00 권장) |
+| 6 | 응답 7 필드 처리 | `NormalizedSectorDailyOhlcv` 의 `prev_compare_amount` / `prev_compare_sign` / `turnover_rate` 는 None 영속화 — DB NULL. ka10094 mixin 재사용 가능성 검토 (None 필드 다수 patterns) | § 11.1 mixin 후보 |
+| 7 | cron 시간 | **mon-fri 07:00 KST** (§ 35 cron shift to morning 정책 일관) — ohlcv_daily 06:00 + daily_flow 06:30 의 직후. plan doc § 11.1 #5 의 19:15 안은 § 35 정책과 충돌하므로 본 chunk 에서 변경 | § 35 (2026-05-12) NXT 마감 후 새벽 cron 일관 |
+| 8 | 백필 윈도 | **3년** (ka10081 패턴) — `scripts/backfill_sector.py` CLI 신규. 본 chunk 에서는 코드만, 실 백필은 별도 운영 chunk | § 11.1 #6 옵션 (a) |
+| 9 | `inds_cd` UseCase 입력 | **`Sector.id` (PK) → repository 가 sector_code lookup** — UseCase 는 sector_id 만 받고 client 호출 직전에 sector_code 추출. base_date 와 함께 `IngestSectorDailyInput` DTO | sector_id 가 primary 식별자 (sector_code 단독은 충돌 가능) |
+
+### 12.3 영향 범위 (10 코드 + 6 테스트)
+
+**코드 (10 files)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `migrations/versions/015_sector_price_daily.py` (신규) | `sector_price_daily` 테이블 신규. FK = `sector_id INTEGER REFERENCES kiwoom.sector(id)`. UNIQUE `(sector_id, trading_date)`. DDL 패턴 = 011 (월봉) 응용 |
+| 2 | `app/adapter/out/persistence/models/sector_price_daily.py` (신규) | ORM (sector_id FK + 4 centi BIGINT + volume BIGINT + trade_amount BIGINT + created_at/updated_at) |
+| 3 | `app/adapter/out/persistence/models/__init__.py` | export 추가 |
+| 4 | `app/adapter/out/kiwoom/chart.py` 또는 `sect.py` 분리 (결정 chunk 진입 시) | `KiwoomChartClient.fetch_sector_daily(inds_cd, base_date)` 신규 + 빈 응답 sentinel break (C-flow-empty-fix 1:1) |
+| 5 | `app/adapter/out/kiwoom/_records.py` | `SectorChartRow` / `SectorChartResponse` Pydantic 7 필드 신규 (extra="ignore") + `NormalizedSectorDailyOhlcv` |
+| 6 | `app/adapter/out/persistence/repositories/sector_price.py` (신규) | `SectorPriceDailyRepository.upsert_many(sector_id, rows)` |
+| 7 | `app/application/service/sector_ohlcv_service.py` (신규) | `IngestSectorDailyUseCase` + `IngestSectorDailyBulkUseCase` (active sector 전체 sync) + NXT skip 가드 + sector_master_missing 가드 |
+| 8 | `app/adapter/web/routers/sector_ohlcv.py` (신규) | `POST /api/kiwoom/sectors/{id}/ohlcv/daily/refresh` + `POST /api/kiwoom/sectors/ohlcv/daily/sync` (전체) + admin API key 보호 |
+| 9 | `app/scheduler.py` | `sector_daily_sync_daily` job 신규 (CronTrigger day_of_week=mon-fri hour=7 minute=0 KST). settings + lifespan alias 등록 |
+| 10 | `app/config/settings.py` | `scheduler_sector_daily_sync_alias` 추가 (B/C/D 일관 fail-fast) |
+
+**테스트 (4 신규 + 2 갱신)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `tests/test_migration_015.py` (신규) | 014 패턴 1:1 — sector_price_daily 테이블 생성 / 컬럼 타입 / FK / UNIQUE / 인덱스 검증 |
+| 2 | `tests/test_kiwoom_chart_client.py` 또는 `test_kiwoom_sect_client.py` (신규) | `fetch_sector_daily` 시나리오 — mock 응답 60 row 단일 페이지 / 페이지네이션 / 빈 응답 break / 7 필드 normalize / 자격증명 / 5xx |
+| 3 | `tests/test_sector_ohlcv_service.py` (신규) | UseCase — sector_id lookup + KRX only / sector_master_missing skip / 정상 upsert / cont-yn 페이지네이션 / 100배 값 정규화 |
+| 4 | `tests/test_sector_price_repository.py` (신규) | upsert idempotent / 동일 키 갱신 / FK constraint / UNIQUE 충돌 |
+| 5 | `tests/test_sector_ohlcv_router.py` (신규) | sync 전체 + refresh 단건 + admin API key 검증 |
+| 6 | `tests/test_scheduler_sector_daily.py` 또는 통합 | sector_daily job 등록 / CronTrigger mon-fri 07:00 KST / alias fail-fast |
+
+**Pydantic + Settings (보조)**:
+- `app/application/dto/sector_ohlcv.py` (신규) — `IngestSectorDailyInput` / `SectorIngestOutcome`
+
+**문서**:
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 39 신규 (D-1 결과)
+- `CHANGELOG.md` / `STATUS.md` § 0/§ 1/§ 2/§ 5/§ 6 / `HANDOFF.md` / 본 doc § 12 (자기 참조)
+
+### 12.4 적대적 이중 리뷰 — 사전 self-check (ted-run 진입 전)
+
+| # | 위험 | 완화 |
+|---|------|------|
+| H-1 | sector 매핑 — `(market_code, sector_code)` UNIQUE 라 `inds_cd` 단독 lookup 불가 (§ 11.1 #2) | UseCase 가 sector_id (PK) 만 입력. ka10101 운영 검증 결과 sector_code 가 시장 간 중복 가능 (예: KOSPI 종합=001, KOSDAQ 종합=101 — 다름이지만 미래 발견 가능) → sector_id 가 안전 |
+| H-2 | 100배 값 가정 운영 검증 미완 (§ 11.2) — KOSPI ~50000 / 100 → ~500 실제 일치 여부 | mock 테스트는 가정 그대로 검증. 운영 첫 호출 응답을 ADR § 39 운영 결과에 기록. 잘못 적용 시 centi → NUMERIC 마이그레이션 별도 (회복 가능) |
+| H-3 | 응답 list key `inds_dt_pole_qry` 운영 검증 미완 (§ 11.2) | mock 테스트로 parser 검증. 운영 첫 호출 시 ka10081 `stk_dt_pole_chart_qry` / ka10082 `stk_stk_pole_chart_qry` / ka10083 `stk_mth_pole_chart_qry` / ka10094 `stk_yr_pole_chart_qry` 일관성으로 신뢰성 확보. 다르면 `extra="ignore"` 가 safe |
+| H-4 | upd_stkpc_tp 없음 — 지수 자체 보정 가정 (§ 11.2) | 지수는 시가총액 가중이므로 액면분할에 자동 보정 (KOSPI200 표준). 단, 응답에 보정 전 raw 가 있을 가능성 운영 검증. ADR § 39 운영 결과에 기록 |
+| H-5 | cron 07:00 KST mon-fri — 06:00 ohlcv_daily + 06:30 daily_flow 와 KRX rate limit (2초/호출) 경합 | sector 50~80 호출 × 2초 = 100~160초 = 1.7~2.7분. 06:30 daily_flow 의 sync 시간 (예: 4000+ stocks × 2초 ≈ 2~3시간) 와 겹칠 가능성 높음. **결정 #7 재검토 필요** — 옵션: (a) cron 늦춤 (예: 10:00) (b) Lock 직렬화 신뢰 (현재 KRX rate limit 이미 직렬화) (c) 별도 KRX 클라이언트 인스턴스. 본 chunk 에서는 (b) 채택 — 기존 lock 으로 안전 |
+| H-6 | sector_master_missing 가드 — ka10101 sync 가 선행되지 않은 환경 | bulk UseCase 에서 `active=true` sector 만 iterate → 빈 리스트면 즉시 종료. 단건 UseCase 에서 `sector_id` 조회 결과 없으면 skip 반환. cron 직전 ka10101 자동 sync 안 함 (sector 마스터 안정성 가정) |
+| H-7 | NXT skip 정책 정확성 (§ 11.2) — NXT 거래소가 자체 지수 산출 시점 발생 가능성 | 본 chunk 는 sector_price_daily 단일 테이블 (KRX only). NXT 지수 도입 시 별도 chunk (sector_price_nxt 또는 nxt_sector 별도 마스터) — 본 chunk 의 데이터 모델은 그 가능성 차단하지 않음 |
+| H-8 | 1 페이지 응답 row 수 unknown (§ 11.2 추정 600 거래일) | 페이지네이션 코드는 항상 cont-yn 체크. mock 테스트로 단일 / 다중 페이지 + 빈 응답 break 시나리오 둘 다 검증. 운영 첫 호출 응답을 ADR § 39 에 기록 |
+| H-9 | `inds_cd` 응답 length 20 vs 요청 3 (Excel 명세 vs 실제) | Pydantic `SectorChartRow.inds_cd: str` length 미제약. 응답 길이 확장 가능성 흡수. UseCase 에서 sector_code 와 직접 매칭 (응답 inds_cd 검증은 보조 sanity check 만) |
+| H-10 | 거래대금 `trde_prica` 단위 (§ 11.2 추정 백만원) | ka10081 / 82 / 83 / 94 의 운영 검증 결과 백만원 확정 시점에 ADR 공통 § 으로 기록 권고. 본 chunk 에서는 BIGINT 단위 추정 그대로 + 운영 검증 후 단위 정정 마이그레이션 (필요 시) |
+| H-11 | scheduler_enabled 활성 보류 정책 (§ 36) — 본 chunk 에 신규 cron job 등록 시 일관성 | sector_daily job 도 § 36 정책 따라 등록만 + 실 발화는 일괄 활성 chunk 까지 대기 (현재 8 scheduler 활성 상태이므로 9 scheduler 로 증가). 단, 컨테이너 재기동 시 자동 발화될 수 있음 — `SCHEDULER_SECTOR_DAILY_SYNC_ENABLED=false` env override 로 보호 가능 |
+| H-12 | Migration 015 destructive 가능성 | 신규 테이블 + FK 만 — 비파괴. entrypoint 자동 마이그레이션 (§ 38.8 #2) 정책 그대로 안전 |
+| H-13 | sect.py 분리 vs chart.py 통합 | `KiwoomChartClient` 가 종목 / 지수 둘 다 책임지면 SRP 위반 경계. 그러나 모두 `/api/dostk/chart` 동일 URL — Hexagonal "adapter" 단일성 유지. **결정**: chart.py 통합 + 메서드 명 prefix (`fetch_stock_daily` / `fetch_sector_daily`) 로 구분. sect.py 분리는 본 chunk 외 |
+
+### 12.5 DoD (D-1)
+
+**코드**:
+- [ ] Migration 015 (sector_price_daily 단일 테이블)
+- [ ] ORM 1 (SectorPriceDaily)
+- [ ] Pydantic 3 (SectorChartRow / SectorChartResponse 7 필드 / NormalizedSectorDailyOhlcv)
+- [ ] DTO 2 (IngestSectorDailyInput / SectorIngestOutcome)
+- [ ] `KiwoomChartClient.fetch_sector_daily` + sentinel break
+- [ ] Repository (SectorPriceDailyRepository.upsert_many)
+- [ ] UseCase 2 (Single + Bulk + NXT skip + sector_master_missing 가드)
+- [ ] Router 2 path (refresh 단건 / sync 전체) + admin API key 보호
+- [ ] Scheduler sector_daily_sync_daily job 등록 (mon-fri KST 07:00, scheduler_enabled 정책 적용)
+- [ ] Settings + lifespan alias
+
+**테스트** (목표: 1059 → ~1090~1110 cases / coverage 유지 ≥ 91%):
+- [ ] `test_migration_015.py` 신규
+- [ ] `test_kiwoom_chart_client.py` (또는 sect_client) sector daily 시나리오 추가
+- [ ] `test_sector_ohlcv_service.py` 신규
+- [ ] `test_sector_price_repository.py` 신규
+- [ ] `test_sector_ohlcv_router.py` 신규
+- [ ] `test_scheduler_sector_daily.py` (또는 통합)
+- [ ] `ruff check` + `mypy --strict` PASS
+
+**이중 리뷰**:
+- [ ] 1R PASS (Reviewer: 스키마/마이그레이션 + UseCase sector_id lookup 정확성 + cron 시간 결정 #7 재검증)
+
+**문서**:
+- [ ] ADR-0001 § 39 추가 (D-1 결과 + H-1~H-13 self-check 반영)
+- [ ] STATUS.md § 0 / § 1 / § 2.1 / § 5 / § 6 갱신 (Phase D 진입 + ka20006 → 완료 + 12/25 endpoint)
+- [ ] CHANGELOG: `feat(kiwoom): Phase D-1 — ka20006 sector daily OHLCV (Migration 015, KRX only, NXT skip, 12/25 endpoint)`
+- [ ] HANDOFF.md 갱신
+- [ ] master.md § 의 ka20006 row 갱신 (chunk 명 / 커밋 해시)
+
+### 12.6 다음 chunk (D-1 이후)
+
+1. **(5-13 06:30 KST 이후) cron 첫 발화 검증** — § 38 다음 chunk (OhlcvDaily 06:00 + DailyFlow 06:30 적재)
+2. **(D-1 종결 + ka20006 운영 첫 호출 후) ADR § 39 운영 결과 채움** — 100배 값 / inds_dt_pole_qry list key / page row 수 / inds_cd length 등 § 11.2 운영 검증 항목
+3. **Phase D-2 진입 — ka10080 분봉** (사용자 결정: 마지막 endpoint). 대용량 파티션 결정 chunk 선행 (월/분기 파티션 vs 단일 테이블 vs 별도 스키마)
+4. **Phase E** — ka10014 (공매도) / ka10068 (대차) / ka20068 (대차 종목별) 신규 wave
+5. **(5-19 이후) § 36.5 1주 모니터 측정 채움** — 현재 8 + sector_daily 1 = 9 scheduler 운영
+6. **(전체 개발 종결 후) secret 회전** — `docs/ops/secret-rotation-2026-05-12.md` 절차서
+
+### 12.7 운영 모니터 (코드 외, 본 chunk 직후 사용자 확인)
+
+D-1 ted-run 완료 + 컨테이너 재배포 후 다음 항목을 ADR § 39 운영 결과에 누적:
+
+- [ ] **첫 호출 (수동 trigger)**: `POST /api/kiwoom/sectors/{id}/ohlcv/daily/refresh` — sector_id=1 (KOSPI 종합) 단건 호출 성공 + DB upsert 확인
+- [ ] **bulk sync (수동 trigger)**: `POST /api/kiwoom/sectors/ohlcv/daily/sync` — active sector 50~80개 일괄 sync 시간 + 0 failed
+- [ ] **100배 값 검증**: KOSPI 종합 응답값 / 100 ≈ 실제 KOSPI 지수 (예: 2700 ± 5%) 일치
+- [ ] **응답 필드 검증**: `inds_dt_pole_qry` list key 정확성 / 7 필드 가정 정확성
+- [ ] **페이지네이션 발생 빈도**: 3년 백필 시 page 수
+- [ ] **cron 07:00 KST 발화 (별도 활성 chunk 후)**: 06:30 daily_flow 와 KRX rate limit 경합 실측 (H-5)
+
+---
+
+_Phase D 진입 chunk. ka10080 분봉을 사용자 결정으로 마지막으로 미룬 결과, 가장 가벼운 sector daily 가 Phase D 첫 endpoint. ka10101 의 sector 마스터 + ka10081/82/83/94 의 chart 패턴 + § 35 cron 정책이 모두 확립된 상태라 신규 결정 항목은 9개 (§ 12.2) — 100배 값 / sector_id 매핑 / NXT skip / cron 시간 / 응답 7 필드 / 백필 윈도 / Migration 015 / UseCase 입력 / chart.py 통합. 12/25 endpoint 진입._
