@@ -1,0 +1,49 @@
+# Python 환경
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 테스트 / 캐시
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# 빌드
+build/
+dist/
+*.egg-info/
+
+# 환경변수 — 보안: 이미지에 절대 포함 금지 (env_file 로만 주입)
+.env
+.env.*
+!.env.example
+
+# 로그 (백필 / 운영 로그는 호스트에 남음)
+logs/
+*.log
+
+# 컨테이너에 불필요
+tests/
+docs/
+*.md
+!README.md
+
+# 버전 관리
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 컨테이너 / compose
+Dockerfile
+.dockerignore
+docker-compose*.yml

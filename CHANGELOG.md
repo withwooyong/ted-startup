@@ -7,6 +7,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-12] ops(kiwoom): Docker 컨테이너 배포 — kiwoom-app service (ADR § 38)
+
+§ 36 scheduler 활성 후 사용자 앱 재시작이 필요했으나 backend_kiwoom 의 운영 인프라 자체가 미완성 (Dockerfile 5/7 작성 후 entrypoint 누락, compose 에 앱 service 없음). 사용자 결정 (옵션 C) — docker-compose 새 service 추가 + 컨테이너 운영. 5-13 06:00 KST 첫 cron 발화 전 완성.
+
+### 1. 신규 / 갱신 파일
+
+- **신규** `scripts/entrypoint.py` — `alembic upgrade head` → `os.execvp uvicorn` (workers=1)
+- **신규** `uv.lock` — 87 packages frozen
+- **신규** `docs/plans/phase-c-docker-deploy.md`
+- **갱신** `Dockerfile` — syntax directive 제거 / uv:latest / `--frozen` 추가 / tzdata Asia/Seoul / `COPY README.md`
+- **갱신** `.dockerignore` — .venv / __pycache__ / logs / .env* / tests / docs / *.md 제외 (`!README.md` 예외)
+- **갱신** `docker-compose.yml` — `kiwoom-app` service 추가 (env_file=`../../.env.prod` / `SCHEDULER_*` 8 env override / depends_on kiwoom-db healthy / restart=unless-stopped / ports 8001)
+- **갱신** `README.md` — `## Docker 운영` 섹션 5단계 명령 + 운영 메모
+- **갱신** `~/.docker/config.json` — credsStore `desktop` → `osxkeychain` (빌드 hang fix)
+
+### 2. 빌드 / 기동 결과
+
+- 이미지 264MB / 빌드 PASS (sha256:90629d12dc3b...)
+- alembic 자동 마이그레이션 (Migration 012→013→014 첫 적용)
+- 8 scheduler 활성 — cron 시각 모두 정확:
+  - sector: 일 03:00 / stock_master: mon-fri 17:30 / fundamental: mon-fri 18:00
+  - **ohlcv_daily: mon-fri 06:00** / **daily_flow: mon-fri 06:30** (5-13 수 첫 발화)
+  - weekly: sat 07:00 / monthly: 매월 1일 03:00 / yearly: 매년 1월 5일 03:00
+- /health: `{"status":"ok"}` / 컨테이너 TZ: `Tue May 12 15:30 KST 2026`
+
+### 3. 해결된 critical 이슈 2건
+
+#### 3.1 빌드 hang — credentials helper
+
+- `~/.docker/config.json` 의 `credsStore: "desktop"` 가 docker-credential-desktop helper hang (47분 + 1시간 두 번 발생)
+- `docker-credential-osxkeychain` 은 정상 응답 확인 (5초)
+- fix: `credsStore: "osxkeychain"` 변경 → pull 정상
+
+#### 3.2 env_prefix 불일치 — scheduler 미활성
+
+- `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 가 Settings 필드 `scheduler_*` 와 매칭 실패
+- pydantic-settings 매칭은 필드명 그대로 case-insensitive — `kiwoom_database_url` ↔ `KIWOOM_DATABASE_URL` 매칭하지만 `scheduler_enabled` ↔ `SCHEDULER_ENABLED` 기대
+- fix: compose `environment:` 에 `SCHEDULER_*` 8 env 명시 (KIWOOM_ prefix 없이). `.env.prod` 의 잘못된 9 env 는 `extra="ignore"` 로 무시
+- 재기동 후 `scheduler_enabled=True` / 8 scheduler 정상 활성 확인
+
+### 4. 보안 노출 발견 (사용자 회수 필요)
+
+| # | 항목 | 위험 |
+|---|------|------|
+| 1 | `KIWOOM_CREDENTIAL_MASTER_KEY` (Fernet 마스터키) | CRITICAL — DB 자격증명 복호화 가능 |
+| 2 | `KIWOOM_API_KEY` / `KIWOOM_API_SECRET` | HIGH — 키움 OpenAPI 호출 가능 |
+| 3 | `KIWOOM_ACCOUNT_NO=35324811` | LOW — 식별자 |
+| 4 | Docker Hub PAT `dckr_pat_...` | HIGH — Docker Hub push 가능 |
+
+진단 명령 출력 시 평문 노출 → 대화 로그 영구 기록. 사용자 직접 회수 + 재발급 필요 (ADR § 38.8 #6/#7).
+
+### 5. 변경 0 / 그대로 유지
+
+- 앱 코드 (app/) — 변경 없음
+- 테스트 — 1059 그대로 (인프라 chunk)
+- DB schema — 변경 없음 (Migration 014 까지 그대로, 컨테이너 기동 시 자동 적용만)
+
+---
+
 ## [2026-05-12] fix(kiwoom): 5-11 NXT 74 rows 보완 — daily 백필 + 검증 (ADR § 37)
 
 § 35.8 의 별도 chunk — § 35 cron 시간 NXT 마감 후 새벽 이동 결정의 데이터 측면 정합성 확정. 5-11 NXT 적재 12% (74 / 정상 ~630) anomaly 보완. § 36 scheduler 활성 직후 5-13 첫 OhlcvDaily cron 발화 전 NXT 데이터 표 깨끗화.

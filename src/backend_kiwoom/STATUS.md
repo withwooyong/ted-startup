@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-12 (5-11 NXT 74 rows 보완 — 백필 21m 6s / NXT 74 → 628 / 0 failed / § 35 cron shift 데이터 정합성 확정 / ADR § 37)
+> **마지막 갱신**: 2026-05-12 (Docker 컨테이너 배포 — kiwoom-app service / 이미지 264MB / 8 scheduler 활성 / 5-13 06:00 첫 cron 발화 준비 / ADR § 38)
 
 ---
 
@@ -12,12 +12,12 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase C** (OHLCV + 일별 수급 + 영숫자 백필 — 데이터 측면 **종결**, scheduler 활성만 남음) |
-| 마지막 완료 chunk | **5-11 NXT 보완 백필** — § 35.8 별도 chunk. NXT 74 → 628 / 0 failed / 21m 6s / KRX 회귀 0 / § 35 cron shift 데이터 정합성 확정 / ADR § 37 |
-| 다음 chunk | **(1주 후) § 36.5 측정 결과 채움** → Phase D 진입 |
-| 25 Endpoint 진행 | **11 / 25 완료** (44%). CLI 도구 4건 + **영숫자 호환성 확장** + **영숫자 historical 적재 완성** + **cron NXT 안전** + **scheduler 본격 활성** + **5-11 NXT 보완** |
-| 누적 chunk | 44 commits (5-11 NXT 보완 chunk 추가) |
-| 테스트 | 1059 cases / coverage 91% (본 chunk 코드 변경 0 — 테스트 변경 없음) |
-| 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. daily_flow 백필 ⏳ 사용자 실측 대기 |
+| 마지막 완료 chunk | **Docker 컨테이너 배포 (kiwoom-app)** — Dockerfile + entrypoint + uv.lock + compose service. 이미지 264MB / 8 scheduler 활성 / /health OK / TZ KST. credsStore + env_prefix 2 critical 이슈 해결 / ADR § 38 |
+| 다음 chunk | **(5-13 06:00) cron 첫 발화 검증** → **(5-19 이후) § 36.5 측정** → Phase D |
+| 25 Endpoint 진행 | **11 / 25 완료** (44%). + **컨테이너 운영 인프라 완성** |
+| 누적 chunk | 45 commits (Docker 배포 chunk 추가) |
+| 테스트 | 1059 cases / coverage 91% (앱 코드 변경 0 — 인프라 chunk) |
+| 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. **kiwoom-app 컨테이너** — Up healthy / 8 scheduler 활성 / 5-13 06:00 첫 발화 준비 |
 
 ---
 
@@ -137,8 +137,11 @@ P3 (선택):
 | ~~11 (F7)~~ | ~~turnover_rate min -57.32 음수 anomaly~~ | full 2026-05-10 | ✅ 분석 완료 (ADR § 31) — **NO-FIX** (키움 raw 보존 정직성 / 0.0009% / 분석 layer 책임) |
 | ~~12 (F8)~~ | ~~full backfill 1 종목 빈 응답 (OHLCV 4078 fetch / 4077 적재)~~ | full 2026-05-10 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록) / 신규 상장 직후 / sentinel 가드 정상 / **NO-FIX** |
 | ~~daily_flow 빈 응답 1 종목~~ | ~~success_krx 3922 vs DISTINCT KRX 3921~~ | full 2026-05-11 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (F8 동일 종목) / **NO-FIX** |
-| **13** | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 | 🔄 **활성 완료** (§ 36) — 1주 후 측정 별도 chunk (5-19 이후) |
+| **13** | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 | 🔄 **활성 완료** (§ 36/§ 38) — 컨테이너 적재 완료. 1주 후 측정 별도 chunk (5-19 이후) |
 | ~~21~~ | ~~5-11 NXT 74 rows 보완~~ | ADR § 35.8 | ✅ **해소** (§ 37, `00ac3b0`) — NXT 74 → 628 / 0 failed / 21m 6s / KRX 회귀 0 |
+| **22** | `.env.prod` 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 정리 | ADR § 38.6.2' | 사용자 직접 (compose env override 로 우회 완료) |
+| **23** | 노출된 secret 4건 회전 (API_KEY/SECRET/Fernet/Docker PAT) | ADR § 38.8 #6/#7 | 사용자 즉시 — 대화 로그 영구 기록 |
+| **24** | Mac 절전 시 컨테이너 중단 (24/7 cron 누락 위험) | ADR § 38.8 #1 | 사용자 환경 결정 — 절전 차단 또는 서버 이전 |
 | ~~19~~ | ~~영숫자 295 종목 추가로 cron elapsed +10분 추정~~ | ADR § 33.6 → § 34.6 | ✅ **정정** — 영숫자 백필 실측 1108 종목 5m 48s = 0.31s/stock → **cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정의 15%) |
 | **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
 
@@ -210,6 +213,7 @@ P3 (선택):
 - **cron NXT 마감 후 새벽 이동** — OhlcvDaily mon-fri 18:30→06:00 / DailyFlow mon-fri 19:00→06:30 / Weekly fri 19:30→sat 07:00. NXT 거래 17:00~20:00 진행 중 cron 결함 fix (사용자 발견 + 5-11 NXT 74 rows 정황). base_date default=`today()` 가 06:00 cron 과 충돌 — `fire_*_job` 에서 `previous_kst_business_day(today)` 명시 전달. `app/batch/business_day.py` helper 신규. 1059 tests / ADR § 35 / `8c14aa3`
 - **scheduler_enabled 활성 + 1주 모니터** — .env.prod 9 env 추가 (KIWOOM_SCHEDULER_ENABLED=true + 8 alias=prod). 코드 변경 0. lifespan fail-fast 통과 / 첫 발화 5-13 (수) 06:00 OhlcvDaily. 1주 후 측정 (cron elapsed / NXT 정상 / failed / 알람) 은 별도 chunk (사용자 결정). plan doc + ADR § 36 / `cebd262`
 - **5-11 NXT 보완 백필** (§ 35.8 별도 chunk) — `backfill_ohlcv.py --period daily --start-date 2026-05-11 --end-date 2026-05-11` (--resume 미사용). NXT 74 → 628 / KRX 4373 success (DB 4370 = 5-7/8 대비 -2 신규/정지) / 0 failed / 21m 6s / 5003 calls (영숫자 nxt_enable=false 호출 skip). § 35 cron shift 데이터 정합성 확정 + § 36.5.2 1주 모니터 SQL 깨끗 진행 / 코드 변경 0 / 검증 SQL 4건 PASS / ADR § 37 / `00ac3b0`
+- **Docker 컨테이너 배포 (kiwoom-app)** — Dockerfile (multi-stage builder+runtime, python:3.12-slim, uv --frozen, non-root uid 1001, tzdata Asia/Seoul, HEALTHCHECK) + scripts/entrypoint.py (alembic upgrade → uvicorn workers=1) + uv.lock 87 packages + docker-compose.yml kiwoom-app service (env_file=../../.env.prod, SCHEDULER_* 8 env override, depends_on=kiwoom-db healthy, restart=unless-stopped) + .dockerignore + README Docker 섹션. **빌드 hang 2건 해결**: credsStore desktop→osxkeychain, syntax directive 제거. **env_prefix 불일치 발견** (.env.prod 의 KIWOOM_SCHEDULER_* 잘못 → compose environment 의 SCHEDULER_* 로 override). 이미지 264MB / 5초 기동 / 8 scheduler 활성 / /health OK / TZ KST / 5-13 06:00 첫 발화 준비. 코드 변경 0 (app/ 무변, scripts/entrypoint.py 신규) / ADR § 38 / `<this commit>`
 
 ---
 

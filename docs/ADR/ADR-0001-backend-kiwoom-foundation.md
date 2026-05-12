@@ -2630,3 +2630,148 @@ SELECT count(*) FROM kiwoom.stock_price_krx WHERE trading_date = '2026-05-11';
 1. **(1주 후) § 36.5 측정 결과 채움** — 2026-05-19 (mon) 이후. NXT 5-11 ~628 / 5-13 ~5-19 ~630 균일 검증
 2. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉
 3. 공휴일 calendar (§ 36.7 #2) — 1주 모니터 빈 응답 패턴 관찰 후
+
+---
+
+## 38. Phase C — Docker 컨테이너 배포 (kiwoom-app service, 2026-05-12 ✅ 완료)
+
+### 38.1 결정
+
+§ 36 scheduler 활성 후 사용자 앱 재시작 필요했으나 현재 backend_kiwoom 은:
+- Dockerfile 5-7 작성 후 entrypoint.py 누락 / 미사용 상태
+- docker-compose 에 앱 service 정의 없음 (`kiwoom-db` 만)
+- uvicorn / systemd / launchd 정의 없음
+
+즉 "재시작" 이 아니라 **앱 운영 인프라 신규 구축** 이 필요. 사용자 결정 (2026-05-12) — docker-compose 새 service 추가 + 컨테이너 운영 (옵션 C).
+
+5-13 (수) 06:00 KST OhlcvDaily cron 발화 전 안정 기동 + § 36.5 1주 모니터 정합성 보장. plan doc `phase-c-docker-deploy.md`.
+
+### 38.2 아키텍처
+
+- **builder + runtime 멀티스테이지** — `python:3.12-slim-bookworm` + uv 멀티스테이지 빌드
+- **uv 기반 결정론적 의존성** — `uv.lock` 신규 + `uv sync --frozen` (호스트/컨테이너 동일 버전)
+- **non-root user** (uid 1001) + TZ=Asia/Seoul + tzdata 설치
+- **HEALTHCHECK** — `urllib.request.urlopen('http://127.0.0.1:8001/health')` python 내장 (curl 의존 X)
+- **단일 worker** — `uvicorn --workers 1` (APScheduler 중복 발화 방지)
+- **자동 마이그레이션** — entrypoint 에서 `alembic upgrade head` 자동 적용 (014 까지 idempotent + 비파괴)
+
+### 38.3 산출물
+
+| 파일 | 동작 |
+|------|------|
+| `Dockerfile` | **갱신** — uv digest pin 제거 (`uv:latest`) + `--frozen` 추가 + tzdata 추가 + 캐시 layer 분리 |
+| `.dockerignore` | **갱신** — .venv / __pycache__ / logs / .env* / tests / docs / *.md 제외 |
+| `scripts/entrypoint.py` | **신규** — `alembic upgrade head` → `os.execvp uvicorn` (단일 worker) |
+| `uv.lock` | **신규** — 87 packages 결정론적 lock |
+| `docker-compose.yml` | **갱신** — `kiwoom-app` service 추가 (env_file=.env.prod + DB hostname override + depends_on healthy + restart=unless-stopped) |
+| `README.md` | **갱신** — `## Docker 운영` 섹션 추가 (5 단계 명령 + 운영 메모) |
+
+### 38.4 DB hostname 처리
+
+- `.env.prod` 의 `KIWOOM_DATABASE_URL` = `localhost:5433` (호스트 스크립트 직접 실행용 — 유지)
+- 컨테이너 안에서는 compose `environment:` 의 `KIWOOM_DATABASE_URL=kiwoom-db:5432` 로 override
+- pydantic-settings 우선순위 (OS env > .env > .env.prod) 활용 → 두 모드 공존, `.env.prod` 수정 불필요
+
+### 38.5 단일 worker (APScheduler 중복 발화 방지)
+
+`uvicorn --workers 1` 명시. 다중 worker 시 lifespan 의 8 cron job 이 worker 마다 등록되어 발화 횟수 × N 회 → 데이터 중복 적재 (UPSERT idempotent 라 결과적 OK 지만 호출 횟수 × N 으로 KRX rate limit 위험).
+
+처리량 부족 시 별도 chunk 에서 외부 scheduler (Celery / Redis lock) 또는 leader election 패턴 검토.
+
+### 38.6 빌드 + 기동 검증 결과
+
+#### 38.6.1 빌드
+
+- 명령: `docker compose build kiwoom-app`
+- 이미지 크기: **264MB** (python:3.12-slim + non-dev 의존성)
+- 빌드 PASS — sha256:90629d12dc3b...
+- builder + runtime 2-stage / uv `--frozen` lock 활용 / non-root uid 1001
+
+#### 38.6.1' 빌드 실패 사건 + 해결 (process learning)
+
+1. **47분 hang at `resolve image config for docker/dockerfile:1.7`** — `# syntax=docker/dockerfile:1.7` directive 제거 시도 → 그래도 hang
+2. **두 번째 hang at `load metadata for python:3.12-slim`** — 진단 결과 **Docker credential helper hang**:
+   - `~/.docker/config.json` 의 `credsStore: "desktop"` 가 docker-credential-desktop helper hang 유발
+   - `docker-credential-osxkeychain` 은 정상 응답 확인
+   - fix: `credsStore: "osxkeychain"` 으로 변경 → 5초 만에 pull 성공
+3. **세 번째 실패** — hatchling 빌드 시 `OSError: Readme file does not exist: README.md`:
+   - Dockerfile builder stage 가 `COPY README.md ./` 누락
+   - fix: `COPY` 라인 추가 후 재빌드 → 성공
+
+#### 38.6.2 기동 + lifespan
+
+- 명령: `docker compose up -d kiwoom-app`
+- alembic upgrade head: ✅ (Migration 012 → 013 → 014 자동 적용 — 이번 docker 환경에서 첫 적용)
+- lifespan fail-fast 통과: ✅
+- 8 scheduler 활성 로그 모두 확인:
+
+```
+sector_sync_weekly         alias=prod  cron=일 03:00 KST
+stock_master_sync_daily    alias=prod  cron=mon-fri 17:30 KST
+stock_fundamental_sync_daily alias=prod cron=mon-fri 18:00 KST
+ohlcv_daily_sync_daily     alias=prod  cron=mon-fri 06:00 KST
+daily_flow_sync_daily      alias=prod  cron=mon-fri 06:30 KST
+weekly_ohlcv_sync_weekly   alias=prod  cron=sat 07:00 KST
+monthly_ohlcv_sync_monthly alias=prod  cron=매월 1일 03:00 KST
+yearly_ohlcv_sync_yearly   alias=prod  cron=매년 1월 5일 03:00 KST
+```
+
+#### 38.6.2' env_prefix 불일치 발견 + 해결 (CRITICAL)
+
+기동 직후 `scheduler_enabled=False` 였음 (모든 scheduler "disabled — start 무시" 로그). 원인:
+
+- 사용자가 `.env.prod` 에 9 env 추가 시 prefix `KIWOOM_SCHEDULER_*` 사용 — but Settings 필드명은 `scheduler_*` (KIWOOM_ prefix 없음)
+- pydantic-settings 의 매칭은 **필드명 그대로 case-insensitive** — `kiwoom_database_url` ↔ `KIWOOM_DATABASE_URL` 매칭 (필드명에 kiwoom_ 포함), `scheduler_enabled` ↔ `SCHEDULER_ENABLED` 기대
+- 해결: compose `environment:` 에 `SCHEDULER_*` 8 env 명시 (KIWOOM_ prefix 없이) — `.env.prod` 의 잘못된 9 env 는 `extra="ignore"` 로 무시됨
+- 재기동 후 `scheduler_enabled=True` 확인
+
+#### 38.6.3 healthcheck
+
+- `curl http://localhost:8001/health` → `{"status":"ok"}` ✅
+- `docker compose ps` → kiwoom-app **Up (healthy)** ✅
+
+#### 38.6.4 cron 발화 시각 정합성
+
+- 컨테이너 TZ: `Tue May 12 15:30:10 KST 2026` ✅ (Asia/Seoul 정확)
+- **5-13 (수) 06:00 KST OhlcvDaily 첫 발화 예정** — base_date = 2026-05-12 (화) 데이터 fetch (§ 35.3 `previous_kst_business_day`)
+- **5-13 (수) 06:30 KST DailyFlow 첫 발화 예정** — 동일
+
+#### 38.6.5 .env.prod env_file 경로 fix
+
+- compose 의 `env_file: .env.prod` 가 `src/backend_kiwoom/.env.prod` 를 찾았으나 실제 위치는 프로젝트 루트
+- fix: `env_file: ../../.env.prod`
+
+### 38.7 외부 동작 영향
+
+- **운영 모드 분리** — 호스트 스크립트 (백필 등 ad-hoc) = localhost:5433 / 컨테이너 (cron) = kiwoom-db:5432. 동시 운영 가능 (UPSERT idempotent + DB lock 가 보호)
+- **자동 재시작** — Mac 재부팅 / docker daemon 재시작 후 자동 기동 (restart=unless-stopped)
+- **로그 영속성** — `docker compose logs` (stdout). 호스트 파일 영속성 필요 시 별도 chunk (volume mount)
+- **개발 환경** — uvicorn 직접 실행은 그대로 가능 (.env.prod 또는 .env 의 localhost:5433 사용)
+
+### 38.8 알려진 follow-up
+
+| # | 항목 | 근거 | 결정 시점 |
+|---|------|------|-----------|
+| 1 | Mac 절전 시 컨테이너 중단 → cron 발화 누락 | 환경 한계 | 사용자 환경 결정 (절전 차단 또는 서버 이전) |
+| 2 | destructive migration 도입 시 entrypoint 분리 | 자동 마이그레이션 정책 | 미래 migration 도입 시 |
+| 3 | 다중 worker 시 외부 scheduler | 처리량 확장 | 단일 worker 한계 도달 시 |
+| 4 | 로그 영속성 (volume mount) | 컨테이너 stdout 만으로 부족 시 | 운영 모니터 1주 후 결정 |
+| 5 | **`.env.prod` 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 정리** | env_prefix 불일치 발견 (§ 38.6.2') | 사용자 직접 — 잘못된 이름 9 env 제거 또는 `SCHEDULER_*` 로 rename |
+| 6 | **노출된 secret 4건 회전** (대화 로그 영구 기록) | 컨테이너 env 점검 시 평문 노출 | 사용자 즉시 — KIWOOM_API_KEY/SECRET revoke + 재발급 / Fernet 마스터키 회전 + DB 재암호화 / ACCOUNT_NO (위험도 낮음) |
+| 7 | **Docker Hub PAT 토큰 회수** | credsStore 진단 시 평문 노출 (`dckr_pat_...`) | 사용자 즉시 — https://hub.docker.com/settings/security 에서 revoke |
+
+### 38.9 결과
+
+- **신규**: `scripts/entrypoint.py` (alembic upgrade + uvicorn exec) + `uv.lock` (87 packages frozen) + plan doc
+- **갱신**: `Dockerfile` (syntax directive 제거 / uv:latest / --frozen / tzdata / README COPY) + `.dockerignore` (49줄 정리) + `docker-compose.yml` (kiwoom-app service + env_file ../../.env.prod + SCHEDULER_* 8 env override) + `README.md` (`## Docker 운영` 섹션)
+- **빌드**: 이미지 264MB / 빌드 PASS
+- **기동**: alembic 자동 적용 + 8 scheduler 활성 + /health OK + TZ KST + healthy
+- **테스트**: 1059 그대로 (앱 코드 변경 0 — 인프라 chunk)
+- **문서 변경**: ADR § 38 (본 §) + STATUS § 0 / § 4 / § 6 + HANDOFF + CHANGELOG
+
+### 38.10 다음 chunk
+
+1. **(5-13 06:00 발화 직후) cron 발화 결과 즉시 검증** — `docker compose logs kiwoom-app` + DB SQL
+2. **(5-19 이후) § 36.5 1주 모니터 측정 채움** — 컨테이너 로그 기반 cron elapsed 추출
+3. **Mac 절전 정책 / 서버 이전** — 24/7 cron 안정성 위함
+4. **Phase D 진입** — ka10080 분봉 / ka20006 업종일봉

@@ -39,6 +39,36 @@ uv run alembic upgrade head
 uv run pytest
 ```
 
+## Docker 운영 (kiwoom-app 컨테이너)
+
+운영 환경 (24/7 cron) — `.env.prod` 9 env 사전 설정 + `kiwoom-db` 컨테이너 실행 중.
+
+```bash
+cd src/backend_kiwoom
+
+# 1) 이미지 빌드 (의존성 변경 시 매번)
+docker compose build kiwoom-app
+
+# 2) 기동 (백그라운드, 재시작 정책 unless-stopped)
+docker compose up -d kiwoom-app
+
+# 3) 로그 watch — lifespan + 8 scheduler 활성 / cron 발화 확인
+docker compose logs -f kiwoom-app
+
+# 4) 상태 확인
+docker compose ps             # Up (healthy) 확인
+curl http://localhost:8001/health   # 200 OK 확인
+```
+
+운영 메모:
+
+- **단일 worker** — `--workers 1` 명시 (APScheduler 중복 발화 방지)
+- **자동 마이그레이션** — 컨테이너 기동 시 `alembic upgrade head` 자동 적용 (idempotent)
+- **DB hostname** — 컨테이너 internal `kiwoom-db:5432` (compose `environment` 가 `.env.prod` override)
+- **TZ=Asia/Seoul** — cron 정확성 위해 컨테이너 timezone 명시
+- **재시작 정책** — `unless-stopped`. Mac 절전/재부팅 후 자동 복귀
+- **시각 동기** — 호스트 시각 정확해야 cron (06:00/06:30/sat 07:00 등) 정확히 발화
+
 ## 보안 원칙 (Phase A)
 
 - **자격증명 평문 저장 금지**: appkey/secretkey 는 Fernet 으로 암호화 후 BYTEA 저장

@@ -20,6 +20,40 @@ services:
       timeout: 3s
       retries: 5
 
+  kiwoom-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kiwoom-app:latest
+    container_name: kiwoom-app
+    env_file:
+      # 프로젝트 루트 (src/backend_kiwoom/../../.env.prod) — 9 env (KIWOOM_SCHEDULER_ENABLED + 8 alias)
+      - ../../.env.prod
+    environment:
+      # 컨테이너 internal network — .env.prod 의 localhost:5433 override
+      KIWOOM_DATABASE_URL: "postgresql+asyncpg://kiwoom:kiwoom@kiwoom-db:5432/kiwoom_db"
+      # 운영 키움 API
+      KIWOOM_DEFAULT_ENV: prod
+      TZ: Asia/Seoul
+      # Scheduler — Settings 필드명 `scheduler_*` 는 env_prefix 없음 (필드명 그대로 매칭).
+      # .env.prod 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 는 무시됨 (extra="ignore"). 본 8 env 가 진실.
+      SCHEDULER_ENABLED: "true"
+      SCHEDULER_SECTOR_SYNC_ALIAS: prod
+      SCHEDULER_STOCK_SYNC_ALIAS: prod
+      SCHEDULER_FUNDAMENTAL_SYNC_ALIAS: prod
+      SCHEDULER_OHLCV_DAILY_SYNC_ALIAS: prod
+      SCHEDULER_DAILY_FLOW_SYNC_ALIAS: prod
+      SCHEDULER_WEEKLY_OHLCV_SYNC_ALIAS: prod
+      SCHEDULER_MONTHLY_OHLCV_SYNC_ALIAS: prod
+      SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS: prod
+    depends_on:
+      kiwoom-db:
+        condition: service_healthy
+    ports:
+      # 호스트 8001 → 컨테이너 8001 (헬스체크 + 디버그용)
+      - "8001:8001"
+    restart: unless-stopped
+
 volumes:
   kiwoom-data:
     name: kiwoom-data
