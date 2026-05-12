@@ -138,7 +138,7 @@ P3 (선택):
 | ~~12 (F8)~~ | ~~full backfill 1 종목 빈 응답 (OHLCV 4078 fetch / 4077 적재)~~ | full 2026-05-10 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (KOSDAQ SPAC, 2026-05-09 등록) / 신규 상장 직후 / sentinel 가드 정상 / **NO-FIX** |
 | ~~daily_flow 빈 응답 1 종목~~ | ~~success_krx 3922 vs DISTINCT KRX 3921~~ | full 2026-05-11 | ✅ 식별 완료 (ADR § 31) — **`452980` 신한제11호스팩** (F8 동일 종목) / **NO-FIX** |
 | **13** | 일간 cron 실측 (운영 cron elapsed) | dry-run § 20.4 | 🔄 **활성 완료** (§ 36) — 1주 후 측정 별도 chunk (5-19 이후) |
-| ~~21~~ | ~~5-11 NXT 74 rows 보완~~ | ADR § 35.8 | ✅ **해소** (§ 37, `<this commit>`) — NXT 74 → 628 / 0 failed / 21m 6s / KRX 회귀 0 |
+| ~~21~~ | ~~5-11 NXT 74 rows 보완~~ | ADR § 35.8 | ✅ **해소** (§ 37, `00ac3b0`) — NXT 74 → 628 / 0 failed / 21m 6s / KRX 회귀 0 |
 | ~~19~~ | ~~영숫자 295 종목 추가로 cron elapsed +10분 추정~~ | ADR § 33.6 → § 34.6 | ✅ **정정** — 영숫자 백필 실측 1108 종목 5m 48s = 0.31s/stock → **cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정의 15%) |
 | **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
 
@@ -209,7 +209,7 @@ P3 (선택):
 - **영숫자 OHLCV 3 period 백필** — daily 1108 (영숫자 295 + 비영숫자 gap 813) / weekly 4373 / monthly 4373 (영업일 calendar ∅ 첫 적재) = 0 failure / 47m 33s / 영숫자 75,149 rows 적재 / anomaly 0건 (NUMERIC max < 35% cap, F6/F7/F8 영숫자 영향 0). 운영 cron +N분 추정 정정 (10 → 1.5). 코드 변경 0. plan doc 신규 + ADR § 34 / `7f6beb5`
 - **cron NXT 마감 후 새벽 이동** — OhlcvDaily mon-fri 18:30→06:00 / DailyFlow mon-fri 19:00→06:30 / Weekly fri 19:30→sat 07:00. NXT 거래 17:00~20:00 진행 중 cron 결함 fix (사용자 발견 + 5-11 NXT 74 rows 정황). base_date default=`today()` 가 06:00 cron 과 충돌 — `fire_*_job` 에서 `previous_kst_business_day(today)` 명시 전달. `app/batch/business_day.py` helper 신규. 1059 tests / ADR § 35 / `8c14aa3`
 - **scheduler_enabled 활성 + 1주 모니터** — .env.prod 9 env 추가 (KIWOOM_SCHEDULER_ENABLED=true + 8 alias=prod). 코드 변경 0. lifespan fail-fast 통과 / 첫 발화 5-13 (수) 06:00 OhlcvDaily. 1주 후 측정 (cron elapsed / NXT 정상 / failed / 알람) 은 별도 chunk (사용자 결정). plan doc + ADR § 36 / `cebd262`
-- **5-11 NXT 보완 백필** (§ 35.8 별도 chunk) — `backfill_ohlcv.py --period daily --start-date 2026-05-11 --end-date 2026-05-11` (--resume 미사용). NXT 74 → 628 / KRX 4373 success (DB 4370 = 5-7/8 대비 -2 신규/정지) / 0 failed / 21m 6s / 5003 calls (영숫자 nxt_enable=false 호출 skip). § 35 cron shift 데이터 정합성 확정 + § 36.5.2 1주 모니터 SQL 깨끗 진행 / 코드 변경 0 / 검증 SQL 4건 PASS / ADR § 37 / `<this commit>`
+- **5-11 NXT 보완 백필** (§ 35.8 별도 chunk) — `backfill_ohlcv.py --period daily --start-date 2026-05-11 --end-date 2026-05-11` (--resume 미사용). NXT 74 → 628 / KRX 4373 success (DB 4370 = 5-7/8 대비 -2 신규/정지) / 0 failed / 21m 6s / 5003 calls (영숫자 nxt_enable=false 호출 skip). § 35 cron shift 데이터 정합성 확정 + § 36.5.2 1주 모니터 SQL 깨끗 진행 / 코드 변경 0 / 검증 SQL 4건 PASS / ADR § 37 / `00ac3b0`
 
 ---
 
