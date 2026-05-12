@@ -2,8 +2,8 @@
 
 > Last updated: 2026-05-12 (KST) — Phase D-1 ka20006 풀 구현 완료 (ted-run 풀 파이프라인 / ADR § 39).
 > Branch: `master`
-> Latest commit: `<this commit>` (Phase D-1 ka20006 풀 구현 — Migration 015 + 인프라 + 자동화)
-> 미푸시 commit: **6 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `550bee5` Docker 배포 + `39ca7a3` secret 회전 절차서 + `a1e20e0` D-1 plan doc + `<this commit>` D-1 풀 구현 — 사용자 명시 요청 시 push)
+> Latest commit: `249c277` (Phase D-1 ka20006 풀 구현 — Migration 015 + 인프라 + 자동화)
+> 미푸시 commit: **6 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `550bee5` Docker 배포 + `39ca7a3` secret 회전 절차서 + `a1e20e0` D-1 plan doc + `249c277` D-1 풀 구현 — 사용자 요청 시 push)
 
 ## Current Status
 
@@ -25,7 +25,7 @@
 | 4 | secret 회전 절차서 작성 + 회전 시점 = 전체 개발 완료 후 (사용자 결정) | 230줄 절차서 + ADR § 38.8 #6/#7 시점 통일 + HANDOFF Pending #2 갱신 | 4 / `39ca7a3` |
 | 5 | 작업 방향 재정렬 (§11 정의 명확화) — 사용자 피드백 수용 후 기존 작업방식 유지 결정 | 메모리 3건 추가 (운영 변경 후행/추천 자제/기존 방식 유지) | 0 (메모리만) |
 | 6 | Phase D-1 ka20006 plan doc § 12 작성 + STATUS/HANDOFF 갱신 + commit | Migration 015 + 인프라 + 자동화 통합 chunk § (9 결정 + 13 self-check + DoD 10 코드 6 테스트) | 3 / `a1e20e0` |
-| 7 | **Phase D-1 ka20006 풀 구현 (ted-run)** — TDD 38 신규 / 구현 10 파일 / 1R CONDITIONAL → PASS / Verification 5관문 PASS / 컨테이너 재배포 / ADR § 39 / 메타 갱신 | 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint | 16 / `<this commit>` |
+| 7 | **Phase D-1 ka20006 풀 구현 (ted-run)** — TDD 38 신규 / 구현 10 파일 / 1R CONDITIONAL → PASS / Verification 5관문 PASS / 컨테이너 재배포 / ADR § 39 / 메타 갱신 | 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint | 16 / `249c277` |
 
 ## In Progress / Pending
 

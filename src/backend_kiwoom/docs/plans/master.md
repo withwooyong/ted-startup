@@ -324,7 +324,7 @@ def to_kiwoom_code(stock_code: str, exchange: ExchangeType) -> str:
 | `stock_minute_price` | stock_id FK, exchange_type, ts (TZ), tic_scope (1/3/5/...), open/high/low/close/volume | ka10080 (선택적) |
 | `stock_tick_price` | stock_id FK, exchange_type, ts, price, volume | ka10079 (선택적, 대용량 — 파티션 필수) |
 | `sector` | sector_code PK, sector_name, market_type | ka10101 |
-| `sector_price_daily` | sector_code FK, date, open/high/low/close, volume | ka20006 |
+| `sector_price_daily` | **sector_id BIGINT FK** (1R HIGH #4 — sector.id BIGSERIAL 일치), date, open/high/low/close (centi BIGINT 4), volume | ka20006 ✅ D-1 `249c277` |
 | `short_selling_kw` | stock_id FK, date, exchange_type, short_volume, short_amount, short_ratio | ka10014 |
 | `lending_balance_kw` | stock_id FK, date, balance_qty, balance_amt, change_qty | ka10068/ka20068 |
 | `ranking_snapshot` | id PK, snapshot_date, snapshot_time, ranking_type (etr_rate/volume/amount/...), exchange_type, rank, stock_id FK, payload JSONB | ka10027/30/31/32/23 통합 저장 |
