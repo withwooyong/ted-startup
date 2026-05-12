@@ -1,9 +1,9 @@
 # Session Handoff
 
-> Last updated: 2026-05-12 (KST) — Phase D-1 ka20006 풀 구현 완료 (ted-run 풀 파이프라인 / ADR § 39).
-> Branch: `master`
-> Latest commit: `249c277` (Phase D-1 ka20006 풀 구현 — Migration 015 + 인프라 + 자동화)
-> 미푸시 commit: **6 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `550bee5` Docker 배포 + `39ca7a3` secret 회전 절차서 + `a1e20e0` D-1 plan doc + `249c277` D-1 풀 구현 — 사용자 요청 시 push)
+> Last updated: 2026-05-12 (KST) — Phase D-1 ka20006 풀 구현 완료 + 푸시 (`3954185` HEAD).
+> Branch: `master` → `origin/master` 동기화 완료
+> Latest commit: `3954185` (메타 해시 채움 + master.md sector_id FK 현행화)
+> 미푸시 commit: **0 건** — 본 세션 4 commit (`39ca7a3` / `a1e20e0` / `249c277` / `3954185`) 모두 push 완료
 
 ## Current Status
 
