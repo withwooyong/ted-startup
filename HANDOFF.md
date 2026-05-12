@@ -2,8 +2,8 @@
 
 > Last updated: 2026-05-12 (KST, /handoff) — Docker 컨테이너 배포 (kiwoom-app, ADR § 38).
 > Branch: `master`
-> Latest commit: `<this commit>` (Docker 배포 — Dockerfile / entrypoint / uv.lock / compose / ADR § 38)
-> 미푸시 commit: **3 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `<this commit>` Docker 배포 — 사용자 명시 요청 시 push)
+> Latest commit: `550bee5` (Docker 배포 — Dockerfile / entrypoint / uv.lock / compose / ADR § 38)
+> 미푸시 commit: **3 건** (`00ac3b0` 5-11 NXT 보완 + `bdc6aef` 메타 해시 + `550bee5` Docker 배포 — 사용자 명시 요청 시 push)
 
 ## Current Status
 
