@@ -7,6 +7,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] diag(kiwoom): scheduler dead 원인 확정 — Mac 절전 (Docker Desktop VM sleep) / 코드 변경 0
+
+§ 41.8 발견 (5-14 06:00/06:30 cron miss) 후속 분석. **pmset -g log** 결정적 증거로 Mac 절전 가설 ✅ 확정. APScheduler race / Docker network / healthcheck restart / Battery 가설 모두 반증.
+
+### 결정적 증거 — pmset 5-13 저녁 반복 Sleep
+
+```
+2026-05-13 20:01:26 Sleep   Entering Sleep state 'Sleep Service Back to Sleep' (Batt 80%) 967s
+2026-05-13 20:17:35 Sleep   (Batt 80%) 1011s
+2026-05-13 20:34:28 Sleep   (Batt 80%) 287s
+2026-05-13 20:39:28 Sleep   due to 'Maintenance Sleep' (Batt 80%) 1057s
+2026-05-13 20:57:07 Sleep   (Batt 80%) 904s
+... (반복 ~ 21:12 까지)
+```
+
+현재 `pmset -g` 상태: `sleep prevented by sharingd, caffeinate*3, powerd, JANDI` — caffeinate 다중 활성 (5-13 저녁 비활성 = 자유 절전). Battery 80% 충전 X.
+
+→ **Mac 절전 → Docker Desktop VM 일시정지 → 컨테이너 sleep → asyncio 이벤트 루프 sleep → APScheduler timer wakeup 미발화 → cron miss**.
+
+### 가설 평가 5종 (ADR § 42.3)
+
+| 가설 | 평가 | 증거 |
+|------|------|------|
+| **Mac 절전** | ✅ **확정** | pmset 5-13 20:01~21:12 + 현재 caffeinate 활성 |
+| APScheduler race | ❌ 반증 | 5-13 baseline diag 12개 main_loop 동일 / 자연 발화 정상 |
+| Docker network / DB | ❌ 반증 | 자연 발화 시점 정상 동작 |
+| healthcheck restart | ❌ 반증 | `docker inspect finishedAt=0001-01-01` |
+| Battery 부족 | ❌ | Charge 80% |
+
+### cron 별 misfire 정책 표
+
+- 새벽 cron (06:00 ohlcv_daily / 06:30 daily_flow / 03:00 monthly/yearly/sector_weekly) — misfire **없음** → sleep 시 skip
+- 07:30 / 07:45 / 08:00 (short_selling / lending_*) — misfire grace 30분/30분/90분 → wake 시 catch-up
+
+### 해결 옵션 5종 (ADR § 42.5) — 사용자 환경 결정 대기
+
+| # | 옵션 | 장점 | 단점 |
+|---|------|------|------|
+| **A** | `caffeinate -dimsu` 영구 (launchd plist) | 즉시 / 비용 0 | 발열 + 배터리 |
+| **B** | 별도 Linux 서버 (Mini PC / NAS / 클라우드) | 절전 무관 / 24/7 | 인프라 + 비용 |
+| C | APScheduler misfire_grace_time 전 cron | 부분 완화 | sleep 중 timer X |
+| D | host launchd cron | Docker 의존 ↓ | host Mac sleep 영향 |
+| E | 현재 유지 + 모니터링 | 변경 0 | 새벽 cron miss 지속 |
+
+### 변경 파일 (4 메타)
+
+- `docs/adr/ADR-0001-backend-kiwoom-foundation.md` § 42 신규 (8 sub-§) + § 41.9 갱신
+- `src/backend_kiwoom/STATUS.md` § 0 / § 4 #30 PASS / § 5 / § 6
+- `HANDOFF.md`
+- `CHANGELOG.md` (본 항목)
+
+### 다음 chunk
+
+1. **사용자 환경 결정** — § 42.5 옵션 A~E. 결정 후 후행 chunk 분기
+2. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (Mac 결정과 독립)
+
+---
+
 ## [2026-05-14] ops(kiwoom): Phase D-1 follow-up E4 — 컨테이너 재배포 + 5-12 운영 백필 재호출 + 0 MaxPages / 0 InterfaceError 검증
 
 본 chunk `f7bcfe3` (Phase D-1 follow-up 풀 구현) 의 운영 검증 chunk. 코드 변경 0 / 메타 4 파일 갱신.

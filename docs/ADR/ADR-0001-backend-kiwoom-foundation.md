@@ -3248,10 +3248,119 @@ avg/stock:     0.3s
 ### 41.9 다음 chunk
 
 1. ~~**(E4) 컨테이너 재배포 + 5-12 운영 백필 재호출**~~ ✅ 완료 (본 § 41.7)
-2. **scheduler dead 재발 분석 chunk** (신규 발견 5-14 06:00/06:30 cron miss — § 41.8) — 가설: APScheduler timer freeze / Mac 절전 (§ 38.8 #1)
+2. ~~**scheduler dead 재발 분석 chunk**~~ ✅ 완료 (§ 42) — Mac 절전 원인 확정
 3. **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** — Migration 신규 (NUMERIC(8,4) precision 확대 — overflow 종목 값 분석 선행) + result.errors 의 full exception type/메시지 log 보강
 4. **§ 40.7 운영 모니터** — ka10014 / ka10068 / ka20068 첫 호출 검증
 5. **(5-19 이후) § 36.5 1주 모니터 측정** — 12 scheduler elapsed
 6. **Phase F / G / H** — 신규 endpoint wave
 7. **Phase D-2 ka10080 분봉 (마지막 endpoint)** — 대용량 파티션 결정 동반
 8. **(전체 개발 종결 후) secret 회전**
+
+---
+
+## 42. scheduler dead 원인 확정 — Mac 절전 (Docker Desktop VM sleep) (2026-05-14, ✅ 분석 종결)
+
+> 추가일: 2026-05-14 (KST) — § 41.8 5-14 06:00/06:30 cron miss 발견 + § 38.8 #1 Mac 절전 가설 정합 확정
+> 분류: 진단 / 코드 변경 0
+> 트리거: 5-13 06:00 dead + 5-14 06:00/06:30 dead 반복 → "일회성" 가설 반증
+> 결정: Mac 절전 = 원인 확정 / 해결책 = 사용자 환경 결정 (caffeinate / 서버 이전 / 현재 유지)
+
+### 42.1 배경 — 인시던트 chronology
+
+| 시점 | 사건 |
+|------|------|
+| 5-13 06:00 KST | OhlcvDaily cron 발화 0 (재배포 직후 첫 새벽 cron) |
+| 5-13 06:30 KST | DailyFlow cron 발화 0 |
+| 5-13 07:00 KST | SectorDaily cron 발화 0 |
+| 5-13 (진단 chunk `0ec6326`) | `/admin/scheduler/diag` 추가 + Phase E 3 alias env 추가 + 컨테이너 재배포 → 12 scheduler 활성. baseline diag = 12개 모두 main_loop 동일 / cancelled=false / next_run_time 정확 (race 가설 반증) |
+| 5-13 17:30 KST | stock_master cron 자연 발화 정상 (fetched=4788) — 일회성 가설 |
+| 5-13 18:00 KST | stock_fundamental cron 자연 발화 정상 (total=4379) — 일회성 가설 ↑ |
+| **5-14 06:00 KST** | OhlcvDaily cron 발화 0 — **dead 재발** |
+| **5-14 06:30 KST** | DailyFlow cron 발화 0 — **dead 재발** |
+| 5-14 06:50 KST | 본 § 42 분석 진입 시점 (사용자 발견) |
+| 5-14 06:51 KST | 본 E4 chunk 컨테이너 재배포 (코드 변경 0, 가설 검증용) |
+| 5-14 07:00 KST | SectorDaily cron 자연 발화 정상 (chart.py 호출 진행) — Mac active 시점 |
+
+### 42.2 결정적 증거 — `pmset -g log` Mac sleep history
+
+5-13 저녁부터 Mac 이 **반복 Sleep + DarkWake** 사이클 진입:
+
+```
+2026-05-13 20:01:26 +0900 Sleep   Entering Sleep state due to 'Sleep Service Back to Sleep':TCPKeepAlive=active Using Batt (Charge:80%) 967 secs
+2026-05-13 20:17:35 +0900 Sleep   (Batt 80%) 1011 secs
+2026-05-13 20:34:28 +0900 Sleep   (Batt 80%) 287 secs
+2026-05-13 20:39:28 +0900 Sleep   due to 'Maintenance Sleep' (Batt 80%) 1057 secs
+2026-05-13 20:57:07 +0900 Sleep   (Batt 80%) 904 secs
+... (반복 사이클 5-13 21:12 까지 확인)
+```
+
+**현재 `pmset -g` 결과 (5-14 07:19)**:
+```
+sleep   1 (sleep prevented by sharingd, caffeinate, caffeinate, caffeinate, powerd, JANDI)
+```
+
+`caffeinate` 다중 활성 = **현재만 절전 차단 중**. 5-13 저녁에는 caffeinate 비활성 → 자유 절전. Battery 모드 (Charge 80%, 충전 중 X) + 20:01 부터 자동 sleep.
+
+### 42.3 가설 평가
+
+| 가설 | 평가 | 증거 |
+|------|------|------|
+| **Mac 절전 → Docker VM sleep → APScheduler timer 미발화** | ✅ **확정** | pmset 5-13 20:01~21:12 반복 Sleep + 현재 caffeinate 활성 (5-13 비활성) |
+| APScheduler timer freeze (race condition) | ❌ 반증 | 5-13 진단 chunk `0ec6326` 의 baseline diag = 12 scheduler 모두 main_loop 동일 / cancelled=false / next_run_time 정확. 자연 발화 (17:30/18:00) 모두 정상 |
+| Docker network / DB 연결 끊김 | ❌ 반증 | 5-13 17:30 / 18:00 / 5-14 07:00 자연 발화 시점에는 정상 동작 |
+| 컨테이너 healthcheck 실패 → restart | ❌ 반증 | `docker inspect kiwoom-app` 의 finishedAt=`0001-01-01T00:00:00Z` (never finished). exit=0 / health=healthy 지속 |
+| Battery 부족 | ❌ | Charge 80% 유지 |
+
+**확정 가설**: Mac 절전 → Docker Desktop VM 일시정지 → 컨테이너 sleep → asyncio 이벤트 루프 sleep → APScheduler timer wakeup 호출 안 됨 → cron 미발화. Mac wake 후 APScheduler default behavior 는 missed firing **skip** (단, `misfire_grace_time` 설정된 cron 만 grace 안에 catch-up).
+
+### 42.4 현재 cron 별 misfire_grace_time 상태
+
+| Cron | misfire | 영향 |
+|------|---------|------|
+| `stock_master_sync_daily` (17:30) | 없음 | Mac sleep 중 시각 도달 시 skip |
+| `stock_fundamental_sync_daily` (18:00) | 없음 | 동일 |
+| `ohlcv_daily_sync_daily` (06:00) | 없음 | **5-14 06:00 miss** |
+| `daily_flow_sync_daily` (06:30) | 없음 | **5-14 06:30 miss** |
+| `weekly_ohlcv_sync_weekly` (sat 07:00) | 없음 | — |
+| `monthly_ohlcv_sync_monthly` (매월 1일 03:00) | 없음 | 새벽 = sleep 위험 ↑ |
+| `yearly_ohlcv_sync_yearly` (매년 1월 5일 03:00) | 없음 | 동일 |
+| `sector_daily_sync_daily` (07:00) | 없음 | 5-14 07:00 정상 (Mac active) |
+| `short_selling_sync_daily` (07:30) | **1800s** | Mac wake 후 30분 grace |
+| `lending_market_sync_daily` (07:45) | **1800s** | 동일 |
+| `lending_stock_sync_daily` (08:00) | **5400s** | Mac wake 후 90분 grace |
+| `sector_sync_weekly` (일 03:00) | 없음 | 일요일 새벽 = 사용자 sleep 가능성 ↑ |
+
+→ 새벽 cron (03:00 / 06:00 / 06:30) 이 sleep 위험 가장 큼.
+
+### 42.5 해결 옵션 (사용자 결정 — § 38.8 #1 갱신)
+
+| # | 옵션 | 장점 | 단점 |
+|---|------|------|------|
+| **A** | `caffeinate -dimsu &` 영구 활성 (launchd plist) | 즉시 적용 / 추가 비용 0 | 발열 + 배터리 빠르게 소모 (노트북 닫혀도 동작) |
+| **B** | 별도 Linux 서버 이전 (Mini PC / NAS / 클라우드 VM) | 절전 무관 / 24/7 안정 | 인프라 구축 + 비용 |
+| C | APScheduler `misfire_grace_time` 전 cron 적용 | 부분 완화 | sleep 중에는 timer 자체 X → grace 만으로 부족. wake 시 즉시 catch-up 만 |
+| D | host launchd cron + `curl admin endpoint` | Docker Desktop 의존 줄임 | host Mac 도 sleep 영향 (WakeUp on cron 필요) |
+| E | 현재 유지 + 모니터링 | 변경 0 | 매일 새벽 cron 미발화 위험 |
+
+### 42.6 본 chunk 결정
+
+본 § 42 는 **분석 종결** — 원인 확정 + 해결 옵션 제시. 사용자 환경 결정으로 본 chunk 의 범위 외. 코드 변경 0 / Migration 0.
+
+**임시 권고** (다음 cron 까지):
+- Mac active 상태 유지 (caffeinate 실행 또는 노트북 깬 채로 둠)
+- 또는 본 chunk 직후 사용자 결정 → 별도 chunk
+
+### 42.7 관련 § 갱신
+
+- **§ 38.8 #1 갱신**: Mac 절전 = "위험 가설" → **"원인 확정"** (5-14 dead 재발로 검증). 해결 옵션 § 42.5 표 추가
+- **§ 41.8 추가 발견**: dead 재발 가설 → 본 § 42 로 종결
+- **HANDOFF Pending #6** (Mac 절전 시 컨테이너 중단 위험): 위험 가설 → **확정 인시던트**. 사용자 환경 결정 시급
+
+### 42.8 다음 chunk
+
+1. **사용자 환경 결정** — § 42.5 옵션 A~E 중 선택. 후행 chunk 는 결정 후 진행
+2. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (Mac 절전 결정과 독립)
+3. **§ 40.7 운영 모니터** — ka10014 / ka10068 / ka20068 첫 호출 검증
+4. **(5-19 이후) § 36.5 1주 모니터 측정** — 12 scheduler elapsed
+5. **Phase F / G / H** — 신규 endpoint wave
+6. **Phase D-2 ka10080 분봉 (마지막 endpoint)** — 대용량 파티션 결정 동반
