@@ -7,6 +7,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] ops(kiwoom): Phase D-1 follow-up E4 — 컨테이너 재배포 + 5-12 운영 백필 재호출 + 0 MaxPages / 0 InterfaceError 검증
+
+본 chunk `f7bcfe3` (Phase D-1 follow-up 풀 구현) 의 운영 검증 chunk. 코드 변경 0 / 메타 4 파일 갱신.
+
+### 운영 검증 결과 (5-14 06:50~07:00 KST)
+
+**(a) 컨테이너 재배포** (06:51 KST) — `docker compose build` 캐시 빌드 + `up -d` → /health ok + 12 scheduler 활성
+
+**(b) sector_daily 5-12 bulk sync** (06:58, `POST /api/kiwoom/sectors/ohlcv/daily/sync`) — `total=124, success=124, failed=0, errors=[]`
+
+| 지표 | 5-12 백필 (5-13 02:33) | 5-12 재호출 (5-14 06:58) |
+|------|------------------------|---------------------------|
+| total | 124 | 124 |
+| success | 60 (48.4%) | **124 (100%)** ✅ |
+| failed | 64 (51.6%) | **0** ✅ |
+| KiwoomMaxPagesExceededError | 56 | **0** ✅ |
+| asyncpg.InterfaceError 32767 | 8 | **0** ✅ |
+| DB row 적재 | 59 | 123 (1 sentinel) |
+
+**(c) KOSDAQ daily_flow 5-12 backfill CLI** (06:53~07:00) — `docker compose exec -T kiwoom-app python scripts/backfill_daily_flow.py --alias prod --start-date 2026-05-12 --end-date 2026-05-12 --only-market-codes 10 --resume`
+
+- `total=1487 종목 / success_krx=1487 / success_nxt=224 / failed=0 / 7m 7s / avg 0.3s/stock`
+- 0 MaxPages / 0 InterfaceError ✅
+
+**(d) DB 최종 상태 (5-12)**:
+- `sector_price_daily` 5-12: **123 row**
+- `stock_daily_flow` 5-12: KRX 2648 / NXT 633 / 합계 3281
+
+### 본 chunk fix 효과 운영 확정
+
+- cap 상향 (10→40 sector / 40→60 daily_market) → 0 MaxPages
+- bulk insert chunk_size=1000 → 0 InterfaceError (32767 한도 회피)
+- 평균 호출 시간 sector 2.5s / stock 0.3s (KRX rate limit 2s/호출 마진)
+
+### 추가 발견 — 5-14 06:00/06:30 cron miss
+
+재배포 직전 1시간 docker logs 0 cron event:
+- 5-14 06:00 OhlcvDaily 발화 0
+- 5-14 06:30 DailyFlow 발화 0
+
+5-13 17:30 stock_master / 18:00 stock_fundamental 자연 발화 정상 검증 후 06:00 dead 일회성 가설 → **5-14 새벽 재발 가능성 ↑**. 본 chunk 컨테이너 재배포 후 07:00 sector_daily cron 자연 발화 정상 확인.
+
+**별도 chunk 후보**: scheduler dead 재발 분석 (APScheduler timer freeze 가설 / Mac 절전 § 38.8 #1 재검토).
+
+### 변경 파일 (4)
+
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 41.7 운영 결과 표 + § 41.8 추가 발견 + § 41.9 다음 chunk (재번호)
+- `src/backend_kiwoom/STATUS.md` § 0 / § 4 #27 #28 PASS + #30 신규 / § 5 / § 6
+- `HANDOFF.md` (본 세션 인수인계)
+- `CHANGELOG.md` (본 항목)
+
+### 다음 chunk
+
+1. **scheduler dead 재발 분석** — 5-14 06:00/06:30 cron miss. APScheduler timer freeze 가설 / Mac 절전 (§ 38.8 #1) 재검토
+2. **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** (별도 ted-run)
+
+---
+
 ## [2026-05-14] fix(kiwoom): Phase D-1 follow-up — MaxPages cap 상향 (ka20006 10→40, ka10086 40→60) + bulk insert 32767 chunk 분할
 
 본 chunk `478efaa` (5-13 진단 + plan doc § 13) 의 ted-run 풀 파이프라인. 운영 5-12 D-1 백필 시도에서 발생한 인시던트 (ka20006 60% 실패 + ka10086 KOSDAQ 1814 누락) 의 코드 fix.

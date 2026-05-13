@@ -3063,3 +3063,195 @@ Phase D-1 ka20006 종결 후 사용자 결정 (5-12): 통합 1 chunk — ka10014
 4. **Phase F (순위 5종) / G (투자자별 3종) / H (통합)** — 신규 endpoint wave
 5. **Phase D-2 ka10080 분봉 (마지막 endpoint)** — 대용량 파티션 결정 chunk 선행
 6. **(전체 개발 종결 후) secret 회전** — `docs/ops/secret-rotation-2026-05-12.md` 절차서
+
+---
+
+## 41. Phase D-1 follow-up — MaxPages cap 상향 + bulk insert 32767 chunk 분할 (2026-05-14, ✅ 완료)
+
+> 추가일: 2026-05-14 (KST) — Phase E (`0e767fe`) + 컨테이너 재배포 (`0ec6326`) + 진단 chunk (`478efaa`, 5-13) 종결 후
+> 분류: fix (운영 인시던트 대응)
+> 트리거: 2026-05-12 D-1 백필 시도 결과 — ka20006 sector_daily 60/124 (48%) + ka10086 KOSDAQ ~1814 누락
+> Plan doc: `src/backend_kiwoom/docs/plans/endpoint-13-ka20006.md § 13`
+
+### 41.1 배경
+
+5-13 dead 가설 자연 재현 반증 (17:30 stock_master + 18:00 stock_fundamental 정상 발화) 후 진단 중 발견된 신규 인시던트 3건 중 2건 (E 묶음) 의 코드 fix. F 별도 (ka10001 NUMERIC overflow + sentinel WARN/skipped 분리).
+
+**근본 원인**:
+
+| # | 인시던트 | 실 예외 | 카운트 |
+|---|---------|--------|--------|
+| 1 | ka20006 MaxPages | `KiwoomMaxPagesExceededError` (`SECTOR_DAILY_MAX_PAGES=10`) | 56 / 124 (45%) |
+| 2 | ka20006 InterfaceError | `asyncpg.exceptions._base.InterfaceError: the number of query arguments cannot exceed 32767` (sector_id 29/57/102/103/105-108) | 8 / 124 |
+| 3 | ka10086 KOSDAQ MaxPages | `KiwoomMaxPagesExceededError` (`DAILY_MARKET_MAX_PAGES=40`) | 다수 (KRX ~1814 누락) |
+
+#1·#3 = 추정값 ("1 page ~600 거래일") 운영 반증. ka10086 실측 (1 page ~22 거래일, mrkcond.py L51-53) 패턴 일관.
+#2 = PostgreSQL wire protocol int16 한도 — bulk insert 의 row × column > 32767 시 발생. sector_daily 일부 long-history sector (15년+) 의 3년 백필 = 5500+ row × 8 col ≈ 44k > 32767 한도 초과.
+
+### 41.2 결정 (plan doc § 13.2 그대로 — 운영 검증 진행 시점 갱신 예정)
+
+| # | 사안 | 결정 |
+|---|------|------|
+| 1 | `SECTOR_DAILY_MAX_PAGES` 상향 | 10 → **40** (ka10086 실측 패턴 일관) |
+| 2 | `DAILY_MARKET_MAX_PAGES` 상향 | 40 → **60** (KOSDAQ 1814 누락 근거) |
+| 3 | bulk insert chunk 분할 | `upsert_many` chunk_size = **1000** (32767 / 13 col ≈ 2520 안전 — 1000 보수치) |
+| 4 | 적용 범위 | (a) `SectorPriceDailyRepository` (b) `StockDailyFlowRepository` |
+| 5 | helper 표준화 | `_chunked_upsert(session, statement_factory, rows, *, chunk_size=1000) -> int` — `_helpers.py` |
+| 6 | 예외 시그니처 확장 | `KiwoomMaxPagesExceededError(*, api_id, page, cap)` — 운영 가시화 (어느 cap 이 얼마나 부족했는지) |
+| 7 | UseCase 시그니처 | **변경 0** (Repository 단 흡수) |
+| 8 | Migration | **없음** (스키마 변경 0) |
+| 9 | 백필 재호출 (운영) | 본 chunk 머지 + 컨테이너 재배포 후 별도 운영 chunk (E4) |
+| 10 | scheduler dead 진단 endpoint | 본 chunk 범위 X — dead 자연 재현 반증 후 `/admin/scheduler/diag` 유지 (운영 가치) |
+
+### 41.3 영향 범위 (6 코드 + 5 테스트, +13 신규 cases)
+
+**코드 (6 files, +342/-59 line, Migration 0)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `app/adapter/out/kiwoom/chart.py` | `SECTOR_DAILY_MAX_PAGES = 10 → 40` + 주석 갱신 + docstring "`(10)` → `(40)`" 정합 (2a 2R M-1) |
+| 2 | `app/adapter/out/kiwoom/mrkcond.py` | `DAILY_MARKET_MAX_PAGES = 40 → 60` + 주석 갱신 |
+| 3 | `app/adapter/out/kiwoom/_client.py` | `KiwoomMaxPagesExceededError(*, api_id, page, cap)` `__init__` 추가 + `super().__init__` 메시지 형식 갱신 + `call_paginated` raise site (line 347) 갱신 |
+| 4 | `app/adapter/out/persistence/repositories/_helpers.py` | `_chunked_upsert` 신규 + docstring stateless 보장 명시 (2a 2R M-2) + `n_cols × chunk_size > 32767` fail-fast 가드 (2b 2R M-1) |
+| 5 | `app/adapter/out/persistence/repositories/sector_price.py` | `_build_upsert` 클로저 + `_chunked_upsert(self._session, _build_upsert, normalized, chunk_size=1000)` 호출 |
+| 6 | `app/adapter/out/persistence/repositories/stock_daily_flow.py` | 동일 패턴 |
+
+**테스트 (4 갱신 + 1 신규, +13 cases)**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `tests/test_kiwoom_chart_client.py` | +2 cases (constant=40 / `(page=40, cap=40)` raise) |
+| 2 | `tests/test_kiwoom_mrkcond_client.py` | +2 cases (constant=60 / `(page=60, cap=60)` raise) |
+| 3 | `tests/test_repository_chunked_upsert.py` (신규) | 7 cases (empty / 1 row / 999 / 1001 / 5500 / chunk_size=500 / n_cols×size > 32767 ValueError) |
+| 4 | `tests/test_sector_price_repository.py` | +1 case (5500 row × 8 col chunk 분할 안전 — testcontainers PG16) |
+| 5 | `tests/test_stock_daily_flow_repository.py` | +1 case (3000 row × 12 col chunk 분할 안전 — testcontainers PG16) |
+
+### 41.4 적대적 이중 리뷰 결과
+
+| 리뷰 | 모델 | 결과 | 발견 |
+|------|------|------|------|
+| 1R 2a 일반 품질 | sonnet | ✅ PASS | M-1 docstring 오기 + M-2 stateless 명시 권고 + LOW 4 |
+| 1R 2b 적대적·보안 | opus | ✅ PASS | M-1 column 수 silent breakage 가드 부재 + LOW 4 |
+
+**MEDIUM 3건 모두 즉시 fix**:
+- 2a M-1: `chart.py:742` docstring `"SECTOR_DAILY_MAX_PAGES (10)" → "(40)"`
+- 2a M-2: `_chunked_upsert` docstring `stateless 보장 필수` 한 줄 추가
+- 2b M-1: `_chunked_upsert` 진입 시 `n_cols × chunk_size > 32767` 시 `ValueError` fail-fast + 신규 가드 테스트 1 case
+
+CRITICAL 0 / HIGH 0 / 본 chunk 의 보안 정책 (응답 본문 echo 금지 / `_clear_chain` / 헤더 인젝션 검증) 우회 0.
+
+### 41.5 Verification 5관문
+
+| 관문 | 결과 |
+|------|------|
+| 3-1 빌드 | py compile 정상 (1199 collection PASS) |
+| 3-2 ruff | All checks passed |
+| 3-2 mypy --strict | Success: no issues found in 95 source files |
+| 3-3 pytest | **1199 passed** (baseline 1186 → +13 신규) / coverage **86.13%** (≥80% 통과) |
+| 3-4 보안 스캔 | ⚪ (계약 분류 자동 생략) |
+| 3-5 런타임 | ✅ (pytest collection 의 import 검증 통과) |
+| 4 E2E | ⚪ (UI 변경 0) |
+
+### 41.6 누적 측정
+
+- 코드: 6 파일 (1 신규 helper + 5 갱신) / Migration 0 / UseCase 변경 0
+- 테스트: 1186 → **1199** (+13 신규 / 100% green)
+- coverage: **86.13%** (≥80% 통과)
+- 1R: CRITICAL 0 / HIGH 0 / MEDIUM 3 즉시 fix → PASS
+- Verification: 5관문 모두 PASS
+- 25 endpoint: 15 / 25 (60%) 그대로 — 신규 endpoint X
+- 스케줄러: 12 그대로 — 신규 cron X
+
+### 41.7 운영 모니터 (E4 chunk — 2026-05-14 ✅ 완료)
+
+본 chunk (`f7bcfe3`) 머지 + 컨테이너 재배포 + 5-12 백필 재호출 결과:
+
+#### (a) 컨테이너 재배포 (06:51 KST)
+
+- `docker compose build kiwoom-app` — 캐시 활용 빌드 즉시 완료
+- `docker compose up -d kiwoom-app` — Recreated / Started
+- /health = `{"status":"ok"}` / 12 scheduler 활성 (재기동 직후)
+
+#### (b) sector_daily 5-12 bulk sync (06:58 KST) — **PASS**
+
+```
+POST /api/kiwoom/sectors/ohlcv/daily/sync?alias=prod&base_date=2026-05-12
+{
+  "total": 124,
+  "success": 124,
+  "failed": 0,
+  "errors": []
+}
+```
+
+| 지표 | 5-12 백필 (5-13 02:33) | 5-12 재호출 (5-14 06:58) |
+|------|------------------------|---------------------------|
+| total | 124 | 124 |
+| success | 60 (48.4%) | **124 (100%)** ✅ |
+| failed | 64 (51.6%) | **0** ✅ |
+| KiwoomMaxPagesExceededError | 56 | **0** ✅ |
+| asyncpg.InterfaceError 32767 | 8 | **0** ✅ |
+| DB row 적재 | 59 | **123** (1 sector sentinel break 정상) |
+
+#### (c) KOSDAQ daily_flow 5-12 backfill CLI (06:53~07:00 KST) — **PASS**
+
+```
+$ docker compose exec -T kiwoom-app python scripts/backfill_daily_flow.py \
+    --alias prod --start-date 2026-05-12 --end-date 2026-05-12 \
+    --only-market-codes 10 --resume --log-level INFO
+
+===== Daily Flow Backfill Summary =====
+indc_mode:     quantity
+date range:    2026-05-12 ~ 2026-05-12
+total:         1487 종목 (KOSDAQ, resume 으로 미적재 종목만)
+success_krx:   1487
+success_nxt:   224
+failed:        0 (ratio 0.00%)
+elapsed:       0h 7m 7s
+avg/stock:     0.3s
+```
+
+| 지표 | 5-12 시도 (5-13) | 5-12 재호출 (5-14) |
+|------|------------------|---------------------|
+| KRX success | 2559 (1814 누락) | **2648** (재호출 1487 합산) ✅ |
+| KOSDAQ MaxPages | 다수 | **0** ✅ |
+| 0 InterfaceError | — | ✅ |
+
+#### (d) DB 최종 상태 (5-12, 07:00 KST)
+
+| 테이블 | 5-12 row |
+|--------|----------|
+| `sector_price_daily` | 123 (1 sector empty sentinel) |
+| `stock_daily_flow` KRX | 2648 |
+| `stock_daily_flow` NXT | 633 |
+| `stock_daily_flow` 합계 | 3281 |
+
+#### (e) page 분포 실측 — 다음 운영 1주 (5-19 이후) § 36.5 와 합산
+
+- ka20006 sector 별 실 page 수 분포: 본 호출은 124 sector 약 5분 소요 = 평균 ~2.5초/sector (KRX rate limit 2초/호출 + chunk 분할 오버헤드 미미). **40 cap 여유 충분 가정** — 정밀 측정은 다음 § 36.5 모니터링 (5-19 이후)
+- ka10086 KOSDAQ 종목 page 분포: 1487 종목 7m 7s = 평균 0.3초/stock = ka10086 대부분 종목이 cap=60 의 일부만 사용 (`--resume` 으로 미적재만 처리한 결과). 60 cap 여유 충분
+
+#### (f) chunk_size 1000 보수치 검증
+
+본 호출은 5-12 단일 일자 (1 row per sector × 124 = 124 rows / 1 row per stock × 1487 = 1487 rows) — 단일 chunk 내에서 처리 (1487 < 1000 × 2 = 2 chunk 만, 8 col × 1487 = 11896 args < 32767). chunk 분할 자체 효과 운영 측정은 3년 백필 시점 (별도 chunk) 으로 이연.
+
+#### (g) `/admin/scheduler/diag` 운영 가치
+
+본 chunk 의 5-14 06:00/06:30 cron miss 발견 — dead 가설 자연 재현 가능성 ↑ (5-13 자연 발화 정상 / 5-14 새벽 cron miss). 그러나 07:00 sector_daily cron 자연 발화 정상 (123 row 적재 / 진행 중). **`/admin/scheduler/diag` 유지 결정 — 추가 인시던트 진단에 필요**. Pending #7 는 1주 모니터 (5-19 이후) 결과 보고 결정.
+
+### 41.8 추가 발견 (5-14 06:50 KST 컨테이너 재배포 직전)
+
+- **5-14 06:00 OhlcvDaily / 06:30 DailyFlow cron miss** — 컨테이너 재배포 전 1시간 docker logs 0 cron event. 5-13 17:30/18:00 정상 발화 검증 후 06:00 dead 일회성 가설 → 5-14 새벽 재발 가능성 ↑
+- 본 chunk 컨테이너 재배포 (06:51 KST) 후 07:00 sector_daily cron 자연 발화 정상 (chart.py 호출 + 5-13 base date 적재 진행)
+- **별도 chunk 후보**: dead 가설 재발 분석 — APScheduler timer freeze 가설 / 컨테이너 sleep 가설 (Mac 절전 § 38.8 #1) 재검토
+
+### 41.9 다음 chunk
+
+1. ~~**(E4) 컨테이너 재배포 + 5-12 운영 백필 재호출**~~ ✅ 완료 (본 § 41.7)
+2. **scheduler dead 재발 분석 chunk** (신규 발견 5-14 06:00/06:30 cron miss — § 41.8) — 가설: APScheduler timer freeze / Mac 절전 (§ 38.8 #1)
+3. **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** — Migration 신규 (NUMERIC(8,4) precision 확대 — overflow 종목 값 분석 선행) + result.errors 의 full exception type/메시지 log 보강
+4. **§ 40.7 운영 모니터** — ka10014 / ka10068 / ka20068 첫 호출 검증
+5. **(5-19 이후) § 36.5 1주 모니터 측정** — 12 scheduler elapsed
+6. **Phase F / G / H** — 신규 endpoint wave
+7. **Phase D-2 ka10080 분봉 (마지막 endpoint)** — 대용량 파티션 결정 동반
+8. **(전체 개발 종결 후) secret 회전**
