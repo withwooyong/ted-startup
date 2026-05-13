@@ -7,6 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-13] docs(kiwoom): 5-12 D-1 백필 partial 진행 + ka20006 60% 실패 발견 + 메타 갱신 (세션 종료)
+
+본 chunk `0ec6326` 직후 작업 — 5-12 D-1 백필 시도. sector_master 124 OK / sector_daily 5-12 60% 실패 (ka20006 follow-up 신규 issue) / ohlcv 5-12 partial (KRX 2559+NXT 632, 1814 누락) / daily_flow 5-12 480 서버 백그라운드 진행 중. 코드 변경 0 (HANDOFF + STATUS + CHANGELOG 메타 갱신만).
+
+### 백필 결과 (15:05 KST 시점)
+
+| Endpoint | 적재 | 결과 |
+|----------|------|------|
+| sector_master (ka10101) | 124 / 124 | ✅ all_succeeded |
+| sector_daily (ka20006) | 59 / 124 | ❌ 60 success / **64 failed** (KiwoomMaxPagesExceededError 다수 + InterfaceError 8) |
+| stock_price_krx (ka10081) | 2559 / 4373 | ⚠️ curl 1시간 timeout, server-side cancel, 1814 누락 |
+| stock_price_nxt (ka10081) | 632 | ✅ 영숫자 포함 정상 |
+| stock_daily_flow (ka10086) | 480 / ~4000 | 🔄 서버 백그라운드 진행 중 (5.25 rows/min, 17:30 cron 까지 못 끝남) |
+
+### ka20006 60% 실패 — STATUS § 4 #27 신규
+
+- KiwoomMaxPagesExceededError 다수 (sector_id 1~57 영역)
+- InterfaceError 8건 (sector_id 29, 57, 102, 103, 105, 106, 107, 108) — async DB session 어딘가에서 잠김
+- D-1 plan doc § 12.4 max_pages 부족 + DB session 패턴 follow-up chunk 필요. ADR § 39 후속.
+
+### 다음 세션 1순위 (HANDOFF)
+
+- 5-13 17:30 / 18:00 stock_master + stock_fundamental dead 재현 모니터 (자연 cron 발화, 다음 세션 진입 직후)
+- 5-12 D-1 백필 완료 확인 + OHLCV 1814 잔여 재호출 결정
+- ka20006 60% 실패 follow-up chunk
+
+---
+
 ## [2026-05-13] fix(kiwoom): Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint — 12 scheduler 활성 + `/admin/scheduler/diag` baseline OK / 5-13 06:00 cron dead 인시던트 발견
 
 5-13 06:00/06:30/07:00 KST cron 발화 0 + DB row 0 — 13시간 idle 후 9 scheduler 의 timer 가 모두 dead. 코드 정적 분석 (lifespan + AsyncIOScheduler) + baseline 검증 (별도 python 1분 cron 정상 발화) + py-spy attach (메인 thread `do_epoll_wait` alive) 모두 정상 → 가설 좁히기 막힘. 진단 endpoint 추가 후 재배포.

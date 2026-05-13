@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-13 (Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint — 12 scheduler 활성 / `/admin/scheduler/diag` baseline OK (12개 모두 main_loop 동일 / timer cancelled=false / next_run_time KST 정확) / 5-13 06:00 cron dead 인시던트 발견 — 원인 미상, 17:30 stock_master 발화 시 재현 모니터)
+> **마지막 갱신**: 2026-05-13 (Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint `0ec6326` + 5-12 D-1 백필 partial — sector_master 124 OK / sector_daily 60% 실패 (ka20006 follow-up 신규 § 4 #27) / ohlcv KRX 2559+NXT 632 적재 (1814 누락) / daily_flow 480 서버 백그라운드 진행 중)
 
 ---
 
@@ -13,7 +13,7 @@
 |------|-----|
 | 진행 Phase | **Phase E 종결** (ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 완료) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
 | 마지막 완료 chunk | **Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint** — `/admin/scheduler/diag` 추가 + compose env Phase E 3 alias (short_selling/lending_market/lending_stock) 추가 + 컨테이너 재배포로 12 scheduler 활성. baseline diag = 12 scheduler 모두 main_loop 동일 / timer cancelled=false / next_run_time KST 정확 — 인스턴스 race 가설 반증. 5-13 06:00/06:30/07:00 cron dead 진짜 원인 미상 — 17:30 stock_master 발화 시 재현 모니터. |
-| 다음 chunk | **5-12 (화) D-1 백필 (ohlcv + daily_flow + sector_daily)** + **5-13 17:30 stock_master dead 재현 모니터** 병행 |
+| 다음 chunk | **5-13 17:30 / 18:00 stock_master + stock_fundamental dead 재현 모니터** (자연 cron 발화) + **5-12 백필 완료 확인** + **OHLCV 1814 잔여 재호출 결정** + **ka20006 60% 실패 follow-up chunk** |
 | 25 Endpoint 진행 | **15 / 25 완료 (60%)**. ka10014 / ka10068 / ka20068 → ✅ |
 | 누적 chunk | 50 commits (Phase E 컨테이너 재배포 + dead 진단 chunk 추가) |
 | 테스트 | **1097 cases** (1059 + 38) / coverage **90%** / ruff PASS / mypy strict PASS |
@@ -140,6 +140,7 @@ P3 (선택):
 | ~~19~~ | ~~영숫자 295 종목 추가로 cron elapsed +10분 추정~~ | ADR § 33.6 → § 34.6 | ✅ **정정** — 영숫자 백필 실측 1108 종목 5m 48s = 0.31s/stock → **cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정의 15%) |
 | **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
 | **26** | **5-13 06:00/06:30/07:00 cron dead** — 13시간 idle 후 timer 발화 0 (ohlcv_daily / daily_flow / sector_daily 모두 0 rows). | 본 chunk 진단 | **원인 미상**. baseline diag (재배포 직후) = 12 scheduler 모두 main_loop 동일 / `timeout.cancelled=false` / next_run_time KST 정확 → 9개 race 가설 반증. **재현 검증** = 5-13 17:30 stock_master 발화 직전/직후 `/admin/scheduler/diag` 호출하여 timer 상태 비교. dead 재현 시 ADR 신규 §. |
+| **27** | **ka20006 sector_daily 60% 실패** — 5-12 백필 호출 시 124 총 / 60 success / **64 failed**: KiwoomMaxPagesExceededError (다수) + InterfaceError (8건). | 5-12 백필 호출 결과 | D-1 plan doc § 12.4 H-5 max_pages 부족 가설 + DB session 패턴 (InterfaceError 8건은 async session 어딘가에서 잠김) 별도 조사 필요. **별도 follow-up chunk** — ADR § 39 후속 또는 신규 §. ka20006 운영 첫 호출 성공률 48% (60/124). |
 
 ---
 
@@ -147,8 +148,9 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **5-12 (화) D-1 백필** (ohlcv_daily + daily_flow + sector_daily — 5-13 cron dead 로 누락) | 5-13 06:00/06:30/07:00 cron 미발화 → KRX/NXT/sector_daily 5-12 row 0. admin endpoint 수동 trigger 로 백필 | 수동 trigger 호출 + 검증 SQL |
-| **2** | **5-13 17:30 stock_master dead 재현 모니터** | § 4 #26. 발화 직전/직후 `/admin/scheduler/diag` 비교 → timer 만료 후 wakeup 도착 여부 검증. dead 재현 시 ADR 신규 § + 원인 가설 다시 좁힘 | 자연 대기 + diag 호출 + ADR |
+| **1** | **5-13 17:30 / 18:00 stock_master + stock_fundamental dead 재현 모니터** (자연 cron 발화) | § 4 #26. 발화 직전/직후 `/admin/scheduler/diag` 비교 → timer 만료 후 wakeup 도착 여부 검증. dead 재현 시 ADR 신규 § + 원인 가설 다시 좁힘 | 자연 대기 + diag 호출 + ADR |
+| **2** | **5-12 D-1 백필 완료 확인** + **OHLCV 1814 잔여 재호출 결정** | 본 세션 partial 적재: sector_master 124 OK / sector_daily 59 (60 success 60% 실패) / ohlcv KRX 2559+NXT 632 (1814 누락) / daily_flow 480 서버 백그라운드 진행 중. 다음 세션 진입 시 row count 재측정 → 재호출 여부 결정 | 검증 SQL + 조건부 재호출 |
+| **3** | **ka20006 sector_daily 60% 실패 follow-up** (별도 chunk) | § 4 #27. KiwoomMaxPagesExceededError 다수 + InterfaceError 8건 — D-1 plan doc § max_pages 부족 + DB session 패턴 검토. ADR § 39 후속 또는 신규 § | plan doc 신규 § + 코드 fix |
 | 3 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 → 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 3 | **Phase F (순위 5종) — ka10027/30/31/32/23** | 신규 endpoint wave (남은 7 endpoint) | 5 endpoint 통합 1 chunk 검토 |
 | 4 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |

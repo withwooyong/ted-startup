@@ -1,20 +1,32 @@
 # Session Handoff
 
-> Last updated: 2026-05-13 (KST) — Phase E 컨테이너 재배포 + scheduler dead 진단 chunk 진행 중 / 미푸시 1 commit 예상.
+> Last updated: 2026-05-13 (KST) — Phase E 컨테이너 재배포 + scheduler dead 진단 chunk 커밋 완료 + 5-12 D-1 백필 partial 진행 중 / 세션 종료.
 > Branch: `master`
-> Latest pushed commit: `0e767fe` (Phase E 풀 구현)
-> 미푸시 commit: 본 chunk 커밋 1건 예상 — push 사용자 명시 요청 시만
+> Latest commit: `0ec6326` (Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint) — 본 세션 1 commit
+> 미푸시: 본 세션 메타 갱신 commit 1건 예상 — 사용자 push 명시 요청
 
 ## Current Status
 
-**Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint chunk 진행 중** — 5-13 (수) 첫 cron 발화 검증 진입 후 **9 scheduler 전체 dead 발견** (06:00/06:30/07:00 KST 발화 0, DB row 0). 코드 정적 분석 (lifespan + AsyncIOScheduler 패턴) + baseline 검증 (컨테이너 안 별도 python 프로세스 1분 cron 정상 발화 — APScheduler 환경 결백) + py-spy attach (메인 thread `do_epoll_wait` alive, asyncio 루프 정상) 모두 통과 → 가설 좁히기 막힘. `/admin/scheduler/diag` endpoint 추가 + docker-compose.yml 에 Phase E 3 alias env 추가 + 컨테이너 재배포 → **12 scheduler 활성**. baseline diag = 12개 모두 `main_loop_id=187651270154288` 동일 / `timeout.cancelled=false` / `next_run_time` KST 정확 → **9개 인스턴스 race 가설 반증** (등록 시점은 깨끗). 진짜 원인 미상 — 시간 의존(13시간 idle 후 dead).
+**Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint chunk 커밋 완료 (`0ec6326`)** + **5-12 D-1 백필 partial 진행 중 (컨테이너 안 daily_flow 계속 처리)** — 두 운영 인시던트 동시 진행 중.
+
+### 인시던트 A: scheduler dead (원인 미상)
+- 5-13 06:00/06:30/07:00 KST cron 발화 0 (DB row 0)
+- 정공법 모두 통과 (코드 정적 / baseline / py-spy) — race 가설 반증
+- `/admin/scheduler/diag` 추가 + 재배포로 12 scheduler 활성 / baseline diag 정상
+- **다음 검증 시점**: 5-13 17:30 KST stock_master 발화 직전/직후 diag 비교
+
+### 인시던트 B: 5-12 D-1 백필 partial + ka20006 60% 실패
+- sector_master 백필 OK — 124 sectors (KOSPI 종합 31 + KOSPI 업종 34 + KOSDAQ 종합 28 + KOSPI 기타 2 + KOSDAQ 업종 29)
+- sector_daily 5-12 백필: **60 success / 64 failed** (KiwoomMaxPagesExceededError 다수 + InterfaceError 8건). ka20006 chunk follow-up 별도.
+- ohlcv 5-12 백필: curl 1시간 timeout → 서버측 cancel → **KRX 2559 / NXT 632 적재** (KRX 1814 누락)
+- daily_flow 5-12 백필: curl 1시간 timeout → 서버측 계속 처리 중. 15:05 KST 시점 **480 / ~4000** (12%). 5.25/min 속도 — 17:30 cron 까지 못 끝남.
 
 **현재 상태**:
-- kiwoom-app container: **12 scheduler 활성** (Phase E 3 신규 포함). baseline diag 정상.
-- 5-12 (화) D-1 데이터 누락 (KRX/NXT/sector_daily row 0) — 백필 chunk 필요
-- 다음 자연 발화 시점: 5-13 17:30 KST stock_master (dead 재현 검증 시점)
-- 테스트 1186 / coverage 86.30% (디버그 endpoint + compose env 만, 코드 ruff/mypy PASS)
-- **15 / 25 endpoint (60%)** — Phase E 종결 변동 없음
+- kiwoom-app container: 12 scheduler 활성 (3 시간 healthy) + daily_flow 백필 백그라운드 진행 중
+- 5-12 D-1 적재 (15:05 KST): KRX 2559 / NXT 632 / daily_flow 480 / sector_daily 59
+- 17:30 stock_master cron 자연 발화 = **2.3시간 후** (dead 재현 검증 시점 — 다음 세션)
+- 테스트 1186 / coverage 86.30% (코드 변경 0 — 본 chunk 디버그 endpoint + compose env 만)
+- **15 / 25 endpoint (60%)** 그대로
 
 ## Completed This Session
 
@@ -29,14 +41,16 @@
 | 7 | **Phase D-1 ka20006 풀 구현 (ted-run)** — TDD 38 신규 / 구현 10 파일 / 1R CONDITIONAL → PASS / Verification 5관문 PASS / 컨테이너 재배포 / ADR § 39 / 메타 갱신 | 1097 tests / coverage 90% / 9 scheduler 활성 / 12/25 endpoint | 16 / `249c277` |
 | 8 | **Phase E 통합 chunk plan doc § 12 작성** — endpoint-15-ka10014.md 본문 끝에 § 12 (12.1~12.7) 신규 / endpoint-16/17 cross-ref / STATUS / HANDOFF / CHANGELOG 갱신 | 10 결정 + 13 self-check + DoD 15 코드 8 테스트 — ted-run 대기 | 6 / `ac6a941` |
 | 9 | **Phase E 풀 구현 (ted-run)** — TDD 89 sonnet 3 병렬 → 구현 25 파일 opus 3 병렬 → 1R CONDITIONAL → fix 10건 (CRITICAL 6 + HIGH 10) → PASS → Verification 5관문 → ADR § 40 / 메타 3종 / master.md 3 row | 1186 tests / coverage 86.30% / ruff + mypy strict PASS / 15/25 endpoint (60%) | 41 / `0e767fe` |
-| 10 | **Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint** (5-13) — 5-13 06:00/06:30/07:00 cron 발화 0 + DB row 0 발견 → 코드 정적 분석 + baseline (별도 python 1분 cron 정상) + py-spy (메인 `do_epoll_wait` alive) 모두 정상 → 가설 좁히기 막힘 → `/admin/scheduler/diag` endpoint 추가 + Phase E 3 alias env 추가 + 재배포 → 12 scheduler 활성 + baseline diag OK (12개 main_loop 동일 / cancelled=false / next_run_time KST 정확) → 9개 race 반증 | 12 scheduler 활성 / 5-12 D-1 백필 + 17:30 재현 모니터 대기 | 2 / `<this commit>` |
+| 10 | **Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint** (5-13) — 5-13 06:00/06:30/07:00 cron 발화 0 + DB row 0 발견 → 코드 정적 분석 + baseline (별도 python 1분 cron 정상) + py-spy (메인 `do_epoll_wait` alive) 모두 정상 → 가설 좁히기 막힘 → `/admin/scheduler/diag` endpoint 추가 + Phase E 3 alias env 추가 + 재배포 → 12 scheduler 활성 + baseline diag OK (12개 main_loop 동일 / cancelled=false / next_run_time KST 정확) → 9개 race 반증 | 12 scheduler 활성 / 5-12 D-1 백필 + 17:30 재현 모니터 대기 | 2 / `0ec6326` |
+| 11 | **5-12 D-1 백필 시도 (partial)** — sector_master 124 sectors 백필 OK → sector_daily 5-12: 60 success / 64 failed (KiwoomMaxPagesExceededError + InterfaceError 8) → ohlcv 5-12: curl 1시간 timeout / 서버측 cancel / KRX 2559+NXT 632 적재 (1814 누락) → daily_flow 5-12: curl timeout / 서버측 계속 처리 / 15:05 480 row (5.25/min, 17:30 까지 못 끝남) | 5-12 D-1 partial 적재 / ka20006 60% 실패 follow-up 별도 chunk / 백그라운드 daily_flow 계속 진행 | 0 (DB만, 코드 변경 0) |
 
 ## In Progress / Pending
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| **1** | **5-12 (화) D-1 백필** (ohlcv_daily + daily_flow + sector_daily 3 endpoint 수동 trigger) | **다음 chunk 1순위** | 5-13 06:00/06:30/07:00 cron dead 로 누락. admin POST endpoint 로 수동 trigger (시급 — 시그널 wave 정확도) |
-| **2** | **5-13 17:30 stock_master 발화 자연 모니터** (dead 재현 검증) | **자연 대기** | 발화 직전/직후 `/admin/scheduler/diag` 호출 비교 → timer 만료 후 wakeup 도착 여부. dead 재현 시 ADR 신규 § + 원인 가설 재정렬 |
+| **1** | **5-13 17:30 stock_master / 18:00 stock_fundamental 발화 자연 모니터** (dead 재현 검증) | **다음 세션 1순위** | 본 세션 종료 시 ~15:30. 17:30 / 18:00 자연 cron 발화 시점 = 다음 세션 진입 직후. 발화 직전/직후 `/admin/scheduler/diag` 비교 → timer 만료 후 wakeup 도착 여부. dead 재현 시 ADR 신규 § + 원인 가설 재정렬 |
+| **2** | **5-12 D-1 백필 완료 확인** + **OHLCV 잔여 1814 stock 재호출 결정** | 다음 세션 2순위 | 본 세션 종료 시 daily_flow 480/4000 진행 중 (서버 백그라운드). 다음 세션 진입 시 row count 재측정 → 완료 여부 + OHLCV 잔여 1814 stock 재호출 여부 결정 |
+| **3** | **ka20006 sector_daily 60% 실패 follow-up** (별도 chunk) | 별도 chunk | KiwoomMaxPagesExceededError 다수 + InterfaceError 8건 — D-1 plan doc § max_pages 부족 + DB session 패턴 검토 필요. ADR § 39 후속 또는 신규 § |
 | ~~**Pending #2 (이전)**~~ | ~~Phase E 컨테이너 재배포~~ | ~~본 chunk 에서 해소 ✅~~ | 12 scheduler 활성 / Migration 016 적용 |
 | **3** | **노출된 secret 4건 회전** | **전체 개발 완료 후** | API_KEY/SECRET revoke + Fernet 마스터키 회전 + DB 재암호화 + Docker Hub PAT revoke (ADR § 38.8 #6/#7). 절차서: [`docs/ops/secret-rotation-2026-05-12.md`](docs/ops/secret-rotation-2026-05-12.md) |
 | **4** | `.env.prod` 의 `KIWOOM_SCHEDULER_*` 9 env 정리 + `SCHEDULER_SECTOR_DAILY_SYNC_ALIAS` + Phase E 3 alias 추가 | 전체 개발 완료 후 | compose env override 로 우회 완료. `.env.prod` 편집은 secret 회전 chunk 와 동일 시점 일괄 |
