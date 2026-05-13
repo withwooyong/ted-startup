@@ -50,7 +50,10 @@ class KiwoomMarketCondClient:
     DAILY_MARKET_API_ID = "ka10086"
     # 실측 (2026-05-10 smoke `7be3185`): 1 page ≈ 22 거래일 (첫 page ~80, p2~ ~22).
     # 가설 "~300 거래일/page" 13배 틀림. 3년 백필 (~750 거래일) ≈ 32 page → 40 (안전 마진 8).
-    DAILY_MARKET_MAX_PAGES = 40
+    # D-1 follow-up (plan § 13.2 #2, 2026-05-13): 5-12 KOSDAQ 백필에서 cap=40 도달
+    # 종목 ~1814 누락 — 일부 오래된 KOSDAQ 종목 (1990년대 상장) page > 40 발생.
+    # 40 → 60 (안전 마진 28). 운영 첫 호출 시 page 분포 실측 → ADR § 42 결과 반영.
+    DAILY_MARKET_MAX_PAGES = 60
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client

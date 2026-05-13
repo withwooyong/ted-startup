@@ -1,5 +1,9 @@
 """SectorPriceDailyRepository — sector_price_daily upsert + 조회 (D-1).
 
+D-1 follow-up 추가 (§ 13):
+- test_upsert_many_chunks_5500_rows_under_32767_param_limit
+  : 5500 row × 8 col = 44000 query args → chunk 분할로 InterfaceError 회피 확인.
+
 chunk = D-1, plan doc § 12 참조.
 
 test_stock_price_periodic_repository.py 의 upsert idempotent / 동일 키 갱신 / FK /
@@ -16,12 +20,14 @@ UNIQUE 충돌 패턴 1:1 응용. sector_id FK 기반 upsert.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+from typing import Any
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapter.out.persistence.models.sector_price_daily import SectorPriceDaily
 from app.adapter.out.persistence.repositories.sector_price import SectorPriceDailyRepository
 
 
@@ -44,7 +50,7 @@ def _make_row(
     sector_id: int,
     trading_date: date,
     close_index_centi: int = 252127,
-) -> dict:
+) -> dict[str, Any]:
     """NormalizedSectorDailyOhlcv 역할의 dict stub."""
     return {
         "sector_id": sector_id,
@@ -182,3 +188,47 @@ async def test_upsert_many_stores_centi_bigint_correctly(session: AsyncSession) 
     assert row_db.high_index_centi == 252733
     assert row_db.low_index_centi == 249918
     assert row_db.close_index_centi == 252127
+
+
+# ---------- D-1 follow-up — chunk 분할로 32767 한도 회피 ----------
+
+
+@pytest.mark.asyncio
+async def test_upsert_many_chunks_5500_rows_under_32767_param_limit(
+    session: AsyncSession,
+) -> None:
+    """5500 row × 8 col = 44000 query args — chunk_size=1000 분할로 InterfaceError 회피.
+
+    이 테스트가 fix 의 핵심:
+    - chunk 미적용 시: asyncpg 가 단일 INSERT 에 44000 args 전달 →
+      `asyncpg.exceptions._base.InterfaceError: cannot exceed 32767` 발생 (red)
+    - chunk 적용 후: 8000 args/chunk (1000 × 8) × 6 chunks → InterfaceError 없이 적재 (green)
+
+    testcontainers PG16 실 DB 에서 실행 — mock 아님.
+    """
+    sid = await _insert_test_sector(session, "SPCK5500")
+    repo = SectorPriceDailyRepository(session)
+
+    base = date(2010, 1, 1)
+    rows = [
+        {
+            "sector_id": sid,
+            "trading_date": base + timedelta(days=i),
+            "open_index_centi": 100000 + i,
+            "high_index_centi": 100100 + i,
+            "low_index_centi": 99900 + i,
+            "close_index_centi": 100050 + i,
+            "trade_volume": 1_000_000 + i,
+            "trade_amount": 2_000_000_000 + i,
+        }
+        for i in range(5500)
+    ]
+
+    count = await repo.upsert_many(rows)
+    assert count == 5500
+
+    stmt = select(func.count()).select_from(SectorPriceDaily).where(
+        SectorPriceDaily.sector_id == sid
+    )
+    db_count = (await session.execute(stmt)).scalar_one()
+    assert db_count == 5500

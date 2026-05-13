@@ -1,5 +1,12 @@
 """StockDailyFlowRepository — ka10086 stock_daily_flow upsert + 조회 (C-2α).
 
+D-1 follow-up 추가 (§ 13):
+- test_upsert_many_chunks_3000_rows_under_32767_param_limit
+  : 3000 row × 12 col = 36000 query args → chunk 분할로 InterfaceError 회피 확인.
+  (NormalizedDailyFlow INSERT 컬럼 = 12개: stock_id/trading_date/exchange/indc_mode/
+   credit_rate/individual_net/institutional_net/foreign_brokerage_net/program_net/
+   foreign_volume/foreign_rate/foreign_holdings)
+
 설계: endpoint-10-ka10086.md § 6.2.
 
 검증:
@@ -16,7 +23,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -311,3 +318,50 @@ async def test_upsert_many_explicit_update_set_drift_guard(session: AsyncSession
     assert r.credit_rate == Decimal("1.1100")
     assert r.foreign_holdings == 999
     assert r.foreign_rate == Decimal("3.3300")
+
+
+# ---------- D-1 follow-up — chunk 분할로 32767 한도 회피 ----------
+
+
+@pytest.mark.asyncio
+async def test_upsert_many_chunks_3000_rows_under_32767_param_limit(
+    session: AsyncSession,
+) -> None:
+    """3000 row × 12 col = 36000 query args — chunk_size=1000 분할로 InterfaceError 회피.
+
+    stock_daily_flow INSERT 컬럼: stock_id, trading_date, exchange, indc_mode,
+    credit_rate, individual_net, institutional_net, foreign_brokerage_net,
+    program_net, foreign_volume, foreign_rate, foreign_holdings (= 12개).
+
+    이 테스트가 fix 의 핵심:
+    - chunk 미적용 시: asyncpg 가 단일 INSERT 에 36000 args 전달 →
+      `asyncpg.exceptions._base.InterfaceError: cannot exceed 32767` 발생 (red)
+    - chunk 적용 후: 12000 args/chunk (1000 × 12) × 3 chunks → InterfaceError 없이 적재 (green)
+
+    testcontainers PG16 실 DB 에서 실행 — mock 아님.
+    """
+    stock_id = await _create_stock(session, "999999")
+    repo = StockDailyFlowRepository(session)
+
+    base = date(2010, 1, 1)
+    rows = [
+        NormalizedDailyFlow(
+            stock_id=stock_id,
+            trading_date=base + timedelta(days=i),
+            exchange=ExchangeType.KRX,
+            indc_mode=DailyMarketDisplayMode.QUANTITY,
+            credit_rate=Decimal("0.50"),
+            individual_net=-714,
+            institutional_net=693,
+            foreign_brokerage_net=0,
+            program_net=0,
+            foreign_volume=-266783,
+            foreign_rate=Decimal("12.34"),
+            foreign_holdings=1234567 + i,
+        )
+        for i in range(3000)
+    ]
+
+    count = await repo.upsert_many(rows)
+    await session.commit()
+    assert count == 3000

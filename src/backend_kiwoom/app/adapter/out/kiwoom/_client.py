@@ -96,7 +96,20 @@ class KiwoomMaxPagesExceededError(KiwoomError):
     """`call_paginated` 가 `max_pages` 한도 도달 — 무한 cont-yn=Y 위험 차단.
 
     의도: 키움 응답이 영원히 cont-yn=Y 를 반환하는 상황 방어. 운영 모니터링 알람.
+
+    필드 (D-1 follow-up § 13.2 #6):
+        api_id: 비식별 메타 (어떤 endpoint 가 초과했는지).
+        page:   도달한 페이지 수 (cap 과 동일 — 마지막 page 가 cont-yn=Y).
+        cap:    `max_pages` 한도 값.
     """
+
+    def __init__(self, *, api_id: str, page: int, cap: int) -> None:
+        super().__init__(
+            f"{api_id} call_paginated max_pages={cap} 초과 (page={page}) — 무한 페이지네이션 위험"
+        )
+        self.api_id = api_id
+        self.page = page
+        self.cap = cap
 
 
 class KiwoomClient:
@@ -344,9 +357,7 @@ class KiwoomClient:
             next_key = page.next_key
 
         # 여기 도달 = max_pages 한도 초과 (마지막 페이지가 cont-yn=Y)
-        raise KiwoomMaxPagesExceededError(
-            f"{api_id} call_paginated max_pages={max_pages} 초과 — 무한 페이지네이션 위험"
-        )
+        raise KiwoomMaxPagesExceededError(api_id=api_id, page=page_count, cap=max_pages)
 
     async def close(self) -> None:
         await self._client.aclose()

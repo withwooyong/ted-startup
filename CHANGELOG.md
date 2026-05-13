@@ -7,6 +7,66 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] fix(kiwoom): Phase D-1 follow-up — MaxPages cap 상향 (ka20006 10→40, ka10086 40→60) + bulk insert 32767 chunk 분할
+
+본 chunk `478efaa` (5-13 진단 + plan doc § 13) 의 ted-run 풀 파이프라인. 운영 5-12 D-1 백필 시도에서 발생한 인시던트 (ka20006 60% 실패 + ka10086 KOSDAQ 1814 누락) 의 코드 fix.
+
+### 변경 사항 (6 코드 + 5 테스트, Migration 0)
+
+**코드**:
+- `app/adapter/out/kiwoom/chart.py` — `SECTOR_DAILY_MAX_PAGES = 10 → 40` + 주석 갱신 + docstring 정합 (2a 2R M-1)
+- `app/adapter/out/kiwoom/mrkcond.py` — `DAILY_MARKET_MAX_PAGES = 40 → 60`
+- `app/adapter/out/kiwoom/_client.py` — `KiwoomMaxPagesExceededError(*, api_id, page, cap)` 시그니처 확장 + `__init__` + `__str__` 메시지 형식 + `call_paginated` raise site (line 347) 갱신
+- `app/adapter/out/persistence/repositories/_helpers.py` — `_chunked_upsert(session, statement_factory, rows, *, chunk_size=1000) -> int` 신규 + stateless docstring (2a 2R M-2) + `n_cols × chunk_size > 32767` fail-fast 가드 (2b 2R M-1)
+- `app/adapter/out/persistence/repositories/sector_price.py` — `_build_upsert` 클로저 + `_chunked_upsert` 호출 (8 col × 1000 = 8000 args/chunk)
+- `app/adapter/out/persistence/repositories/stock_daily_flow.py` — 동일 패턴 (12 col × 1000 = 12000 args/chunk)
+
+**테스트 (+13 cases / 1199 passed)**:
+- `tests/test_kiwoom_chart_client.py` (+2) — constant=40 / `(page=40, cap=40)` raise
+- `tests/test_kiwoom_mrkcond_client.py` (+2) — constant=60 / `(page=60, cap=60)` raise
+- `tests/test_repository_chunked_upsert.py` (**신규**, 7) — empty / 1 row / 999 (단일 chunk) / 1001 (2 chunk) / 5500 (6 chunk) / chunk_size=500 (4 chunk) / **n_cols=35 ValueError**
+- `tests/test_sector_price_repository.py` (+1) — 5500 row × 8 col chunk 분할 안전 (testcontainers PG16)
+- `tests/test_stock_daily_flow_repository.py` (+1) — 3000 row × 12 col 동일 패턴
+
+### ted-run 풀 파이프라인 결과
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0 TDD | sonnet | 7 cases red 확인 / 기존 68 PASS |
+| 1 구현 | opus (메인 직접) | 6 파일 / +342/-59 line |
+| 2a 1차 리뷰 | sonnet | ✅ PASS (CRITICAL 0 / HIGH 0 / MEDIUM 2 fix / LOW 4) |
+| 2b 적대적 리뷰 | opus | ✅ PASS (CRITICAL 0 / HIGH 0 / MEDIUM 1 fix / LOW 4) |
+| 3 Verification | sonnet | ruff clean / mypy --strict 95 files Success / **1199 passed** / cov **86.13%** |
+| 3-4 보안 스캔 | — | ⚪ 계약 분류 자동 생략 |
+| 3-5 런타임 | — | ✅ pytest collection import 검증 |
+| 4 E2E | — | ⚪ UI 변경 0 |
+| 5 Ship | — | ADR § 41 ✅ / 메타 3종 / 커밋 / 푸시 보류 |
+
+### MEDIUM 즉시 fix (1R 재리뷰 정책)
+
+- **2a M-1**: `chart.py:742` docstring `SECTOR_DAILY_MAX_PAGES (10)` → `(40)` 정합
+- **2a M-2**: `_chunked_upsert` docstring 에 "factory 는 stateless 보장 필수" 명시
+- **2b M-1**: `_chunked_upsert` 진입 시 `n_cols × chunk_size > 32767` ValueError fail-fast — 미래 schema growth (33+ col) 시 silent breakage 차단. 신규 가드 테스트 1 case 추가
+
+### plan/메타 § 42 → § 41 정합화
+
+- `endpoint-13-ka20006.md § 13.2 / § 13.3 / § 13.5 / § 13.7`
+- `STATUS.md § 5` / `HANDOFF.md` / 본 CHANGELOG
+
+### 누적 메트릭
+
+- 테스트: 1186 → **1199** (+13 / 100% green)
+- coverage: **86.13%** (≥80% 통과)
+- 25 endpoint: 15 / 25 (60%) — 신규 endpoint X
+- 스케줄러: 12 그대로 — 신규 cron X
+
+### 다음 chunk
+
+1. **(E4) 컨테이너 재배포 + 5-12 운영 백필 재호출** — `docker compose build` → cap 상향 + chunk 분할 적용 → sector_daily 64 sector + KOSDAQ ~1814 종목 재호출 → 0 MaxPages / 0 InterfaceError 검증 → ADR § 41.7 운영 결과 채움
+2. **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** — Migration 신규 (NUMERIC(8,4) precision 확대 — overflow 종목 값 분석 선행) + WARN/skipped 분리 + result.errors full exception type/메시지 log 보강 (E와 독립)
+
+---
+
 ## [2026-05-13] docs(kiwoom): 5-13 dead 가설 반증 + 신규 인시던트 3건 진단 + Phase D-1 follow-up plan doc § 13 추가
 
 본 chunk `1d7759e` 직후 작업 — 5-13 17:30 stock_master / 18:00 stock_fundamental 자연 cron 정상 발화 확인 → dead 가설 반증. 진단 중 신규 인시던트 3건 발견 → endpoint-13 § 13 Phase D-1 follow-up plan doc 작성 + endpoint-10 § 14 cross-ref. 코드 변경 0 / 1186 tests 그대로.
@@ -33,7 +93,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 ### Phase D-1 follow-up plan doc § 13 (endpoint-13)
 
 - 13.1 배경 (인시던트 트리 + E vs F 분리 정당성)
-- 13.2 결정 10건 (ADR § 42 신규 예정) — cap 상향 + bulk chunk 분할 + helper 표준화
+- 13.2 결정 10건 (ADR § 41 신규 예정) — cap 상향 + bulk chunk 분할 + helper 표준화
 - 13.3 영향 범위 (**6 코드 + 5 테스트** — Migration 0 / UseCase 변경 0)
 - 13.4 self-check (H-1 ~ H-10)
 - 13.5 DoD
@@ -60,7 +120,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ### 다음 chunk
 
-1. **(E3) Phase D-1 follow-up ted-run 풀 파이프라인** — TDD + 구현 6 + 테스트 5 + 1R+2R + Verification 5관문 + ADR § 42 / 메타 3종. 풀 사이클 ~3-5 시간
+1. **(E3) Phase D-1 follow-up ted-run 풀 파이프라인** — TDD + 구현 6 + 테스트 5 + 1R+2R + Verification 5관문 + ADR § 41 / 메타 3종. 풀 사이클 ~3-5 시간
 2. **(E4) 컨테이너 재배포 + 5-12 운영 백필 재호출** — sector_daily 64 sector + KOSDAQ ~1814 종목 재호출
 3. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (E 와 독립)
 

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.kiwoom._records import NormalizedDailyFlow
 from app.adapter.out.persistence.models import StockDailyFlow
-from app.adapter.out.persistence.repositories._helpers import rowcount_of
+from app.adapter.out.persistence.repositories._helpers import _chunked_upsert
 from app.application.constants import ExchangeType
 
 
@@ -76,33 +76,36 @@ class StockDailyFlowRepository:
             for r in valid_rows
         ]
 
-        insert_stmt = pg_insert(StockDailyFlow).values(values)
+        # D-1 follow-up (plan § 13.2 #3/#5): bulk INSERT chunk_size=1000 split.
+        # PostgreSQL wire protocol int16 한도 (32767 query args) 회피 —
+        # 12 col × 1000 row = 12000 args/chunk < 32767 안전 마진. 단일 caller session
+        # 안에서 chunk loop → 전체 트랜잭션 원자성 caller 통제.
+        def _build_upsert(chunk_rows: list[dict[str, Any]]) -> Any:
+            insert_stmt = pg_insert(StockDailyFlow).values(chunk_rows)
+            # B-γ-1 2R B-H3 — 명시 update_set. ON CONFLICT 키 (stock_id, trading_date,
+            # exchange) 제외. 미래 NormalizedDailyFlow 필드 추가 시 본 list 도 수동 갱신
+            # 강제 (schema-drift 차단). `created_at` 의도적 제외 — 최초 insert 시각 보존.
+            update_set: dict[str, Any] = {
+                "indc_mode": insert_stmt.excluded.indc_mode,
+                "credit_rate": insert_stmt.excluded.credit_rate,
+                "individual_net": insert_stmt.excluded.individual_net,
+                "institutional_net": insert_stmt.excluded.institutional_net,
+                "foreign_brokerage_net": insert_stmt.excluded.foreign_brokerage_net,
+                "program_net": insert_stmt.excluded.program_net,
+                "foreign_volume": insert_stmt.excluded.foreign_volume,
+                "foreign_rate": insert_stmt.excluded.foreign_rate,
+                "foreign_holdings": insert_stmt.excluded.foreign_holdings,
+                "fetched_at": func.now(),
+                "updated_at": func.now(),
+            }
+            return insert_stmt.on_conflict_do_update(
+                index_elements=["stock_id", "trading_date", "exchange"],
+                set_=update_set,
+            )
 
-        # B-γ-1 2R B-H3 — 명시 update_set. ON CONFLICT 키 (stock_id, trading_date, exchange) 제외.
-        # 미래 NormalizedDailyFlow 필드 추가 시 본 list 도 수동 갱신 강제 (schema-drift 차단).
-        # `created_at` 의도적 제외 — 최초 insert 시각 보존 (UPSERT 시에도 갱신하지 않음).
-        update_set: dict[str, Any] = {
-            "indc_mode": insert_stmt.excluded.indc_mode,
-            "credit_rate": insert_stmt.excluded.credit_rate,
-            "individual_net": insert_stmt.excluded.individual_net,
-            "institutional_net": insert_stmt.excluded.institutional_net,
-            "foreign_brokerage_net": insert_stmt.excluded.foreign_brokerage_net,
-            "program_net": insert_stmt.excluded.program_net,
-            "foreign_volume": insert_stmt.excluded.foreign_volume,
-            "foreign_rate": insert_stmt.excluded.foreign_rate,
-            "foreign_holdings": insert_stmt.excluded.foreign_holdings,
-            "fetched_at": func.now(),
-            "updated_at": func.now(),
-        }
-
-        upsert_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=["stock_id", "trading_date", "exchange"],
-            set_=update_set,
-        )
-
-        result = await self._session.execute(upsert_stmt)
+        total = await _chunked_upsert(self._session, _build_upsert, values, chunk_size=1000)
         await self._session.flush()
-        return rowcount_of(result)
+        return total
 
     async def find_range(
         self,

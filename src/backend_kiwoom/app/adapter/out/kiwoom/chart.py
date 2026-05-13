@@ -345,9 +345,11 @@ class KiwoomChartClient:
     YEARLY_MAX_PAGES = 2
 
     # D-1 — 업종 일봉 (ka20006). KRX only, NXT 미지원 (plan § 12.2 #4).
-    # 1 페이지 ~600 거래일 추정 (ka10081 와 동일 가정). 3년 백필 = 2 페이지 + 여유.
+    # D-1 follow-up (plan § 13.2 #1, 2026-05-13): 추정값 "1 page ~600 거래일" 운영 반증.
+    # 5-12 백필 124 sector 중 56 (45%) MaxPages 도달. ka10086 실측 (1 page ~22 거래일,
+    # mrkcond.py L51-53) 패턴 차용 — 3년 ≈ 34 page + 안전 마진 6 → cap=40.
     SECTOR_DAILY_API_ID = "ka20006"
-    SECTOR_DAILY_MAX_PAGES = 10
+    SECTOR_DAILY_MAX_PAGES = 40
 
     def __init__(self, kiwoom_client: KiwoomClient) -> None:
         self._client = kiwoom_client
@@ -736,7 +738,7 @@ class KiwoomChartClient:
         Parameters:
             inds_cd: 3자리 숫자 업종코드 ("001"/"101"/"201"/...). ka10101 sector_code 호환.
             base_date: 기준일자 (이 날짜를 포함한 과거 시계열 응답).
-            max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 SECTOR_DAILY_MAX_PAGES (10).
+            max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 SECTOR_DAILY_MAX_PAGES (40).
 
         Raises:
             ValueError: inds_cd 가 3자리 숫자 외 (호출 차단).

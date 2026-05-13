@@ -508,3 +508,59 @@ async def test_fetch_daily_market_since_date_none_keeps_existing_pagination() ->
 
     assert call_count == 2, "since_date 없으면 cont-yn=N 까지 모두 fetch"
     assert len(rows) == 2
+
+
+# =============================================================================
+# D-1 follow-up — Step 0 TDD (red) 테스트
+# chunk = D-1 follow-up, plan doc § 13
+# =============================================================================
+
+
+# ---------- D-1.10 DAILY_MARKET_MAX_PAGES == 60 상수 단언 ----------
+
+
+def test_daily_market_max_pages_constant_is_60() -> None:
+    """DAILY_MARKET_MAX_PAGES 가 60 이어야 한다 (현재 40 → 실패 확인).
+
+    Step 1 구현 전 red 고정 목적 — 상수 변경 후 green 전환 예정.
+    """
+    assert KiwoomMarketCondClient.DAILY_MARKET_MAX_PAGES == 60
+
+
+# ---------- D-1.11 max_pages 초과 시 KiwoomMaxPagesExceededError + page/cap 속성 ----------
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_market_max_pages_exceeded_raises_with_page_and_cap() -> None:
+    """무한 cont-yn=Y mock → KiwoomMaxPagesExceededError 발생 + exc.page == 60, exc.cap == 60.
+
+    Step 1 구현 전 red 고정:
+    - 현재 DAILY_MARKET_MAX_PAGES == 40 → exc.page/cap 값이 달라 assertion 실패
+    - KiwoomMaxPagesExceededError 에 page/cap 속성이 없어 AttributeError 발생
+    """
+    from app.adapter.out.kiwoom._client import KiwoomMaxPagesExceededError as _MaxExc
+
+    call_count = 0
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "stk_cd": "005930",
+                "daly_stkpc": [{"date": "20241125", "ind": "+100"}],
+                "return_code": 0,
+                "return_msg": "정상",
+            },
+            headers={"cont-yn": "Y", "next-key": f"k-{call_count}"},
+        )
+
+    async with _make_kiwoom_client(handler) as kc:
+        adapter = KiwoomMarketCondClient(kc)
+        with pytest.raises(_MaxExc) as exc_info:
+            await adapter.fetch_daily_market("005930", query_date=date(2024, 11, 25))
+
+    exc = exc_info.value
+    assert exc.page == 60, f"exc.page={getattr(exc, 'page', '미존재')} — 60 기대"
+    assert exc.cap == 60, f"exc.cap={getattr(exc, 'cap', '미존재')} — 60 기대"

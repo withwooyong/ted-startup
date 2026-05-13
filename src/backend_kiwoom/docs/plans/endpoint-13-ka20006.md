@@ -1121,12 +1121,12 @@ _Phase D 진입 chunk. ka10080 분봉을 사용자 결정으로 마지막으로 
 **별도 인시던트 (본 chunk 범위 아님 — F chunk 분리)**:
 - ka10001 stock_fundamental ASYNCPG 11건 = `NumericValueOutOfRangeError: precision 8 scale 4 must < 10^4` → NUMERIC(8,4) 컬럼 overflow (Migration 신규 + precision 확대 필요). VALIDATE 2건 = sentinel detect (ka10001 `_validate_stk_cd_for_lookup`) — WARN/skipped 분리 누락. **F chunk 별도 진행**.
 
-### 13.2 결정 (ADR-0001 § 42 신규 예정)
+### 13.2 결정 (ADR-0001 § 41 신규 예정)
 
 | # | 사안 | 결정 | 근거 |
 |---|------|------|------|
 | 1 | `SECTOR_DAILY_MAX_PAGES` 상향 | 10 → **40** | ka10086 실측 패턴 (1 page ~22 거래일, mrkcond.py L51-53) 그대로 차용. 3년 = ~34 page + 안전 마진 6. 실측은 ted-run TDD 단계 + 운영 검증에 위임 |
-| 2 | `DAILY_MARKET_MAX_PAGES` 상향 | 40 → **60** | 5-12 KOSDAQ 1814 누락 = 일부 종목 page > 40. 60 (안전 마진 26) 으로 상향. 운영 첫 호출 시 실제 page 분포 측정 → ADR § 42 운영 결과 |
+| 2 | `DAILY_MARKET_MAX_PAGES` 상향 | 40 → **60** | 5-12 KOSDAQ 1814 누락 = 일부 종목 page > 40. 60 (안전 마진 26) 으로 상향. 운영 첫 호출 시 실제 page 분포 측정 → ADR § 41 운영 결과 |
 | 3 | bulk insert chunk 분할 | `upsert_many` chunk_size = **1000** (rows). 32767 / 평균 13 col ≈ 2520 안전. 1000 보수치 | sector_daily 일부 sector (long-history 15년+) → 5500 row × 6 col ≈ 33000 한도 초과. 1000 row × 13 col = 13000 안전 |
 | 4 | 적용 범위 | (a) sector_price_daily Repository (b) stock_daily_flow Repository | 본 chunk 범위. Phase E 의 short_selling / lending 은 별도 chunk (적용 의무 없음 — bulk row 수 추정 미만) |
 | 5 | chunked upsert 헬퍼 | `_chunked_upsert(session, model, rows, *, chunk_size)` — 모든 Repository 가 공통 호출 | Repository 별 중복 회피. 미래 endpoint 표준 |
@@ -1160,7 +1160,7 @@ _Phase D 진입 chunk. ka10080 분봉을 사용자 결정으로 마지막으로 
 | 5 | `tests/test_daily_flow_repository_chunk.py` (신규 또는 기존 통합) | daily_flow Repository 동일 패턴 |
 
 **문서**:
-- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 42 신규 (Phase D-1 follow-up 결과)
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 41 신규 (Phase D-1 follow-up 결과)
 - `CHANGELOG.md` / `STATUS.md` § 0 / § 1 / § 4 / § 5 / § 6 / `HANDOFF.md` / 본 doc § 13 (자기 참조)
 - `endpoint-10-ka10086.md` 끝에 § 13 cross-ref 노트 ("Phase D-1 follow-up = endpoint-13 § 13 참조")
 - `master.md` ka20006 / ka10086 row 갱신 (cap 값 + chunk_size)
@@ -1200,7 +1200,7 @@ _Phase D 진입 chunk. ka10080 분봉을 사용자 결정으로 마지막으로 
 - [ ] 1R PASS (Reviewer: chunk_size 1000 보수치 + ON CONFLICT 트랜잭션 경계 + `_chunked_upsert` cardinality 동적 계산)
 
 **문서**:
-- [ ] ADR-0001 § 42 추가 (Phase D-1 follow-up 결과 + H-1~H-10 self-check 반영)
+- [ ] ADR-0001 § 41 추가 (Phase D-1 follow-up 결과 + H-1~H-10 self-check 반영)
 - [ ] STATUS.md § 0 / § 1 / § 4 / § 5 / § 6 갱신 (Phase D-1 follow-up 종결 + 5-12 백필 재호출 별도 chunk)
 - [ ] CHANGELOG: `fix(kiwoom): Phase D-1 follow-up — MaxPages cap 상향 (ka20006 10→40, ka10086 40→60) + bulk insert 32767 chunk 분할`
 - [ ] HANDOFF.md 갱신
@@ -1220,11 +1220,11 @@ _Phase D 진입 chunk. ka10080 분봉을 사용자 결정으로 마지막으로 
 
 ### 13.7 운영 모니터 (코드 외, 본 chunk 직후 사용자 확인)
 
-본 chunk 머지 + 컨테이너 재배포 후 다음 항목을 ADR § 42 운영 결과에 누적:
+본 chunk 머지 + 컨테이너 재배포 후 다음 항목을 ADR § 41 운영 결과에 누적:
 
 - [ ] **5-12 sector_daily 재호출**: 실패 64건 sector 의 `POST /api/kiwoom/sectors/{id}/ohlcv/daily/refresh` — 0 MaxPages / 0 InterfaceError
 - [ ] **5-12 ka10086 KOSDAQ 재호출**: 실패 ~1814 종목의 `POST /api/kiwoom/stocks/{code}/daily-flow/refresh?exchange=KRX&mrkt_tp=10` — 0 MaxPages
-- [ ] **page 분포 실측**: ka20006 sector 별 실제 page 수 (40 cap 의 여유) / ka10086 KOSDAQ 종목 별 page 수 (60 cap 의 여유) — ADR § 42 운영 결과 표
+- [ ] **page 분포 실측**: ka20006 sector 별 실제 page 수 (40 cap 의 여유) / ka10086 KOSDAQ 종목 별 page 수 (60 cap 의 여유) — ADR § 41 운영 결과 표
 - [ ] **chunk_size 1000 보수치 검증**: sector_daily 5500 row sector 의 실제 chunk 분할 횟수 + 총 elapsed (단일 chunk 대비 오버헤드)
 - [ ] **(별도 chunk) 5-13 새벽 dead 인시던트 진단 endpoint 정리** — `/admin/scheduler/diag` 유지/제거 결정
 

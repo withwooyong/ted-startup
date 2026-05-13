@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapter.out.kiwoom.chart import NormalizedSectorDailyOhlcv
 from app.adapter.out.persistence.models.sector_price_daily import SectorPriceDaily
-from app.adapter.out.persistence.repositories._helpers import rowcount_of
+from app.adapter.out.persistence.repositories._helpers import _chunked_upsert
 
 
 class SectorPriceDailyRepository:
@@ -93,29 +93,32 @@ class SectorPriceDailyRepository:
         if not normalized:
             return 0
 
-        insert_stmt = pg_insert(SectorPriceDaily).values(normalized)
+        # D-1 follow-up (plan § 13.2 #3/#5): bulk INSERT 를 chunk_size=1000 으로 split.
+        # PostgreSQL wire protocol int16 한도 (32767 query args) 회피 —
+        # 8 col × 1000 row = 8000 args/chunk < 32767 안전 마진. 단일 caller session
+        # 안에서 chunk loop → 전체 트랜잭션 원자성 caller 통제.
+        def _build_upsert(chunk_rows: list[dict[str, Any]]) -> Any:
+            insert_stmt = pg_insert(SectorPriceDaily).values(chunk_rows)
+            # 명시 update_set — schema-drift 차단 (B-γ-1 2R B-H3 일관).
+            # ON CONFLICT key (sector_id, trading_date) 는 의도적 제외.
+            update_set: dict[str, Any] = {
+                "open_index_centi": insert_stmt.excluded.open_index_centi,
+                "high_index_centi": insert_stmt.excluded.high_index_centi,
+                "low_index_centi": insert_stmt.excluded.low_index_centi,
+                "close_index_centi": insert_stmt.excluded.close_index_centi,
+                "trade_volume": insert_stmt.excluded.trade_volume,
+                "trade_amount": insert_stmt.excluded.trade_amount,
+                "fetched_at": func.now(),
+                "updated_at": func.now(),
+            }
+            return insert_stmt.on_conflict_do_update(
+                index_elements=["sector_id", "trading_date"],
+                set_=update_set,
+            )
 
-        # 명시 update_set — schema-drift 차단 (B-γ-1 2R B-H3 일관).
-        # ON CONFLICT key (sector_id, trading_date) 는 의도적 제외.
-        update_set: dict[str, Any] = {
-            "open_index_centi": insert_stmt.excluded.open_index_centi,
-            "high_index_centi": insert_stmt.excluded.high_index_centi,
-            "low_index_centi": insert_stmt.excluded.low_index_centi,
-            "close_index_centi": insert_stmt.excluded.close_index_centi,
-            "trade_volume": insert_stmt.excluded.trade_volume,
-            "trade_amount": insert_stmt.excluded.trade_amount,
-            "fetched_at": func.now(),
-            "updated_at": func.now(),
-        }
-
-        upsert_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=["sector_id", "trading_date"],
-            set_=update_set,
-        )
-
-        result = await self._session.execute(upsert_stmt)
+        total = await _chunked_upsert(self._session, _build_upsert, normalized, chunk_size=1000)
         await self._session.flush()
-        return rowcount_of(result)
+        return total
 
 
 __all__ = ["SectorPriceDailyRepository"]
