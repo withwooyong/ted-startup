@@ -1147,3 +1147,19 @@ ALTER TABLE kiwoom.stock_daily_flow
 ---
 
 _Phase C 의 마지막 endpoint. ka10081 (가격) + 본 endpoint (수급) 의 짝꿍이 백테스팅의 base. 이중 부호 + 외인순매수 단위가 운영 first call 의 가장 큰 검증 포인트._
+
+---
+
+## 14. Phase D-1 follow-up cross-ref
+
+> **추가일**: 2026-05-13 (KST)
+> **본문**: `endpoint-13-ka20006.md` § 13 참조
+
+5-12 D-1 백필 시도 시 ka10086 KOSDAQ 종목 ~1814건이 `KiwoomMaxPagesExceededError` (`DAILY_MARKET_MAX_PAGES=40`) 한도 도달 — 일부 오래된 KOSDAQ 종목 (1990년대 상장) 이 page > 40 필요. ka20006 sector_daily 의 동일 패턴 (`SECTOR_DAILY_MAX_PAGES=10` 부족 + bulk insert 32767 InterfaceError) 과 통합 fix chunk = **endpoint-13 § 13 (Phase D-1 follow-up)**.
+
+본 endpoint 관련 fix:
+- `DAILY_MARKET_MAX_PAGES = 40 → 60` (mrkcond.py L53)
+- `KiwoomMaxPagesExceededError(page, cap)` 시그니처 (운영 가시화)
+- `daily_flow Repository` `_chunked_upsert` 적용 (chunk_size=1000) — 32767 한도 안전 (선제 적용, daily_flow 단일 종목 5500 row × 22 필드 = 121k 초과 가능)
+
+자세한 결정 / 영향 범위 / self-check / DoD 는 endpoint-13 § 13 참조.

@@ -7,6 +7,65 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-13] docs(kiwoom): 5-13 dead 가설 반증 + 신규 인시던트 3건 진단 + Phase D-1 follow-up plan doc § 13 추가
+
+본 chunk `1d7759e` 직후 작업 — 5-13 17:30 stock_master / 18:00 stock_fundamental 자연 cron 정상 발화 확인 → dead 가설 반증. 진단 중 신규 인시던트 3건 발견 → endpoint-13 § 13 Phase D-1 follow-up plan doc 작성 + endpoint-10 § 14 cross-ref. 코드 변경 0 / 1186 tests 그대로.
+
+### dead 재현 검증 결과 (1순위 종결)
+
+| cron | 시각 | 결과 |
+|------|------|------|
+| `stock_master` | 17:30:00 KST | fetched=4788 upserted=4788 deactivated=2 nxt_enabled=634 (1.4s) ✅ |
+| `stock_fundamental` | 18:00:00 KST | total=4379 success=4063 **failed=316 ratio=0.07** (17m) — dead 정상 but 새 인시던트 발견 |
+
+→ 5-13 06:00/06:30/07:00 dead 는 **자연 재현 안 됨**. 컨테이너 재배포 직후 일회성 가설로 정리. `/admin/scheduler/diag` 유지.
+
+### 신규 인시던트 3건 진단
+
+| 인시던트 | 실제 예외 | 카운트 | 근본 원인 | fix chunk |
+|---------|---------|--------|----------|-----------|
+| ka20006 MaxPages | `KiwoomMaxPagesExceededError` (`SECTOR_DAILY_MAX_PAGES=10`) | 56 / 124 | 추정 "1 page ~600 거래일" 틀림 — ka10086 실측 22 거래일/page 패턴이면 3년=34 page | **E** (endpoint-13 § 13) |
+| ka20006 InterfaceError | `asyncpg ... cannot exceed 32767` (sector_id 29/57/102/103/105-108) | 8 / 124 | PostgreSQL wire protocol int16 한도 — bulk insert row × column > 32767 | **E** |
+| ka10086 KOSDAQ MaxPages | `KiwoomMaxPagesExceededError` (`DAILY_MARKET_MAX_PAGES=40`) | 다수 (KRX ~1814 누락) | 40 cap 부족 — 일부 KOSDAQ 종목 page > 40 | **E** (endpoint-10 § 14 cross-ref) |
+| ka10001 NUMERIC overflow | `asyncpg.exceptions.NumericValueOutOfRangeError: precision 8 scale 4 must < 10^4` | 11 / 316 | NUMERIC(8,4) 컬럼 overflow — Migration 신규 필요 | **F** (별도 chunk) |
+| ka10001 sentinel 거부 | `_validate_stk_cd_for_lookup` (stkinfo.py:249, 0000D0 등) | 2+ / 316 | sentinel 종목 ERROR 분류 → 실패율 오집계 | **F** |
+
+### Phase D-1 follow-up plan doc § 13 (endpoint-13)
+
+- 13.1 배경 (인시던트 트리 + E vs F 분리 정당성)
+- 13.2 결정 10건 (ADR § 42 신규 예정) — cap 상향 + bulk chunk 분할 + helper 표준화
+- 13.3 영향 범위 (**6 코드 + 5 테스트** — Migration 0 / UseCase 변경 0)
+- 13.4 self-check (H-1 ~ H-10)
+- 13.5 DoD
+- 13.6 다음 chunk
+- 13.7 운영 모니터
+
+**핵심 fix** (ted-run 다음 세션):
+1. `SECTOR_DAILY_MAX_PAGES = 10 → 40` (chart.py L350)
+2. `DAILY_MARKET_MAX_PAGES = 40 → 60` (mrkcond.py L53)
+3. `_chunked_upsert(session, model, rows, *, chunk_size=1000)` helper 신규 (Repository 공통)
+4. `sector_daily` / `daily_flow` Repository `upsert_many` → `_chunked_upsert` 호출
+5. `KiwoomMaxPagesExceededError(page, cap)` 시그니처 확장 (운영 가시화)
+
+### 산출물
+
+**Plan doc 2 갱신**:
+- `src/backend_kiwoom/docs/plans/endpoint-13-ka20006.md` § 13 신규 (~200줄)
+- `src/backend_kiwoom/docs/plans/endpoint-10-ka10086.md` § 14 cross-ref 추가
+
+**메타 3 갱신**:
+- `src/backend_kiwoom/STATUS.md` § 0 / § 4 #26 #27 (resolved) #28 #29 신규 / § 5 / § 6
+- `HANDOFF.md` (본 세션 인수인계)
+- `CHANGELOG.md` (본 항목)
+
+### 다음 chunk
+
+1. **(E3) Phase D-1 follow-up ted-run 풀 파이프라인** — TDD + 구현 6 + 테스트 5 + 1R+2R + Verification 5관문 + ADR § 42 / 메타 3종. 풀 사이클 ~3-5 시간
+2. **(E4) 컨테이너 재배포 + 5-12 운영 백필 재호출** — sector_daily 64 sector + KOSDAQ ~1814 종목 재호출
+3. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (E 와 독립)
+
+---
+
 ## [2026-05-13] docs(kiwoom): 5-12 D-1 백필 partial 진행 + ka20006 60% 실패 발견 + 메타 갱신 (세션 종료)
 
 본 chunk `0ec6326` 직후 작업 — 5-12 D-1 백필 시도. sector_master 124 OK / sector_daily 5-12 60% 실패 (ka20006 follow-up 신규 issue) / ohlcv 5-12 partial (KRX 2559+NXT 632, 1814 누락) / daily_flow 5-12 480 서버 백그라운드 진행 중. 코드 변경 0 (HANDOFF + STATUS + CHANGELOG 메타 갱신만).
