@@ -7,6 +7,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-13] fix(kiwoom): Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint — 12 scheduler 활성 + `/admin/scheduler/diag` baseline OK / 5-13 06:00 cron dead 인시던트 발견
+
+5-13 06:00/06:30/07:00 KST cron 발화 0 + DB row 0 — 13시간 idle 후 9 scheduler 의 timer 가 모두 dead. 코드 정적 분석 (lifespan + AsyncIOScheduler) + baseline 검증 (별도 python 1분 cron 정상 발화) + py-spy attach (메인 thread `do_epoll_wait` alive) 모두 정상 → 가설 좁히기 막힘. 진단 endpoint 추가 후 재배포.
+
+### 1. 변경 파일 (2)
+- `src/backend_kiwoom/app/main.py` — `/admin/scheduler/diag` endpoint (`require_admin_key` 가드, 12 scheduler 의 `_eventloop_id` / `eventloop_is_main` / `timeout.cancelled` / `timeout.delta_seconds` / `next_run_time` 노출) + `_app.state.schedulers` dict lifespan 노출 (12 인스턴스 reference)
+- `src/backend_kiwoom/docker-compose.yml` — Phase E 3 alias env 추가 (`SCHEDULER_SHORT_SELLING_SYNC_ALIAS` / `SCHEDULER_LENDING_MARKET_SYNC_ALIAS` / `SCHEDULER_LENDING_STOCK_SYNC_ALIAS = prod`) — lifespan fail-fast 가드 해소
+
+### 2. baseline diag 결과 (재배포 직후)
+
+- 12 scheduler 모두 `eventloop_id = 187651270154288 = main_loop_id` (동일 루프 잡음)
+- `eventloop_is_main` / `eventloop_running` / `scheduler_running` / `started_flag` 12개 모두 `true`
+- `timeout.cancelled` 12개 모두 `false` / `timeout.delta_seconds` 양수 (첫 발화 stock_master `+25,260초` = 5-13 17:30 KST)
+- `next_run_time` 12개 모두 KST 정확 (5-13 17:30 / 18:00, 5-14 06:00 / 06:30 / 07:00 / 07:30 / 07:45 / 08:00, 5-16 sat 07:00, 5-17 sun 03:00, 6-01 03:00, 2027-01-05 03:00)
+- **결론**: 9개 인스턴스 race 가설 반증 (인스턴스 등록 시점은 깨끗). dead 진짜 원인 = 13시간 idle 후 시간 의존 — 미상.
+
+### 3. 다음 단계
+
+- 5-13 17:30 stock_master 발화 직전/직후 `/admin/scheduler/diag` 호출 → timer 만료 후 wakeup 도착 여부 비교 (dead 재현 검증)
+- 5-12 (화) D-1 누락 데이터 백필 — ohlcv_daily + daily_flow + sector_daily 3 endpoint 수동 trigger (admin endpoint)
+- dead 재현 시 ADR 신규 § + 원인 가설 재정렬
+
+### 4. 운영 상태
+
+- 컨테이너 재배포 — 12 scheduler 활성 (9 → 12, Phase E 3 신규: short_selling 07:30 / lending_market 07:45 / lending_stock 08:00 KST mon-fri)
+- alembic upgrade head 완료 (016 까지) / /health OK / 메모리 안정
+- 테스트 1186 / coverage 86.30% (코드 변경 0 — 디버그 endpoint + compose env 만, ruff PASS / mypy strict PASS)
+
+### 5. 알려진 이슈 갱신 (STATUS § 4)
+
+- **#26 신규**: 5-13 06:00/06:30/07:00 cron dead — 원인 미상, 17:30 재현 검증
+- ~~Pending #2~~: Phase E 컨테이너 재배포 ✅ 본 chunk 에서 해소 (12 scheduler 활성)
+
+---
+
 ## [2026-05-13] feat(kiwoom): Phase E — ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 (Migration 016, 15/25 endpoint 60%)
 
 ted-run 풀 파이프라인 적용 — Step 0 TDD 89 신규 (sub-agent 3 sonnet 병렬) → Step 1 구현 25 파일 (sub-agent 3 opus 병렬) → Step 2 이중 리뷰 CONDITIONAL (1R CRITICAL 6 + HIGH 10) → fix 10건 → PASS → Step 3 Verification 5관문 → ADR § 40 → 커밋. Phase E 종결 (3 endpoint 통합 1 chunk 사용자 결정 5-12). 12/25 → 15/25 endpoint.

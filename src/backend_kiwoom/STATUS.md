@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-13 (Phase E 풀 구현 완료 — ted-run 풀 파이프라인 / 25 파일 / 1R CONDITIONAL→PASS (CRITICAL 6 + HIGH 10 fix) / Verification 5관문 PASS / 1186 tests / coverage 86% / 15/25 endpoint 60% / ADR § 40)
+> **마지막 갱신**: 2026-05-13 (Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint — 12 scheduler 활성 / `/admin/scheduler/diag` baseline OK (12개 모두 main_loop 동일 / timer cancelled=false / next_run_time KST 정확) / 5-13 06:00 cron dead 인시던트 발견 — 원인 미상, 17:30 stock_master 발화 시 재현 모니터)
 
 ---
 
@@ -12,12 +12,12 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase E 종결** (ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 완료) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
-| 마지막 완료 chunk | **Phase E 풀 구현 (ted-run)** — Migration 016 (short_selling_kw + lending_balance_kw 2 테이블) + 매도 측 시그널 wave. TDD 89 신규 / 구현 25 파일 (15 신규 + 10 갱신) / 1R CONDITIONAL → PASS (CRITICAL 6 + HIGH 10 fix) / Verification 5관문 PASS / 12 scheduler 활성 (9 → 12) / ADR § 40 |
-| 다음 chunk | **(5-13 06:00 발화 직후) cron 첫 발화 검증** + **§ 40.7 운영 모니터** (ka10014/ka10068/ka20068 첫 호출 + tm_tp / NXT 공매도 응답 / 시장 분리 / Length=6 NXT / delta_volume 부호 / balance_amount 단위) |
+| 마지막 완료 chunk | **Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint** — `/admin/scheduler/diag` 추가 + compose env Phase E 3 alias (short_selling/lending_market/lending_stock) 추가 + 컨테이너 재배포로 12 scheduler 활성. baseline diag = 12 scheduler 모두 main_loop 동일 / timer cancelled=false / next_run_time KST 정확 — 인스턴스 race 가설 반증. 5-13 06:00/06:30/07:00 cron dead 진짜 원인 미상 — 17:30 stock_master 발화 시 재현 모니터. |
+| 다음 chunk | **5-12 (화) D-1 백필 (ohlcv + daily_flow + sector_daily)** + **5-13 17:30 stock_master dead 재현 모니터** 병행 |
 | 25 Endpoint 진행 | **15 / 25 완료 (60%)**. ka10014 / ka10068 / ka20068 → ✅ |
-| 누적 chunk | 49 commits (Phase E 풀 구현 chunk 추가) |
+| 누적 chunk | 50 commits (Phase E 컨테이너 재배포 + dead 진단 chunk 추가) |
 | 테스트 | **1097 cases** (1059 + 38) / coverage **90%** / ruff PASS / mypy strict PASS |
-| 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. **kiwoom-app 컨테이너** — Up healthy / 12 scheduler 활성 (Phase E 3 신규: short_selling 07:30 + lending_market 07:45 + lending_stock 08:00 KST) — 컨테이너 재배포 후 활성. 테스트 1186 / coverage **86.30%** / ruff PASS / mypy strict PASS |
+| 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. **kiwoom-app 컨테이너** — Up healthy / **12 scheduler 활성** (Phase E 3 신규: short_selling 07:30 + lending_market 07:45 + lending_stock 08:00 KST). **❌ 5-13 06:00/06:30/07:00 cron dead** — 13시간 idle 후 timer 발화 0. baseline diag 정상 (12개 main_loop 동일 / timer cancelled=false) — 원인 미상. 17:30 발화 시 재현 모니터. 테스트 1186 / coverage **86.30%** / ruff PASS / mypy strict PASS |
 
 ---
 
@@ -139,6 +139,7 @@ P3 (선택):
 | **24** | Mac 절전 시 컨테이너 중단 (24/7 cron 누락 위험) | ADR § 38.8 #1 | 사용자 환경 결정 — 절전 차단 또는 서버 이전 |
 | ~~19~~ | ~~영숫자 295 종목 추가로 cron elapsed +10분 추정~~ | ADR § 33.6 → § 34.6 | ✅ **정정** — 영숫자 백필 실측 1108 종목 5m 48s = 0.31s/stock → **cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정의 15%) |
 | **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
+| **26** | **5-13 06:00/06:30/07:00 cron dead** — 13시간 idle 후 timer 발화 0 (ohlcv_daily / daily_flow / sector_daily 모두 0 rows). | 본 chunk 진단 | **원인 미상**. baseline diag (재배포 직후) = 12 scheduler 모두 main_loop 동일 / `timeout.cancelled=false` / next_run_time KST 정확 → 9개 race 가설 반증. **재현 검증** = 5-13 17:30 stock_master 발화 직전/직후 `/admin/scheduler/diag` 호출하여 timer 상태 비교. dead 재현 시 ADR 신규 §. |
 
 ---
 
@@ -146,8 +147,9 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **(5-13 06:00 발화 직후) cron 첫 발화 검증** + **§ 40.7 운영 모니터** | § 38.10 #1 + § 39.7 (sector_daily 100배 값 / 페이지네이션) + § 40.7 (Phase E ka10014/ka10068/ka20068 첫 호출 + tm_tp / NXT 공매도 / 시장 분리 / Length=6 / delta_volume 부호 / balance_amount 단위) | 검증 SQL + 수동 trigger 호출 만 |
-| 2 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 → 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
+| **1** | **5-12 (화) D-1 백필** (ohlcv_daily + daily_flow + sector_daily — 5-13 cron dead 로 누락) | 5-13 06:00/06:30/07:00 cron 미발화 → KRX/NXT/sector_daily 5-12 row 0. admin endpoint 수동 trigger 로 백필 | 수동 trigger 호출 + 검증 SQL |
+| **2** | **5-13 17:30 stock_master dead 재현 모니터** | § 4 #26. 발화 직전/직후 `/admin/scheduler/diag` 비교 → timer 만료 후 wakeup 도착 여부 검증. dead 재현 시 ADR 신규 § + 원인 가설 다시 좁힘 | 자연 대기 + diag 호출 + ADR |
+| 3 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 → 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 3 | **Phase F (순위 5종) — ka10027/30/31/32/23** | 신규 endpoint wave (남은 7 endpoint) | 5 endpoint 통합 1 chunk 검토 |
 | 4 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |
 | 5 | Phase G (투자자별 3종) / H (통합) | 신규 endpoint wave | 각 chunk 별 신규 |
@@ -217,6 +219,7 @@ P3 (선택):
 - **secret 회전 절차서 + 회전 시점 결정** (5-12) — `docs/ops/secret-rotation-2026-05-12.md` 신규 230줄 + ADR § 38.8 #6/#7 시점 "전체 개발 완료 후" 로 통일. KIWOOM_APPKEY/SECRETKEY + Fernet 마스터키 + Docker Hub PAT 회전 절차 (4 단계 + 백업 + 롤백 + 완료 체크리스트). 사용자 결정 — `.env.prod` 편집 / DB 재암호화 운영 영향 큼 → 개발 종결 후 일괄. 코드 변경 0 / ADR § 38.8 갱신 / HANDOFF Pending #2 갱신 / `39ca7a3`
 - **Phase D-1 ka20006 plan doc § 12** (5-12) — `endpoint-13-ka20006.md` 의 § 12 신규 (Migration 015 + 인프라 + 자동화 통합 chunk). 9 결정 + 13 self-check + DoD. 코드 변경 0 / `a1e20e0`
 - **Phase D-1 ka20006 풀 구현** (5-12) — Migration 015 (sector_price_daily, sector_id BIGINT FK, UNIQUE (sector_id, trading_date), centi BIGINT 4 컬럼) + ORM + Pydantic 3 (SectorChartRow 7 필드 / Response / NormalizedSectorDailyOhlcv) + DTO 2 (Input / Outcome / BulkResult with skipped) + KiwoomChartClient.fetch_sector_daily (sentinel break) + SectorPriceDailyRepository (upsert_many) + IngestSectorDailyUseCase Single+Bulk (NXT skip + sector_master_missing + sector_inactive 3 가드) + Router 2 path (admin API key) + Scheduler mon-fri 07:00 KST + Settings alias + main.py lifespan 통합. 1R CONDITIONAL → PASS (CRITICAL 3 main.py 통합 누락 + HIGH 2 sector_id INTEGER→BIGINT/skipped 분리 fix). Verification 5관문 PASS. 컨테이너 재배포 (alembic 014→015 자동 적용 / 9 scheduler 활성 / /health OK). 7 신규 + 5 갱신 코드 + 6 신규 테스트 = **1097 tests / coverage 90%** / ruff PASS / mypy strict PASS / 12/25 endpoint. ADR § 39 / `249c277`
+- **Phase E 컨테이너 재배포 + scheduler dead 진단 endpoint** (5-13) — 5-13 06:00/06:30/07:00 KST cron dead 발견 (13시간 idle 후 9 scheduler 의 timer 가 모두 발화 0 → KRX/NXT/sector_daily 5-12 row 0). 코드 정적 분석 + baseline 검증 (별도 python 프로세스 1분 cron 정상 발화) + py-spy attach (메인 thread `do_epoll_wait` idle = alive) 모두 정상 — 9개 race 가설 입증 불가. `/admin/scheduler/diag` endpoint 추가 (`require_admin_key` 가드 / 12 scheduler 의 `_eventloop_id`, `eventloop_is_main`, `timeout.cancelled`, `timeout.delta_seconds`, `next_run_time` 노출) + `_app.state.schedulers` dict lifespan 노출. docker-compose.yml 에 Phase E 3 alias env (`SCHEDULER_SHORT_SELLING_SYNC_ALIAS` / `SCHEDULER_LENDING_MARKET_SYNC_ALIAS` / `SCHEDULER_LENDING_STOCK_SYNC_ALIAS` = `prod`) 추가. 컨테이너 재빌드 + 재배포 → 12 scheduler 활성. baseline diag 결과 = 12개 모두 `main_loop_id=187651270154288` 동일 / `timeout.cancelled=false` / `next_run_time` KST 정확 → 인스턴스 race 가설 반증. 다음 단계 = 5-12 D-1 백필 + 5-13 17:30 stock_master 발화 시 재현 모니터. 2 파일 / `<this commit>`
 
 ---
 

@@ -48,6 +48,10 @@ services:
       SCHEDULER_MONTHLY_OHLCV_SYNC_ALIAS: prod
       SCHEDULER_YEARLY_OHLCV_SYNC_ALIAS: prod
       SCHEDULER_SECTOR_DAILY_SYNC_ALIAS: prod
+      # Phase E (ka10014 / ka10068 / ka20068) — mon-fri 07:30 / 07:45 / 08:00 KST
+      SCHEDULER_SHORT_SELLING_SYNC_ALIAS: prod
+      SCHEDULER_LENDING_MARKET_SYNC_ALIAS: prod
+      SCHEDULER_LENDING_STOCK_SYNC_ALIAS: prod
     depends_on:
       kiwoom-db:
         condition: service_healthy

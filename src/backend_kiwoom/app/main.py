@@ -22,7 +22,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Final, Literal
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +36,7 @@ from app.adapter.out.kiwoom.slb import KiwoomLendingClient
 from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
 from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
+    require_admin_key,
     reset_ingest_daily_flow_factory,
     reset_ingest_lending_market_factory,
     reset_ingest_lending_stock_bulk_factory,
@@ -743,6 +744,23 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     lending_stock_scheduler.start()
 
+    # 인시던트 진단용 — /admin/scheduler/diag 가 12 scheduler 의 _eventloop / next_run_time /
+    # _timeout 상태를 노출. 9 scheduler dead (5-13) 원인 추적 chunk.
+    _app.state.schedulers = {
+        "sector_sync": scheduler,
+        "stock_master": stock_scheduler,
+        "stock_fundamental": fundamental_scheduler,
+        "ohlcv_daily": ohlcv_scheduler,
+        "daily_flow": daily_flow_scheduler,
+        "weekly_ohlcv": weekly_ohlcv_scheduler,
+        "monthly_ohlcv": monthly_ohlcv_scheduler,
+        "yearly_ohlcv": yearly_ohlcv_scheduler,
+        "sector_daily": sector_daily_scheduler,
+        "short_selling": short_selling_scheduler,
+        "lending_market": lending_market_scheduler,
+        "lending_stock": lending_stock_scheduler,
+    }
+
     try:
         yield
     finally:
@@ -832,6 +850,67 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get(
+        "/admin/scheduler/diag",
+        dependencies=[Depends(require_admin_key)],
+    )
+    async def scheduler_diag(request: Request) -> dict[str, object]:
+        """12 scheduler 인스턴스의 _eventloop / _timeout / next_run_time 상태 dump.
+
+        9 scheduler dead (2026-05-13 06:00 KST 첫 cron 발화 누락) 원인 추적용. 메인
+        loop id 와 각 인스턴스의 _eventloop id 비교 → 동일 루프 잡았는지 검증.
+        timeout.when() 의 monotonic 값 + main_loop.time() 과의 차이 → cron 발화까지의
+        남은 시간 검증.
+        """
+        main_loop = asyncio.get_running_loop()
+        schedulers_map: dict[str, object] = getattr(request.app.state, "schedulers", {})
+        items: list[dict[str, object]] = []
+        for name, sched in schedulers_map.items():
+            inner = sched._scheduler  # type: ignore[attr-defined]  # 진단 전용 — private 직접 접근
+            loop = inner._eventloop
+            timeout = getattr(inner, "_timeout", None)
+            timeout_info: dict[str, object] | None
+            if timeout is None:
+                timeout_info = None
+            else:
+                try:
+                    when = timeout.when()
+                    timeout_info = {
+                        "monotonic_when": when,
+                        "delta_seconds": when - main_loop.time(),
+                        "cancelled": timeout.cancelled(),
+                    }
+                except Exception as exc:  # noqa: BLE001 — 진단용 fallback
+                    timeout_info = {"error": f"{type(exc).__name__}: {exc}"}
+            items.append(
+                {
+                    "name": name,
+                    "enabled_flag": sched._enabled,  # type: ignore[attr-defined]
+                    "started_flag": sched._started,  # type: ignore[attr-defined]
+                    "scheduler_running": inner.running,
+                    "eventloop_id": id(loop) if loop else None,
+                    "eventloop_running": loop.is_running() if loop else None,
+                    "eventloop_closed": loop.is_closed() if loop else None,
+                    "eventloop_is_main": (id(loop) == id(main_loop)) if loop else None,
+                    "timeout": timeout_info,
+                    "jobs": [
+                        {
+                            "id": j.id,
+                            "next_run_time": j.next_run_time.isoformat() if j.next_run_time else None,
+                            "pending": j.pending,
+                            "trigger": str(j.trigger),
+                        }
+                        for j in inner.get_jobs()
+                    ],
+                }
+            )
+        return {
+            "now_monotonic": main_loop.time(),
+            "main_loop_id": id(main_loop),
+            "main_loop_running": main_loop.is_running(),
+            "schedulers": items,
+        }
 
     return app
 
