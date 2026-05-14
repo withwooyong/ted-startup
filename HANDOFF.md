@@ -2,9 +2,9 @@
 
 > Last updated: 2026-05-14 (KST) — Phase F-2 backfill 임계치 / alphanumeric guard 분리 ted-run 풀 파이프라인 완료
 > Branch: `master`
-> Latest commit: `<this commit>` (Phase F-2 + ADR § 46 + 메타 4종)
-> 미푸시: **2건** (`ced66f3` F-1 + `<this commit>` F-2 — 사용자 명시 요청 시 푸시)
-> 본 세션 commit 1건: `<this commit>` (Phase F-2) → 미푸시
+> Latest commit: `8f6b453` (Phase F-2 + ADR § 46 + 메타 4종)
+> 미푸시: **2건** (`ced66f3` F-1 + `8f6b453` F-2 — 사용자 명시 요청 시 푸시)
+> 본 세션 commit 1건: `8f6b453` (Phase F-2) → 미푸시
 
 ## Current Status
 
