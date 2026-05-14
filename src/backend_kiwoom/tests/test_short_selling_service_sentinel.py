@@ -13,6 +13,10 @@ bulk execute 루프가 SentinelStockCodeError 를 캐치 시:
 - 임계치 메시지에 (alphanumeric_skipped=N) 명시
 
 본 테스트는 구현 전 의도적으로 실패 (red) — Step 1 구현 후 green 전환 대상.
+
+Phase F-3 R2 갱신 (D-2): 매직 스트링 비교를 SkipReason enum 비교로 치환.
+- SkipReason.SENTINEL_SKIP.value == "sentinel_skip" (StrEnum 이므로 string 비교 호환)
+- SkipReason.ALPHANUMERIC_PRE_FILTER.value == "alphanumeric_pre_filter"
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from app.adapter.out.kiwoom._records import ShortSellingTimeType
 from app.adapter.out.kiwoom.shsa import KiwoomShortSellingClient
 from app.adapter.out.kiwoom.stkinfo import SentinelStockCodeError
 from app.application.constants import ExchangeType
+from app.application.dto._shared import SkipReason  # type: ignore[import]  # Phase F-3 Step 1 에서 생성
 from app.application.service.short_selling_service import (
     IngestShortSellingBulkUseCase,
     IngestShortSellingUseCase,
@@ -204,7 +209,8 @@ async def test_bulk_sentinel_goes_to_total_skipped_not_failed(
         f"skipped_outcomes 길이=1 기대, 실제={len(result.skipped_outcomes)}"  # type: ignore[attr-defined]
     )
     assert result.skipped_outcomes[0].stock_code == "00088K"  # type: ignore[attr-defined]
-    assert result.skipped_outcomes[0].error == "sentinel_skip"  # type: ignore[attr-defined]
+    # Phase F-3 R2 D-2: 매직 스트링 → SkipReason enum 비교 (StrEnum 이라 string 호환)
+    assert result.skipped_outcomes[0].error == SkipReason.SENTINEL_SKIP  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +276,8 @@ async def test_bulk_filter_alphanumeric_skips_call(
     # Step 2 MED-1: pre-filter 경로 종목 명세 보존 단언
     assert len(result.skipped_outcomes) == 1  # type: ignore[attr-defined]
     assert result.skipped_outcomes[0].stock_code == "00088K"  # type: ignore[attr-defined]
-    assert result.skipped_outcomes[0].error == "alphanumeric_pre_filter"  # type: ignore[attr-defined]
+    # Phase F-3 R2 D-2: 매직 스트링 → SkipReason enum 비교 (StrEnum 이라 string 호환)
+    assert result.skipped_outcomes[0].error == SkipReason.ALPHANUMERIC_PRE_FILTER  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

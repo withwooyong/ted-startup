@@ -3780,3 +3780,141 @@ INFO  [alembic.runtime.migration] Running upgrade 016_short_lending -> 017_ka100
 | `LendingStockBulkResult` | `total_alphanumeric_skipped: int` | `alphanumeric_skipped_outcomes: tuple[...]` | _분리_ — 기존 `total_skipped` (empty 응답 의미, Phase E 부터) 유지 + 신규 필드 분리 (DTO breaking 최소화) |
 
 본 비대칭은 사용자 확정 결정 (D-2 + plan § 4 #3) 으로 의도된 것. future-service 진입 시 _합산 선호_ 가이드라인 (lending 외에는 short 패턴 적용). 통일 rename 은 R2 inherit § 46.8 #5 와 합류해 다음 chunk 에서 처리 가능.
+
+---
+
+## 47. Phase F-3 — R2 inherit 7건 정리 (SkipReason Enum + errors_above_threshold tuple 통일 + empty helper + 단건 sentinel catch) (2026-05-14, ✅ 완료)
+
+§ 46.8 R2 inherit 7건 일괄 해소 chunk. Phase F-4 (5 ranking endpoint 통합) 진입 _전_ 정착 패턴 정리. ted-run 풀 파이프라인 (`--force-2b`) + 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). 코드 변경 0 인 H-2 router DTO breaking 변경은 본 § 에 명시 (R2 inherit 5건 별도 표).
+
+### 47.1 결정 (8건 — 사용자 권고 default 일괄 채택)
+
+| # | 결정 항목 | 확정 답 | 근거 |
+|---|----------|---------|------|
+| D-1 | `SkipReason` Enum 위치 | `app/application/dto/_shared.py` (신규 모듈) | DTO layer 공유 enum 의 표준 위치. `app/application/constants.py` (도메인 상수 — `ExchangeType` 등) 와 의미 분리 |
+| D-2 | 표현 | StrEnum (`SkipReason.ALPHANUMERIC_PRE_FILTER = "alphanumeric_pre_filter"` / `SkipReason.SENTINEL_SKIP = "sentinel_skip"`) | `outcome.error: str` 그대로 string 호환 (`outcome.error == SkipReason.SENTINEL_SKIP` 호환). 값 = 기존 매직 스트링 그대로 (KOSCOM 대조 / log 분석 영향 0) |
+| D-3 | `errors_above_threshold` 타입 통일 | short DTO `bool` → `tuple[str, ...]` (lending 패턴 통일) | 정보량 손실 없음 + lending 이 이미 그 형태. **router DTO breaking 변경** (§ 47.6 명시) |
+| D-4 | 임계치 메시지 | `warnings` + `errors_above_threshold` 둘 다 보존 + cron 둘 다 알람 | 의미 분리 유지 (lending 패턴 1:1) |
+| D-5 | empty stocks 조기 반환 | `_empty_bulk_result` private helper 추출 (short + lending) | 4번째 빈 반환 (Phase F-4 5 endpoint 의 bulk 가 5 곳 더 늘어남) break-even 명확 |
+| D-6 | H-R2-1 처리 | `scripts/backfill_short.py:189` label `alphanumeric_skipped:` → `total_skipped:` (DTO field 와 일치) | 단순. DTO field rename 아님 — ADR § 46.9 네이밍 비대칭 사용자 확정 보존 |
+| D-7 | 단건 UseCase catch 정책 | `IngestShortSellingUseCase` / `IngestLendingStockUseCase` 둘 다 `SentinelStockCodeError` catch + outcome.error = `SkipReason.SENTINEL_SKIP.value` | defense-in-depth — 라우터 정규식 우회 시에도 명시적 outcome 보고. Phase F-4 ranking 라우터에도 동일 패턴 적용 가능 (일관성) |
+| D-8 | `skipped_count` property | 양쪽 DTO 도입 — `short.skipped_count = self.total_skipped` / `lending.skipped_count = self.total_alphanumeric_skipped` | 비대칭 흡수 — caller 가 동일 인터페이스 (`result.skipped_count`) 로 두 DTO 접근 가능. ADR § 46.9 비대칭은 historical alias 로 보존 |
+
+### 47.2 영향 범위 (8 production + 4 test 갱신 + 3 test 신규 + 1 test 회귀 = 16 파일 / +573 / -230)
+
+**Production 8 파일** (~+395/-189):
+- `app/application/dto/_shared.py` (신규, +24/-0) — `SkipReason` StrEnum 도입
+- `app/application/dto/short_selling.py` (+25/-11) — `errors_above_threshold: bool` → `tuple[str, ...]`, `skipped_count` property, `SkipReason` re-export, docstring 강화
+- `app/application/dto/lending.py` (+18/-6) — `skipped_count` property, `SkipReason` re-export, docstring 강화
+- `app/application/service/short_selling_service.py` (+85/-20) — `SkipReason` 치환 (3 사이트), `_empty_bulk_result` private helper, 단건 UseCase `SentinelStockCodeError` catch (D-7 + defense-in-depth docstring), bulk loop 사후 outcome 분기 (D-7 부수 효과), `errors_above_threshold` tuple 패턴, dead path `# pragma: no cover` 마커
+- `app/application/service/lending_service.py` (+65/-16) — 동일 패턴
+- `app/adapter/web/routers/short_selling.py` (+3/-3) — Pydantic `errors_above_threshold: tuple[str, ...]` (router DTO breaking)
+- `app/batch/short_selling_job.py` (+4/-1) — `errors=list(result.errors_above_threshold)` logger.error 인자 추가 (lending_stock_job 패턴 미러)
+- `scripts/backfill_short.py` (+3/-1) — label `alphanumeric_skipped:` → `total_skipped:` (D-6)
+
+**Test 갱신 4 + 신규 3 + 회귀 1 = 8 파일** (~+178/-41):
+- `tests/test_short_selling_service.py` (+62/-34) — `errors_above_threshold` tuple 단언 + helper 회귀 + skipped_count 회귀
+- `tests/test_lending_service.py` (+50/-26) — helper 회귀 + skipped_count 회귀
+- `tests/test_short_selling_service_sentinel.py` (+5/-6) — 매직 스트링 → `SkipReason.SENTINEL_SKIP.value` 비교
+- `tests/test_lending_service_alphanumeric_skipped.py` (+5/-6) — 동일
+- `tests/test_skip_reason.py` (신규, +25/-0) — enum 값 안정성 회귀 4 케이스
+- `tests/test_short_selling_use_case_sentinel.py` (신규, +73/-0) — 단건 UseCase sentinel catch 3 케이스 (D-7)
+- `tests/test_lending_use_case_sentinel.py` (신규, +75/-0) — 동일
+- `tests/test_backfill_short_filter.py` (+10/-4) — label `total_skipped:` 변경 회귀 + F-2 alphanumeric_skipped 단언 갱신
+
+### 47.3 이중 리뷰 (R1 + R2 — Santa Method)
+
+**R1**:
+- 2a (sonnet) — PASS / CRITICAL 0 / HIGH 0 / LOW 2 (lending direct-catch BATCH commit 비대칭 + F401 noqa)
+- 2b (opus) — CONDITIONAL / CRITICAL 0 / **HIGH 2** + MEDIUM 3 + LOW 2
+  - H-1: lending `else` 블록 sentinel 분기 안의 BATCH commit 중복 (Step 1 사후 분기 부수 효과)
+  - H-2: router DTO `bool → tuple[str, ...]` 브레이킹 변경 (코드 변경 0 — 본 ADR § 47.6 명시)
+  - M-1: bulk loop 기존 except 분기 dead path 주석 미스리딩
+  - M-2: 단건 UseCase silent skip docstring 명시
+  - M-3: `skipped_count` property 비대칭 docstring 강화
+  - L-1: `_empty_bulk_result` 시그니처 일관성
+  - L-2: SkipReason 위치 결정 (코드 변경 0 — ADR 기록만)
+
+**R1 fix 6건** (opus):
+- H-1: lending `else` 블록 안의 BATCH commit 블록 제거 — loop tail 의 단일 commit 이 흡수. short_selling 자연흐름과 commit 모델 일관
+- M-1: short/lending 의 기존 `except SentinelStockCodeError` 분기 3 사이트 `# pragma: no cover` 마커 + 주석 강화 (단건 UseCase D-7 catch 가 도달 차단 / 향후 wrap 변경 대비 안전망)
+- M-2: 두 단건 UseCase docstring 끝에 `Phase F-3 D-7 — defense-in-depth` 문단 (한국어)
+- M-3: 두 `skipped_count` property docstring 강화 — 표준 인터페이스 / 비대칭 보존 (§ 46.9) / 미래 rename 후보
+- L-1: short `_empty_bulk_result` positional → keyword-only 통일. 호출처 갱신. lending 이미 keyword-only
+- L-3 (R1 2a): F401 noqa 제거 + `__all__` 에 `SkipReason` 추가 (re-export 명시)
+
+**R2 (재리뷰 1회)**:
+- 2a R2 (sonnet) — PASS / CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0 (R1 LOW 2 해소). inherit 2 (LOW)
+- 2b R2 (opus) — CONDITIONAL (CRITICAL 0 / HIGH 0 / **MEDIUM 1 ruff 회귀** + inherit 5)
+  - ruff F401/I001 회귀 3건 (test 파일 — `unittest.mock.patch` unused + import 정렬) → `ruff --fix` 자동 해소
+
+**최종 종합**: 양쪽 합의 PASS / 차단 0 / inherit 5 (§ 47.8)
+
+### 47.4 Verification 5관문 (PASS)
+
+| 관문 | 결과 |
+|------|------|
+| 3-1 빌드 | ✅ mypy strict 106 files Success |
+| 3-2 정적분석 | ✅ ruff All checks passed! / mypy strict 106 files Success |
+| 3-3 테스트 | ✅ **1284 passed** (1267 baseline + 17 신규) / coverage **86.56%** (+0.13%p baseline 86.43%) |
+| 3-4 보안스캔 | ⚪ refactor 분류 자동 생략 |
+| 3-5 런타임 smoke | ✅ imports OK / `SkipReason.value` = 매직 스트링 동일 (`"alphanumeric_pre_filter"` / `"sentinel_skip"`) |
+| 4 E2E | ⚪ UI 변경 0 자동 생략 |
+
+### 47.5 누적 메트릭
+
+| 항목 | F-2 (baseline) | F-3 (본 chunk) | Δ |
+|------|----------------|----------------|---|
+| 25 endpoint 완료 | 15 (60%) | 15 (60%) | 0 (refactor) |
+| 테스트 케이스 | 1267 | **1284** | +17 |
+| coverage | 86.43% | **86.56%** | +0.13%p |
+| mypy strict 파일 수 | 105 | **106** | +1 (`_shared.py`) |
+| 누적 chunk 수 | 56+ | **57+** | +1 |
+
+### 47.6 운영 효과 / Router DTO breaking 변경
+
+**런타임 영향 0** — bulk path 의 outcome / DTO 의미 동등. 매직 스트링 enum 치환은 _값 동일_ (StrEnum `.value` = 기존 string). KOSCOM cross-check / log 분석 / DB 저장 영향 0.
+
+**Router DTO breaking** (H-2):
+- `POST /api/kiwoom/short-selling/bulk/sync` 응답 `errors_above_threshold` 필드 schema 변경
+- 기존: `bool` (false / true)
+- 신규: `array[string]` (`[]` / `["msg1", ...]`)
+- **SemVer minor breaking** (dev pre-release 가정 하 진행) — 외부 클라이언트 (JS / Python) 가 `if (resp.errors_above_threshold === true)` 비교 시 `[]` 도 truthy (JS) — _false positive 알림_ 위험. 운영 dashboard / 모니터링 외부 호출자 식별 안 됨 (현재 backend_kiwoom 자체 호출자 = scheduler / CLI 만)
+- **운영 측 대응**: ADR § 47 본 항목 명시 + 다음 chunk 진입 시 외부 호출자 검증 (Phase F-4 / Phase H Grafana 통합 시점)
+
+**Cron 영향**: short_selling cron (07:30 KST) — logger.error 에 `errors=list(result.errors_above_threshold)` 인자 추가 (lending_stock_job 패턴 미러). 임계치 메시지가 _리스트_ 로 노출되어 디버깅 가시성 향상
+
+**Coverage uplift**: 86.43% → 86.56% (+0.13%p) — 17 신규 테스트 케이스 + 단건 UseCase sentinel catch path coverage
+
+### 47.7 다음 chunk
+
+| 후보 | 시점 | 비고 |
+|------|------|------|
+| **Phase F-4** — 5 ranking endpoint 통합 (ka10027/30/31/32/23) | 본 chunk 직후 | plan doc 작성됨 (`phase-f-4-rankings.md`). D-1~D-14 사용자 확정 + 견적 ~2,500줄 분할 재검토 (a/b/c) 필수 |
+| 5-15 (금) 06:00 자연 cron 검증 | 5-15 자동 | § 43 + § 44 + § 45 + § 46 + § 47 효과 동시 |
+| F-3 R2 inherit 5건 정리 | Phase F-4 합류 또는 별도 | § 47.8 |
+
+### 47.8 R2 inherit 5건 (다음 chunk 권고)
+
+| # | 출처 | 항목 | 영향 |
+|---|------|------|------|
+| 1 | R2 2b H-2 | router DTO `errors_above_threshold: bool → tuple[str, ...]` breaking 변경 — 외부 호출자 식별 후속 | Phase F-4 ranking router 진입 시 자체 호출자 검증. OpenAPI spec / consumer 식별 |
+| 2 | R2 2b M-1 | `pyproject.toml` 에 `[tool.coverage.run]` + `[tool.coverage.report] exclude_lines = ["pragma: no cover"]` 명시 설정 부재 — coverage.py default 의존 | coverage 설정 chunk (별도) |
+| 3 | R2 2b L-2 | `SkipReason` 위치 — `app/application/dto/_shared.py` vs `app/application/constants.py` 통일 결정 | 향후 enum 모듈 통합 결정 |
+| 4 | R1 2b 기존 (R2 보존) | lending bulk progress log `total_skipped` 카운터 이름 혼선 (`total_alphanumeric_skipped` 와 변수명 충돌 — 코드는 정상, log 표현 모호) | 후속 정리 chunk — 코드 변경 0 가능 |
+| 5 | R2 2b NEW (해소됨) | ruff F401/I001 회귀 3건 (`test_lending_service.py:33` + `test_short_selling_service.py:36, 688`) | ✅ 본 chunk 해소 (`ruff check --fix` auto) — 기록 보존만 |
+
+### 47.9 ted-run 풀 파이프라인 메트릭
+
+| Step | 모델 | 결과 | 신규 산출물 |
+|------|------|------|------------|
+| 0 TDD | sonnet | 17 신규 / 5 collection error + 4 FAILED 의도된 red | 3 신규 + 5 갱신 |
+| 1 구현 | opus | 1284 PASS / ruff+mypy clean | 8 production + 1 test 회귀 보완 |
+| 2a R1 | sonnet | PASS / LOW 2 | (변경 0) |
+| 2b R1 | opus | CONDITIONAL / HIGH 2 + MED 3 + LOW 2 | (변경 0) |
+| 2 fix R1 | opus | 6 fix | 4 파일 |
+| 2a R2 | sonnet | PASS / inherit 2 | (변경 0) |
+| 2b R2 | opus | CONDITIONAL → fix / inherit 5 | (ruff auto-fix 3건) |
+| 3 Verification | sonnet+haiku | 5관문 PASS | (변경 0) |
+| 4 E2E | — | ⚪ UI 변경 0 | — |
+| 5 Ship | 메인 | ADR § 47 + 메타 4종 + 커밋 | 4 메타

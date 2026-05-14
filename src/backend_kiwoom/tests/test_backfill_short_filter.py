@@ -67,10 +67,11 @@ async def test_backfill_short_passes_filter_alphanumeric_true(capsys: pytest.Cap
 
 
 @pytest.mark.asyncio
-async def test_backfill_short_summary_includes_alphanumeric_skipped(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLI summary stdout 에 alphanumeric_skipped: 5 라인이 포함되는지 검증.
+async def test_backfill_short_summary_includes_total_skipped(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI summary stdout 에 total_skipped: 5 라인이 포함되는지 검증.
 
-    Red: summary 출력에 alphanumeric_skipped 라인 없음 → assert 실패.
+    Phase F-3 D-6 (H-R2-1): label `alphanumeric_skipped:` → `total_skipped:` 통일
+    (DTO field 명과 일치). 기존 F-2 테스트의 label 단언을 신규 label 로 갱신.
     """
     from scripts.backfill_short import async_main
 
@@ -87,12 +88,11 @@ async def test_backfill_short_summary_includes_alphanumeric_skipped(capsys: pyte
     await async_main(["--start", "2025-01-01", "--end", "2025-01-02", "--alias", "test"])
 
     captured = capsys.readouterr()
-    # Red: 현재 summary 에 alphanumeric_skipped 라인 없음 → assert 실패
-    assert "alphanumeric_skipped" in captured.out, (
-        f"summary 에 alphanumeric_skipped 라인 없음.\n실제 stdout:\n{captured.out}"
+    assert "total_skipped" in captured.out, (
+        f"summary 에 total_skipped 라인 없음.\n실제 stdout:\n{captured.out}"
     )
     assert "5" in captured.out, (
-        f"alphanumeric_skipped 값(5) 이 stdout 에 없음.\n실제 stdout:\n{captured.out}"
+        f"total_skipped 값(5) 이 stdout 에 없음.\n실제 stdout:\n{captured.out}"
     )
 
 

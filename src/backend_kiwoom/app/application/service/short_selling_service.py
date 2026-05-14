@@ -43,6 +43,7 @@ from app.adapter.out.persistence.repositories.short_selling import (
     ShortSellingKwRepository,
 )
 from app.application.constants import ExchangeType
+from app.application.dto._shared import SkipReason
 from app.application.dto.short_selling import (
     ShortSellingBulkResult,
     ShortSellingIngestOutcome,
@@ -63,6 +64,28 @@ SessionProvider = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 # partial 임계치 (plan § 8.1 + § 12.2 결정 #10)
 PARTIAL_WARN_THRESHOLD: float = 0.05   # 5% 초과 → warning
 PARTIAL_ERROR_THRESHOLD: float = 0.15  # 15% 초과 → errors_above_threshold
+
+
+def _empty_bulk_result(
+    *,
+    pre_filter_skipped: int,
+    skipped_outcomes: list[ShortSellingIngestOutcome],
+) -> ShortSellingBulkResult:
+    """Phase F-3 D-5 — active 종목 0개 시 일관된 zero-value ShortSellingBulkResult 생성.
+
+    bulk loop 진입 전 (pre-filter 직후) `stocks` 가 비어 있을 때 사용. 매번 인라인으로
+    DTO 를 채우면 필드 누락 위험이 있어 helper 로 분리. lending_service `_empty_bulk_result`
+    와 패턴 일관 (시그니처 keyword-only 통일, Step 2 L-1).
+
+    Args:
+        pre_filter_skipped: alphanumeric pre-filter 단계에서 제거된 종목 수.
+        skipped_outcomes: pre-filter 명세 outcomes (KOSCOM cross-check 용).
+    """
+    return ShortSellingBulkResult(
+        total_stocks=pre_filter_skipped,
+        total_skipped=pre_filter_skipped,
+        skipped_outcomes=tuple(skipped_outcomes),
+    )
 
 
 class IngestShortSellingUseCase:
@@ -100,6 +123,12 @@ class IngestShortSellingUseCase:
 
         Returns:
             ShortSellingIngestOutcome — upserted >=0 (정상) / skipped+reason / error.
+
+        Phase F-3 D-7 — defense-in-depth:
+            라우터 정규식 (`^[0-9]{6}$`) 우회 호출 시에도 SentinelStockCodeError 를 catch 하여
+            outcome.error = SkipReason.SENTINEL_SKIP.value 로 변환 + outcome.upserted = 0 반환.
+            silent failure 가 아닌 _명시적 outcome 보고_ — 호출자가 outcome.error 로 skip 사유
+            명확히 식별 가능. 라우터 가드 없는 호출자 (CLI / 테스트 / 향후 bulk endpoint) 도 동일 패턴.
         """
         # 가드 1: mock env + NXT skip (모의투자 KRX only)
         if self._env == "mock" and exchange is ExchangeType.NXT:
@@ -149,6 +178,20 @@ class IngestShortSellingUseCase:
                 end_date=end_date,
                 tm_tp=tm_tp,
                 exchange=exchange,
+            )
+        except SentinelStockCodeError:
+            # Phase F-3 D-7: defense-in-depth — 라우터 정규식 (^[0-9]{6}$) 우회 경로
+            # (CLI / bulk / 테스트 직접 호출) 에서 alphanumeric stock_code 가 단건
+            # UseCase 에 도달하면 SentinelStockCodeError 가 raise 된다. catch 하여
+            # outcome.error = SkipReason.SENTINEL_SKIP.value 로 변환 — bulk loop 의
+            # sentinel 분리와 일관 (F-2 결정 #3).
+            # KiwoomBusinessError 보다 _먼저_ catch (SentinelStockCodeError 가
+            # ValueError 상속이라 broader except 에 잡히지 않도록 분기 위치 우선).
+            logger.info("ka10014 sentinel skip stock_code=%s", stock_code)
+            return ShortSellingIngestOutcome(
+                stock_code=stock_code,
+                exchange=exchange,
+                error=SkipReason.SENTINEL_SKIP.value,
             )
         except KiwoomBusinessError as exc:
             # 비식별 메타만 (message echo 차단) — exc.return_code 만 노출
@@ -255,17 +298,16 @@ class IngestShortSellingBulkUseCase:
                         ShortSellingIngestOutcome(
                             stock_code=s.stock_code,
                             exchange=ExchangeType.KRX,
-                            error="alphanumeric_pre_filter",
+                            error=SkipReason.ALPHANUMERIC_PRE_FILTER.value,
                         )
                     )
             stocks = kept
 
         if not stocks:
             logger.info("ka10014 bulk sync — active 종목 0개")
-            return ShortSellingBulkResult(
-                total_stocks=pre_filter_skipped,
-                total_skipped=pre_filter_skipped,
-                skipped_outcomes=tuple(skipped_outcomes_list),
+            return _empty_bulk_result(
+                pre_filter_skipped=pre_filter_skipped,
+                skipped_outcomes=skipped_outcomes_list,
             )
 
         # NOTE: total_stocks 분모는 pre-filter 적용 후 stocks 길이 + pre_filter_skipped.
@@ -295,18 +337,37 @@ class IngestShortSellingBulkUseCase:
                     end_date=end_date,
                     exchange=ExchangeType.KRX,
                 )
-                krx_outcomes.append(krx_outcome)
-            except SentinelStockCodeError:
+                # Phase F-3 D-7: 단건 UseCase 가 SentinelStockCodeError 를 catch 하여
+                # outcome.error=SkipReason.SENTINEL_SKIP.value 로 반환하는 경로 보강.
+                # 이 경우 bulk loop 은 사후 검사로 sentinel 분기로 라우팅
+                # (krx_outcomes 에 적재되어 total_failed 에 가산되지 않도록).
+                if krx_outcome.error == SkipReason.SENTINEL_SKIP.value:
+                    sentinel_skipped += 1
+                    skipped_outcomes_list.append(krx_outcome)
+                    logger.info(
+                        "ka10014 KRX bulk sentinel skip (via outcome) stock_code=%s",
+                        stock.stock_code,
+                    )
+                else:
+                    krx_outcomes.append(krx_outcome)
+            except SentinelStockCodeError:  # pragma: no cover — dead path after F-3 D-7
                 # Phase F-2 결정 #3 — sentinel skip 은 실패가 아님 (total_skipped 분리).
                 # KiwoomError / Exception 보다 먼저 catch (SentinelStockCodeError 가
                 # ValueError 상속이라 broader Exception 에 잡히지 않도록).
                 # Step 2 MED-1: 종목 명세 보존 (F-1 패턴).
+                # F-3 D-7 이후: 단건 UseCase 가 D-7 catch 로 도달 차단 — 본 분기는
+                # _현재_ 도달 불가능 (try 범위가 `self._single.execute()` 만이며 단건
+                # UseCase 가 raise 하지 않음). 다음의 _새 raise 경로_ 대비 안전망으로
+                # 유지: ① wrap/route 변경으로 다른 raise 경로 추가 ② Stock 조회 단계
+                # 의 raise ③ session_provider 단계의 raise. 추가로 D-7 catch 가
+                # 회귀로 제거될 경우 fallback. `# pragma: no cover` 로 coverage
+                # 분석에서 dead 명시.
                 sentinel_skipped += 1
                 skipped_outcomes_list.append(
                     ShortSellingIngestOutcome(
                         stock_code=stock.stock_code,
                         exchange=ExchangeType.KRX,
-                        error="sentinel_skip",
+                        error=SkipReason.SENTINEL_SKIP.value,
                     )
                 )
                 logger.info(
@@ -350,16 +411,28 @@ class IngestShortSellingBulkUseCase:
                         end_date=end_date,
                         exchange=ExchangeType.NXT,
                     )
-                    nxt_outcomes.append(nxt_outcome)
-                except SentinelStockCodeError:
+                    # Phase F-3 D-7: 사후 검사로 sentinel 분기 라우팅 (KRX 측과 동일).
+                    if nxt_outcome.error == SkipReason.SENTINEL_SKIP.value:
+                        sentinel_skipped += 1
+                        skipped_outcomes_list.append(nxt_outcome)
+                        logger.info(
+                            "ka10014 NXT bulk sentinel skip (via outcome) stock_code=%s",
+                            stock.stock_code,
+                        )
+                    else:
+                        nxt_outcomes.append(nxt_outcome)
+                except SentinelStockCodeError:  # pragma: no cover — dead path after F-3 D-7
                     # Phase F-2 결정 #3 — NXT 측도 동일 분리 (sentinel skip).
                     # Step 2 MED-1: 종목 명세 보존.
+                    # F-3 D-7 이후: KRX 측 분기와 동일 — 단건 UseCase D-7 catch 로
+                    # 도달 차단. wrap 변경 / Stock 조회 raise / session_provider
+                    # 단계 raise 등 _새 raise 경로_ 대비 안전망으로 유지.
                     sentinel_skipped += 1
                     skipped_outcomes_list.append(
                         ShortSellingIngestOutcome(
                             stock_code=stock.stock_code,
                             exchange=ExchangeType.NXT,
-                            error="sentinel_skip",
+                            error=SkipReason.SENTINEL_SKIP.value,
                         )
                     )
                     logger.info(
@@ -411,7 +484,9 @@ class IngestShortSellingBulkUseCase:
         total_skipped = pre_filter_skipped + sentinel_skipped
 
         warnings: list[str] = []
-        errors_above_threshold = False
+        # Phase F-3 D-3: bool → list[str] (return 시 tuple 변환). lending 패턴 통일.
+        # error 임계치 초과 시 메시지를 누적 — 메시지 자체가 알람 컨텍스트 (실패율 / 분모).
+        errors_above_threshold: list[str] = []
         if total_calls > 0:
             ratio = total_failed / total_calls
             # plan § 8.1: <5% 정상 / 5~15% warning / >15% error.
@@ -419,13 +494,15 @@ class IngestShortSellingBulkUseCase:
             # "app" logger 로 직접 호출 — pytest caplog 의 logger="app" 캡처 호환성.
             _app_logger = logging.getLogger("app")
             if ratio > PARTIAL_ERROR_THRESHOLD:
-                errors_above_threshold = True
                 msg = (
                     f"ka10014 bulk 실패율 {ratio:.2%} > {PARTIAL_ERROR_THRESHOLD:.0%} "
                     f"(failed={total_failed}/{total_calls}) "
                     f"(alphanumeric_skipped={total_skipped})"
                 )
+                # D-4: warnings + errors_above_threshold 양쪽 모두 보존 (기존 warnings
+                # append 동작 유지하여 caplog 기반 회귀 / 운영 알림 호환).
                 warnings.append(msg)
+                errors_above_threshold.append(msg)
                 _app_logger.error(msg)
             elif ratio >= PARTIAL_WARN_THRESHOLD:
                 msg = (
@@ -441,7 +518,7 @@ class IngestShortSellingBulkUseCase:
             krx_outcomes=tuple(krx_outcomes),
             nxt_outcomes=tuple(nxt_outcomes),
             warnings=tuple(warnings),
-            errors_above_threshold=errors_above_threshold,
+            errors_above_threshold=tuple(errors_above_threshold),
             total_skipped=total_skipped,
             skipped_outcomes=tuple(skipped_outcomes_list),
         )

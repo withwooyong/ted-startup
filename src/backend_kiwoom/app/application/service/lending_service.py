@@ -42,6 +42,7 @@ from app.adapter.out.persistence.models import Stock
 from app.adapter.out.persistence.repositories.lending_balance import (
     LendingBalanceKwRepository,
 )
+from app.application.dto._shared import SkipReason
 from app.application.dto.lending import (
     IngestLendingStockInput,
     LendingMarketIngestOutcome,
@@ -60,6 +61,29 @@ logger = logging.getLogger(__name__)
 # plan § 12.2 #10 — lending_stock partial 임계치 (5% warning / 15% error)
 LENDING_STOCK_WARNING_THRESHOLD: float = 0.05
 LENDING_STOCK_ERROR_THRESHOLD: float = 0.15
+
+
+def _empty_bulk_result(
+    *,
+    start_date: date,
+    end_date: date,
+    pre_filter_skipped: int,
+    alphanumeric_skipped_outcomes: list[LendingStockIngestOutcome],
+) -> LendingStockBulkResult:
+    """Phase F-3 D-5 — active 종목 0개 시 일관된 zero-value LendingStockBulkResult 생성.
+
+    bulk loop 진입 전 (pre-filter 직후) `stocks` 가 비어 있을 때 사용. 매번 인라인으로
+    DTO 를 채우면 필드 누락 위험이 있어 helper 로 분리. short_selling_service
+    `_empty_bulk_result` 와 패턴 일관 (단, lending DTO 필드에 맞춰 시그니처 다름).
+    """
+    return LendingStockBulkResult(
+        start_date=start_date,
+        end_date=end_date,
+        total_stocks=pre_filter_skipped,
+        outcomes=(),
+        total_alphanumeric_skipped=pre_filter_skipped,
+        alphanumeric_skipped_outcomes=tuple(alphanumeric_skipped_outcomes),
+    )
 
 
 class IngestLendingMarketUseCase:
@@ -161,6 +185,12 @@ class IngestLendingStockUseCase:
 
         Returns:
             LendingStockIngestOutcome — skipped/error/upserted.
+
+        Phase F-3 D-7 — defense-in-depth:
+            라우터 정규식 (`^[0-9]{6}$`) 우회 호출 시에도 SentinelStockCodeError 를 catch 하여
+            outcome.error = SkipReason.SENTINEL_SKIP.value 로 변환 + outcome.upserted = 0 반환.
+            silent failure 가 아닌 _명시적 outcome 보고_ — 호출자가 outcome.error 로 skip 사유
+            명확히 식별 가능. 라우터 가드 없는 호출자 (CLI / 테스트 / 향후 bulk endpoint) 도 동일 패턴.
         """
         # 1. stock 조회 (KRX only — nxt_enable 무관)
         stmt = select(Stock).where(Stock.stock_code == stock_code)
@@ -190,6 +220,21 @@ class IngestLendingStockUseCase:
                 stock_code,
                 start_date=start_date,
                 end_date=end_date,
+            )
+        except SentinelStockCodeError:
+            # Phase F-3 D-7: defense-in-depth — 라우터 정규식 (^[0-9]{6}$) 우회 경로
+            # (CLI / bulk / 테스트 직접 호출) 에서 alphanumeric stock_code 가 단건
+            # UseCase 에 도달하면 SentinelStockCodeError 가 raise 된다. catch 하여
+            # outcome.error = SkipReason.SENTINEL_SKIP.value 로 변환 — bulk loop 의
+            # sentinel 분리와 일관 (F-2 결정 #3).
+            # KiwoomBusinessError 보다 _먼저_ catch (SentinelStockCodeError 가
+            # ValueError 상속이라 broader except 에 잡히지 않도록 분기 위치 우선).
+            logger.info("ka20068 sentinel skip stock_code=%s", stock_code)
+            return LendingStockIngestOutcome(
+                stock_code=stock_code,
+                start_date=start_date,
+                end_date=end_date,
+                error=SkipReason.SENTINEL_SKIP.value,
             )
         except KiwoomBusinessError as exc:
             return LendingStockIngestOutcome(
@@ -293,7 +338,7 @@ class IngestLendingStockBulkUseCase:
                     alphanumeric_skipped_outcomes_list.append(
                         LendingStockIngestOutcome(
                             stock_code=s.stock_code,
-                            error="alphanumeric_pre_filter",
+                            error=SkipReason.ALPHANUMERIC_PRE_FILTER.value,
                         )
                     )
             stocks = kept
@@ -304,13 +349,11 @@ class IngestLendingStockBulkUseCase:
                 only_market_codes,
                 only_stock_codes,
             )
-            return LendingStockBulkResult(
+            return _empty_bulk_result(
                 start_date=start_date,
                 end_date=end_date,
-                total_stocks=pre_filter_skipped,
-                outcomes=(),
-                total_alphanumeric_skipped=pre_filter_skipped,
-                alphanumeric_skipped_outcomes=tuple(alphanumeric_skipped_outcomes_list),
+                pre_filter_skipped=pre_filter_skipped,
+                alphanumeric_skipped_outcomes=alphanumeric_skipped_outcomes_list,
             )
 
         outcomes: list[LendingStockIngestOutcome] = []
@@ -327,17 +370,22 @@ class IngestLendingStockBulkUseCase:
                     start_date=start_date,
                     end_date=end_date,
                 )
-            except SentinelStockCodeError:
+            except SentinelStockCodeError:  # pragma: no cover — dead path after F-3 D-7
                 # Phase F-2 결정 #3 — sentinel skip 은 실패가 아님 (total_alphanumeric_skipped 분리).
                 # KiwoomError / Exception 보다 먼저 catch (ValueError 상속이라
                 # broader Exception 에 잡히지 않도록 분기 위치 우선).
                 # Step 2 MED-1: 종목 명세 보존 (F-1 패턴) — outcomes 에는 미적재 (실제 호출만)
                 # 하되, alphanumeric_skipped_outcomes 에는 사유와 함께 적재.
+                # F-3 D-7 이후: 단건 UseCase 가 D-7 catch 로 도달 차단 — 본 분기는
+                # _현재_ 도달 불가능 (try 범위가 `self._single.execute()` 만이며 단건
+                # UseCase 가 raise 하지 않음). wrap/route 변경 / Stock 조회 raise /
+                # session_provider 단계 raise 등 _새 raise 경로_ 대비 안전망으로 유지.
+                # `# pragma: no cover` 로 coverage 분석에서 dead 명시.
                 sentinel_skipped += 1
                 alphanumeric_skipped_outcomes_list.append(
                     LendingStockIngestOutcome(
                         stock_code=stock.stock_code,
-                        error="sentinel_skip",
+                        error=SkipReason.SENTINEL_SKIP.value,
                     )
                 )
                 logger.info(
@@ -371,6 +419,23 @@ class IngestLendingStockBulkUseCase:
                 )
                 total_failed += 1
             else:
+                # Phase F-3 D-7: 단건 UseCase 가 SentinelStockCodeError 를 catch 하여
+                # outcome.error=SkipReason.SENTINEL_SKIP.value 로 반환하는 경로 보강.
+                # 이 경우 bulk loop 은 사후 검사로 sentinel 분기로 라우팅
+                # (outcomes 에 적재되어 total_failed 에 가산되지 않도록).
+                # Step 2 H-1 fix: BATCH commit 중복 제거 — loop tail 의 단일
+                # commit 블록 (`if i % self.BATCH_SIZE == 0:`) 이 모든 iteration
+                # 을 흡수. sentinel 분기 안의 commit 은 dead duplicate 였음.
+                if outcome.error == SkipReason.SENTINEL_SKIP.value:
+                    sentinel_skipped += 1
+                    alphanumeric_skipped_outcomes_list.append(outcome)
+                    logger.info(
+                        "ka20068 bulk sentinel skip (via outcome) stock_code=%s",
+                        stock.stock_code,
+                    )
+                    # outcomes 에 미적재 — 위 SentinelStockCodeError catch 분기와 동일.
+                    # continue 직전이지만 loop tail BATCH commit 이 i 기반이라 그대로 동작.
+                    continue
                 if outcome.error is not None:
                     total_failed += 1
                 elif outcome.skipped:

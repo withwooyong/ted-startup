@@ -7,6 +7,127 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] refactor(kiwoom): Phase F-3 — R2 inherit 7건 정리 (SkipReason Enum + errors_above_threshold tuple 통일 + empty helper + 단건 sentinel catch) (ted-run 풀 파이프라인)
+
+ADR § 46.8 R2 inherit 7건 전부 해소 + § 47 신규. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). 1284 PASS / cov 86.56% (+0.13%p) / mypy 106 files (+1) / R1 HIGH 2 fix → R2 ruff auto-fix → 양쪽 합의 PASS.
+
+### 변경 사항 (8 production + 4 test 갱신 + 3 test 신규 + 1 test 회귀 = 16 파일 / +573/-230)
+
+**Production 8 파일**:
+- `app/application/dto/_shared.py` (신규, +24/-0) — `SkipReason` StrEnum (`ALPHANUMERIC_PRE_FILTER` / `SENTINEL_SKIP`). 값 = 기존 매직 스트링 그대로 (KOSCOM/log 분석 영향 0)
+- `app/application/dto/short_selling.py` (+25/-11) — `errors_above_threshold: bool` → `tuple[str, ...]` (lending 패턴 통일), `skipped_count` property, `SkipReason` re-export (`__all__`), docstring 강화
+- `app/application/dto/lending.py` (+18/-6) — `skipped_count` property (비대칭 흡수), `SkipReason` re-export, docstring 강화
+- `app/application/service/short_selling_service.py` (+85/-20) — `SkipReason` 치환 (3 사이트: 258/309/362), `_empty_bulk_result` private helper (keyword-only), 단건 UseCase `SentinelStockCodeError` catch (D-7 defense-in-depth), bulk loop 사후 outcome 분기, `errors_above_threshold` `list[str]` 누적 → `tuple` 변환, dead path `# pragma: no cover` 마커 2 사이트 (KRX/NXT)
+- `app/application/service/lending_service.py` (+65/-16) — 동일 패턴 + `else` 블록 sentinel commit 중복 제거 (R1 H-1 fix)
+- `app/adapter/web/routers/short_selling.py` (+3/-3) — Pydantic `errors_above_threshold: tuple[str, ...]` (router DTO breaking 변경 — § 47.6 명시)
+- `app/batch/short_selling_job.py` (+4/-1) — `errors=list(result.errors_above_threshold)` logger.error 인자 추가 (lending_stock_job 패턴 미러)
+- `scripts/backfill_short.py:189` (+3/-1) — label `alphanumeric_skipped:` → `total_skipped:` (D-6 / H-R2-1 해소)
+
+**Test 갱신 4**:
+- `tests/test_short_selling_service.py` (+62/-34) — `errors_above_threshold` tuple 단언 + `test_empty_stocks_uses_helper_result` + `test_skipped_count_property_returns_total_skipped`
+- `tests/test_lending_service.py` (+50/-26) — 동일 패턴
+- `tests/test_short_selling_service_sentinel.py` (+5/-6) — 매직 스트링 → `SkipReason.SENTINEL_SKIP.value` 비교
+- `tests/test_lending_service_alphanumeric_skipped.py` (+5/-6) — 동일
+
+**Test 신규 3** (17 케이스):
+- `tests/test_skip_reason.py` (+25/-0, 4 케이스) — enum 값 안정성 회귀 (`ALPHANUMERIC_PRE_FILTER.value` / `SENTINEL_SKIP.value` / StrEnum string 비교 호환 / members 개수 안정성)
+- `tests/test_short_selling_use_case_sentinel.py` (+73/-0, 3 케이스) — 단건 UseCase D-7 catch 회귀
+- `tests/test_lending_use_case_sentinel.py` (+75/-0, 3 케이스) — 동일
+
+**Test 회귀 보완 1**:
+- `tests/test_backfill_short_filter.py` (+10/-4) — `test_backfill_short_summary_includes_alphanumeric_skipped` → `test_backfill_short_summary_includes_total_skipped` 갱신
+
+### 사용자 확정 (D-1~D-8 권고 default 일괄 채택, 2026-05-14)
+
+- **D-1**: `SkipReason` Enum 위치 = `app/application/dto/_shared.py` 신규 모듈
+- **D-2**: 표현 = StrEnum (`outcome.error: str` 그대로 호환)
+- **D-3**: `errors_above_threshold` 타입 통일 = short DTO `bool` → `tuple[str, ...]` (lending 패턴)
+- **D-4**: `warnings` + `errors_above_threshold` 둘 다 보존 + cron 둘 다 알람
+- **D-5**: `_empty_bulk_result` private helper 추출 (short + lending, keyword-only 통일)
+- **D-6**: `scripts/backfill_short.py:189` label `alphanumeric_skipped:` → `total_skipped:`
+- **D-7**: 단건 UseCase 둘 다 `SentinelStockCodeError` catch + outcome.error = `SkipReason.SENTINEL_SKIP.value`
+- **D-8**: DTO 양쪽 `@property skipped_count` (비대칭 흡수)
+
+### ted-run 풀 파이프라인
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0 TDD | sonnet | 17 신규 / 5 collection error + 4 FAILED 의도된 red |
+| 1 구현 | opus | 1284 PASS / ruff+mypy clean |
+| 2a R1 | sonnet | PASS / LOW 2 |
+| 2b R1 | opus | CONDITIONAL / HIGH 2 + MEDIUM 3 + LOW 2 |
+| 2 fix R1 | opus | 6 fix (H-1 commit 제거 / M-1 마커 / M-2/M-3 docstring / L-1 keyword-only / L-3 F401) |
+| 2a R2 | sonnet | PASS / inherit 2 LOW |
+| 2b R2 | opus | CONDITIONAL → ruff auto-fix 3건 / inherit 5건 |
+| 3 Verification | sonnet+haiku | 5관문 PASS / ruff clean + mypy 106 + 1284 / cov 86.56% + 런타임 imports OK |
+| 4 E2E | — | ⚪ UI 변경 0 자동 생략 |
+| 5 Ship | 메인 | ADR § 47 + 메타 3 + 커밋 |
+
+### R2 inherit 5건 (§ 47.8 — 다음 chunk 권고)
+
+1. router DTO `bool → tuple` breaking 외부 호출자 식별 — Phase F-4 합류
+2. `pyproject.toml` 에 `[tool.coverage.run/report]` 명시 설정 부재 — coverage 설정 chunk
+3. `SkipReason` 위치 (`dto/_shared.py` vs `application/constants.py`) 통일 결정
+4. lending bulk progress log `total_skipped` 카운터 이름 혼선 (R1 기존 코드 부채)
+5. ruff F401/I001 회귀 3건 — ✅ 본 chunk 해소 (auto)
+
+### Verification
+
+- ruff: All checks passed!
+- mypy --strict: 106 files Success (+1 `_shared.py`)
+- pytest: **1284 passed** (1267 baseline + 17 신규)
+- coverage: **86.56%** (+0.13%p)
+- 런타임 smoke: imports OK / `SkipReason.value` = 매직 스트링 동일
+
+### 운영 영향
+
+- **런타임 영향 0** — bulk path 의 outcome / DTO 의미 동등. StrEnum value = 기존 매직 스트링 그대로 (KOSCOM/log 분석/DB 저장 영향 0)
+- **Router DTO breaking** (H-2): `POST /api/kiwoom/short-selling/bulk/sync` 응답 `errors_above_threshold` schema 변경 (bool → array[string]). dev pre-release 가정 하 진행. 외부 호출자 식별은 inherit (Phase F-4 시점)
+- Cron 영향: short_selling cron (07:30) logger.error 가 `errors=list(...)` 인자 추가 — 디버깅 가시성 향상
+
+### 다음 작업
+
+1. **Phase F-4 — 5 ranking endpoint 통합** (`phase-f-4-rankings.md`) — D-1~D-14 사용자 확정 + 견적 ~2,500줄 분할 재검토
+2. 5-15 06:00 자연 cron 검증 (병행 / 코드 0)
+3. F-3 R2 inherit 5건 (§ 47.8) Phase F-4 합류 또는 별도
+
+---
+
+## [2026-05-14] docs(kiwoom): Phase F-3 / F-4 plan doc 신규 작성 (코드 변경 0)
+
+5-14 후속 세션 사용자 확정 (chunk 분할 정책 A — 5 endpoint 통합 1 chunk / R2 inherit 7건 선처리 / 5-15 cron 검증 병행) 에 따라 Phase F 진입 전 plan doc 2건 신규 작성.
+
+### 변경 사항 (plan doc 2 신규 + 메타 3 갱신)
+
+**plan doc 신규**:
+- `src/backend_kiwoom/docs/plans/phase-f-3-r2-inherit-cleanup.md` (~280 line) — ADR § 46.8 R2 inherit 7건 정리 chunk. SkipReason StrEnum 도입 + `errors_above_threshold` 타입 통일 (short bool → tuple[str, ...] = lending 패턴) + `_empty_bulk_result` helper + 단건 UseCase sentinel catch (defense-in-depth) + `backfill_short.py:189` label-field mismatch fix. D-1~D-8 사용자 확정 default 권고 표 (ted-run 입력 직전 합의 필요). 변경면 ~10 파일 / ~250-300줄 / 신규 enum 모듈 `app/application/dto/_shared.py`
+- `src/backend_kiwoom/docs/plans/phase-f-4-rankings.md` (~330 line) — 5 ranking endpoint (ka10027/30/31/32/23) 통합 chunk. Migration 007 `kiwoom.ranking_snapshot` + UNIQUE 6 + GIN index + JSONB payload + `KiwoomRkInfoClient` 5 fetch 메서드 + 5 단건 / 5 Bulk UseCase + 15 라우터 (POST 단건/POST sync/GET) + 5 cron chain (19:30/35/40/45/50 KST mon-fri). D-1~D-14 결정 표. ka10030 의 23 필드 nested payload 분리 (`{opmr, af_mkrt, bf_mkrt}`). F-3 정착 패턴 (SkipReason / tuple errors_above_threshold / empty helper / 단건 catch) 위에서 작업. 견적 ~2,500줄 — `feedback_chunk_split_for_pipelines` 임계 초과로 ted-run 입력 직전 분할 옵션 (b/c) 재논의 권고
+
+**메타 3 갱신**:
+- `src/backend_kiwoom/STATUS.md` § 0 (마지막 갱신 + 다음 chunk Phase F-3/F-4 순서 명시) + § 4 #32 (R2 inherit plan doc 작성 진행 표시) + § 5 (다음 chunk 후보 1순위 F-3 / 2순위 F-4 / 3순위 5-15 cron 검증)
+- `HANDOFF.md` rewrite (F-3/F-4 plan doc 작성 직전 직후 상태)
+- `CHANGELOG.md` prepend (본 entry)
+
+### 사용자 확정 (2026-05-14, 본 세션)
+
+- **chunk 분할 정책 A**: 5 endpoint 통합 1 chunk (F-4)
+- **R2 inherit 7건 선처리**: Phase F 진입 _전_ 별도 chunk (F-3)
+- **5-15 cron 검증 병행**: 코드 변경 0, F-3/F-4 plan doc 작성 / inherit 정리는 독립 진행 가능
+
+### 운영 영향
+
+- 코드 변경 0. 회귀 위험 없음
+- `kiwoom-app` 컨테이너 영향 없음 (plan doc 만)
+- 미푸시 commit 누적: F-1 (`ced66f3`) + F-2 (`8f6b453`) + 본 plan doc commit (별도 — _사용자 명시 시점에 커밋_)
+
+### 다음 작업 (Phase F-3 ted-run 진입 시 결정 필요)
+
+1. D-1~D-8 (F-3) 사용자 확정 답 입력
+2. ted-run 풀 파이프라인 진입
+3. F-3 완료 후 F-4 plan doc 의 D-1~D-14 + 견적 ~2,500줄 분할 재검토
+
+---
+
 ## [2026-05-14] feat(kiwoom): Phase F-2 — backfill 임계치 / alphanumeric guard 분리 (ted-run 풀 파이프라인)
 
 § 44.9 + Known Issue #31 (backfill `5%` 임계치 vs alphanumeric `6.75%` 자연 분포 충돌) 해소. F-1 의 `SentinelStockCodeError` 패턴 (§ 45) 을 `shsa.py` / `slb.py` adapter + `short_selling_service` / `lending_service` bulk loop + CLI 두 파일 + scheduler cron log 까지 확장. ted-run 풀 파이프라인 (`--force-2b`) + 사용자 4 확정 (D-1 A+B 하이브리드 / D-2 분리 신규 필드 / D-3 분모 유지 + 메시지 명시 / D-4 `filter_alphanumeric` 신규 파라미터).

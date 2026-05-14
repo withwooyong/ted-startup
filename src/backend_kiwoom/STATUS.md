@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-14 (Phase F-2 — backfill 임계치 / alphanumeric guard 분리 ted-run 풀 파이프라인 완료. § 4 #31 (backfill 5% 임계치 vs alphanumeric 6.75% 충돌) + § 44.9 해소. F-1 의 `SentinelStockCodeError` 패턴을 `shsa.py` + `slb.py` adapter + `short_selling_service` + `lending_service` bulk + scheduler cron log + CLI 두 파일까지 확장. 사용자 4 확정 결정 (D-1 A+B 하이브리드 / D-2 `total_alphanumeric_skipped` 분리 / D-3 분모 유지 + 메시지 명시 / D-4 `filter_alphanumeric` 신규 파라미터). R1 HIGH 2 + MEDIUM 7 모두 fix (Step 2 fix 8건) + R2 양쪽 합의 차단 0 / inherit 7건 (§ 46.8). Verification 5관문 PASS / **1267 tests** / cov **86.43%** (+0.24%p). 코드 9 production + 6 신규 test (31 케이스) + 2 회귀 + 1 infra = 18 파일 +232/-28 production. ADR § 46 신규 (9 sub-§))
+> **마지막 갱신**: 2026-05-14 (Phase F-3 — R2 inherit 7건 정리 ted-run 풀 파이프라인 완료. § 46.8 7건 전부 해소. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). `SkipReason` StrEnum 신규 모듈 (`app/application/dto/_shared.py`) + `errors_above_threshold` 양쪽 tuple 통일 + `_empty_bulk_result` private helper + 단건 UseCase sentinel catch (D-7 defense-in-depth) + `skipped_count` property 양쪽 (비대칭 흡수) + `backfill_short.py:189` label total_skipped 일치. R1 HIGH 2 + MEDIUM 3 + LOW 2 → fix 6건 → R2 양쪽 합의 PASS / inherit 5건 (§ 47.8 — router DTO breaking ADR 명시 / coverage 설정 부재 / SkipReason 위치 통일 / lending progress log 카운터 명 / ruff auto-fix 3건). Verification 5관문 PASS / **1284 tests** (+17) / cov **86.56%** (+0.13%p) / mypy strict 106 files (+1). 코드 8 production + 4 갱신 + 3 신규 + 1 회귀 = 16 파일 +573/-230. ADR § 47 신규 (9 sub-§))
 
 ---
 
@@ -12,11 +12,11 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase E 종결** (ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 완료) + **F-1/F-2 ops fix 완료**. D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
-| 마지막 완료 chunk | **Phase F-2 — backfill 임계치 / alphanumeric guard 분리** (ted-run 풀 파이프라인) — § 4 #31 + § 44.9 해소. F-1 `SentinelStockCodeError` 패턴 1:1 확장 (`shsa.py` + `slb.py` adapter / `short_selling_service` + `lending_service` bulk loop / scheduler cron log / `backfill_short.py` + `backfill_lending_stock.py` CLI). 사용자 4 확정 D-1~D-4. `ShortSellingBulkResult.total_skipped` + `skipped_outcomes` 신규 / `LendingStockBulkResult.total_alphanumeric_skipped` + `alphanumeric_skipped_outcomes` 신규 (의미 분리). UseCase `filter_alphanumeric: bool = False` 신규 파라미터 (CLI True / cron False). R1 HIGH 2 + MEDIUM 7 모두 fix (8 fix: H-1 A SQL 복원 + MED-1 F-1 패턴 이식 + MED-2 cron 가시성 + 정규식 앵커 + alembic 결정). R2 양쪽 합의 PASS / inherit 7건. Verification 5관문 PASS (ruff clean + mypy strict 105 files + **1267 tests** + cov **86.43%**). 9 production + 6 신규 + 2 회귀 + 1 infra = 18 파일 +232/-28 production. ADR § 46 신규 (9 sub-§) |
-| 다음 chunk | **Phase F (순위 5종) — ka10027/30/31/32/23** (신규 endpoint wave 25→20/25 80%) / **5-15 (금) 06:00 자연 cron 검증** (§ 43 + § 44 + § 45 + § 46 효과 동시) / **F-2 R2 inherit 7건** (§ 46.8 — 정리 chunk 또는 Phase F 합류) |
-| 25 Endpoint 진행 | **15 / 25 완료 (60%)** — F-1/F-2 는 ops fix 라 endpoint 수 변동 없음 |
-| 누적 chunk | 56+ commits (Phase F-2 포함) |
-| 테스트 | **1267 cases** (+31 신규) / coverage **86.43%** (+0.24%p) / ruff PASS / mypy strict 105 files PASS |
+| 마지막 완료 chunk | **Phase F-3 — R2 inherit 7건 정리** (ted-run 풀 파이프라인) — § 46.8 7건 전부 해소 + § 47 신규. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). `SkipReason` StrEnum 신규 모듈 (`app/application/dto/_shared.py`) + 양쪽 DTO `errors_above_threshold: tuple[str, ...]` 통일 + `_empty_bulk_result` private helper (short + lending) + 단건 UseCase `SentinelStockCodeError` catch (D-7 defense-in-depth) + `skipped_count` property 양쪽 (비대칭 흡수 — § 46.9 보존) + `backfill_short.py:189` label `total_skipped:` 일치. R1 HIGH 2 + MEDIUM 3 + LOW 2 → fix 6건 → R2 ruff auto-fix 3건 → 양쪽 합의 PASS / inherit 5건 (§ 47.8). Verification 5관문 PASS (ruff clean + mypy strict **106 files** + **1284 tests** + cov **86.56%** + 런타임 imports OK). 8 production + 4 갱신 + 3 신규 + 1 회귀 = 16 파일 +573/-230. ADR § 47 신규 (9 sub-§) |
+| 다음 chunk | **Phase F-4 — 5 ranking endpoint 통합** (plan doc 작성됨, `phase-f-4-rankings.md` — 25 endpoint 60→80%) → **5-15 06:00 자연 cron 검증** (병행 / 코드 0) → **Phase G (투자자별 3종)**. _사용자 확정_: F-4 통합 1 chunk (단 ~2,500줄 임계 초과 — ted-run 직전 분할 재검토). F-3 R2 inherit 5건 (§ 47.8) 은 Phase F-4 합류 또는 별도 chunk |
+| 25 Endpoint 진행 | **15 / 25 완료 (60%)** — F-3 는 refactor 라 endpoint 수 변동 없음. Phase F-4 진입 시 80% 도달 |
+| 누적 chunk | 57+ commits (Phase F-3 포함) |
+| 테스트 | **1284 cases** (+17 신규) / coverage **86.56%** (+0.13%p) / ruff PASS / mypy strict **106 files** PASS |
 | 운영 검증 | ✅ **12 scheduler 활성**. ✅ **Phase F-1 Migration 017 운영 적용**. ✅ **Phase F-2 코드 적용** (DTO 신규 필드 + filter_alphanumeric + cron log 가시성). **다음**: 5-15 06:00 자연 cron + 5-14 18:00 ka10001 cron + 5-14 07:30/08:00 short/lending cron 효과 동시 검증 (코드 0) |
 
 ---
@@ -145,6 +145,8 @@ P3 (선택):
 | ~~28~~ | ~~ka10086 KOSDAQ 1814 누락~~ | 운영 검증 완료 | ✅ **운영 검증 PASS** (5-14 06:53~07:00, `<this chunk>`) — KOSDAQ 1487 KRX + 224 NXT success / 0 failed / 7m 7s. 0 MaxPages. backfill CLI `--only-market-codes 10 --resume`. |
 | ~~**30**~~ | ~~5-14 06:00 OhlcvDaily / 06:30 DailyFlow cron miss~~ | 본 chunk 분석 완료 | ✅ **원인 확정** (`<this chunk>` ADR § 42) — Mac 절전 → Docker VM sleep → APScheduler timer 미발화. pmset 5-13 20:01~21:12 반복 Sleep 증거. 해결 옵션 § 42.5 (caffeinate / 서버 이전 / misfire 전체 / launchd / 현재 유지) 사용자 환경 결정 대기 |
 | ~~29~~ | ~~**ka10001 stock_fundamental 7.2% 실패** (5-13 18:00 cron)~~ | 5-13 18:00 cron | ✅ **해소** (Phase F-1, ADR § 45) — `trade_compare_rate (8,4)→(12,4)` + `low_250d_pre_rate (8,4)→(10,4)` Migration 017 + `SentinelStockCodeError(ValueError)` 신설 + `FundamentalSyncResult.skipped` 분리. 5-14 18:00 cron 부터 NumericValueOutOfRangeError 11건 → 0건 + failed=실제 실패 (sentinel 제외) 예상 |
+| ~~**32**~~ | ~~F-2 R2 inherit 7건~~ | ADR § 46.8 | ✅ **해소** (Phase F-3, ADR § 47) — D-1~D-8 사용자 확정 default 일괄 채택. SkipReason StrEnum 신규 모듈 + errors_above_threshold tuple 통일 + empty helper + 단건 sentinel catch + skipped_count property + backfill label fix. 16 파일 +573/-230 / **1284 tests** / cov **86.56%** |
+| **34** | F-3 R2 inherit 5건 | ADR § 47.8 | inh-1 router DTO breaking consumer 식별 / inh-2 coverage 설정 부재 / inh-3 SkipReason 위치 통일 / inh-4 lending progress log / inh-5 ruff auto-fix 기록. Phase F-4 합류 가능 |
 
 ---
 
@@ -152,9 +154,9 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **Phase F (순위 5종) — ka10027/30/31/32/23** | 신규 endpoint wave (남은 7 endpoint). F-1/F-2 ops fix 완료로 도메인 확장 진입 가능 (25 endpoint 60→80%) | 5 endpoint 통합 1 chunk 검토 |
-| **2** | **5-15 (금) 06:00 자연 cron 검증** | ADR § 43 + § 44 + § 45 + § 46 효과 동시 검증 시점. 5-14 07:30/08:00 short_selling/lending_stock cron 도 sentinel catch 효과 확인 (코드 0) | 운영 / 코드 0 |
-| **3** | **F-2 R2 inherit 7건** (ADR § 46.8) | M-A 분모 통일 / M-B `SkipReason` Enum / M-R2-1 errors_above_threshold 타입 / M-R2-2 empty 조기반환 / H-R2-1 label-field rename / L-A~C | 작음 (정리 chunk) 또는 Phase F 합류 |
+| **1** | **Phase F-4 — 5 ranking endpoint 통합** (`phase-f-4-rankings.md` 작성됨) | ka10027/30/31/32/23 통합 1 chunk (사용자 확정 A). Migration 007 + ranking_snapshot + JSONB payload + 15 라우터 + 5 cron. F-3 정착 패턴 (SkipReason / tuple errors_above_threshold / empty helper / 단건 catch) 위에서 작업. _주의_: 견적 ~2,500줄 (메모리 chunk_split 임계 초과 — ted-run 직전 분할 재검토) | ~2,300-2,500 line (D-1 통합 옵션 시) |
+| **2** | **5-15 (금) 06:00 자연 cron 검증** | ADR § 43 + § 44 + § 45 + § 46 + § 47 효과 동시 검증 시점. 5-14 07:30/08:00 short_selling/lending_stock cron 도 sentinel catch 효과 확인 (코드 0) | 운영 / 코드 0 |
+| **3** | **F-3 R2 inherit 5건** (ADR § 47.8) | inh-1 router DTO breaking ADR consumer 식별 / inh-2 coverage 설정 / inh-3 SkipReason 위치 통일 / inh-4 lending progress log 카운터 명 / inh-5 ruff auto-fix 기록 | Phase F-4 합류 가능 또는 별도 |
 | 4 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 5 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |
 | 5 | Phase G (투자자별 3종) / H (통합) | 신규 endpoint wave | 각 chunk 별 신규 |
@@ -233,6 +235,7 @@ P3 (선택):
 - **Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복** (5-14) — 12 scheduler 활성 + mg=21600 노출 12/12 + kiwoom-db `restart: unless-stopped` + 5-13 backfill 5 테이블 15,898 row 회복. ADR § 44. `b9d32a6`
 - **Phase F-1 — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** (5-14, ted-run) — § 4 #29 (5-13 18:00 cron 7.2% 실패) + § 44.9 해소. `trade_compare_rate (8,4)→(12,4)` + `low_250d_pre_rate (8,4)→(10,4)` Migration 017 운영 적용. `SentinelStockCodeError(ValueError)` 신설 (stkinfo) + `FundamentalSyncResult.skipped: tuple[...]` 분리. R1+R2 PASS / MEDIUM 3 fix / 1236 PASS / cov 86.19%. ADR § 45. `ced66f3`
 - **Phase F-2 — backfill 임계치 / alphanumeric guard 분리** (5-14, ted-run) — § 4 #31 + § 44.9 해소. F-1 sentinel 패턴 1:1 확장 (shsa/slb adapter + service bulk + scheduler cron log + CLI 두 파일). 사용자 4 확정 D-1~D-4 (A+B 하이브리드 / 분리 신규 필드 / 분모 유지 + 메시지 명시 / `filter_alphanumeric` 신규 파라미터). R1 HIGH 2 + MEDIUM 7 모두 fix (Step 2 fix 8건 — H-1 A SQL 복원 / MED-1 F-1 `skipped_outcomes` 패턴 이식 / MED-2 cron 가시성 / 정규식 앵커 / alembic env.py 결정) + R2 양쪽 합의 PASS (inherit 7건 § 46.8). 9 production + 6 신규 + 2 회귀 + 1 infra = 18 파일 +232/-28 production / **1267 PASS** / cov **86.43%** (+0.24%p). ADR § 46 신규 (9 sub-§). `8f6b453`
+- **Phase F-3 — R2 inherit 7건 정리** (5-14, ted-run) — § 46.8 7건 전부 해소 + § 47 신규. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). `SkipReason` StrEnum 신규 모듈 (`app/application/dto/_shared.py`) + 양쪽 DTO `errors_above_threshold: tuple[str, ...]` 통일 + `_empty_bulk_result` private helper (short + lending, keyword-only) + 단건 UseCase `SentinelStockCodeError` catch (D-7 defense-in-depth, 두 단건 UseCase docstring 명시) + `skipped_count` property 양쪽 (비대칭 흡수 — § 46.9 보존) + `backfill_short.py:189` label `total_skipped:` 일치 + DTO `__all__` SkipReason re-export + dead path `# pragma: no cover` 마커 3 사이트. R1 HIGH 2 + MEDIUM 3 + LOW 2 → fix 6건 (H-1 lending else commit 제거 + M-1 dead path 마커 + M-2 defense docstring + M-3 property docstring + L-1 keyword-only + L-3 F401 해소) → R2 ruff auto-fix 3건 → 양쪽 합의 PASS / inherit 5건 (§ 47.8 — router DTO breaking consumer 식별 / coverage 설정 부재 / SkipReason 위치 / lending progress log / ruff auto-fix 기록). Verification 5관문 PASS (ruff clean + mypy strict **106 files** + **1284 tests** (+17) + cov **86.56%** (+0.13%p) + 런타임 imports OK / E2E ⚪ UI 변경 0). 8 production + 4 갱신 + 3 신규 + 1 회귀 = 16 파일 +573/-230. ADR § 47 신규 (9 sub-§). `<this commit>`
 
 ---
 

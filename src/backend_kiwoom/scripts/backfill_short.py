@@ -186,7 +186,9 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                 f"nxt_outcomes:  {len(result.nxt_outcomes)}",
                 f"total_upserted:{result.total_upserted}",
                 f"total_failed:  {result.total_failed} (ratio {failure_ratio:.2%})",
-                f"alphanumeric_skipped:{result.total_skipped}",
+                # Phase F-3 D-6 (H-R2-1): label = DTO field 명 일치. KOSCOM
+                # cross-check 가 label 을 파싱하므로 회귀 명세 유지.
+                f"total_skipped: {result.total_skipped}",
                 f"elapsed:       {elapsed:.1f}s",
             ]
         )

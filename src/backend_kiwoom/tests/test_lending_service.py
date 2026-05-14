@@ -24,6 +24,10 @@ STOCK (ka20068) — 4건:
 10. CHECK constraint 위반 (scope=MARKET + stock_id=1 INSERT 시도) → IntegrityError
 11. Bulk 50 batch (100 종목) → 50건마다 commit (BATCH_SIZE 분기)
 12. only_market_codes 필터 (KOSPI 만) → KOSDAQ skip
+
+Phase F-3 R2 갱신 (D-5 / D-8):
+13. test_empty_stocks_uses_helper_result: active 종목 0개 시 _empty_bulk_result helper 위임 검증
+14. test_skipped_count_property_returns_total_alphanumeric_skipped: LendingStockBulkResult.skipped_count property
 """
 
 from __future__ import annotations
@@ -36,13 +40,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from app.adapter.out.kiwoom.slb import KiwoomLendingClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.adapter.out.kiwoom._exceptions import KiwoomBusinessError
 from app.adapter.out.kiwoom._records import LendingMarketRow, LendingStockRow
+from app.adapter.out.kiwoom.slb import KiwoomLendingClient
 
 # ---------------------------------------------------------------------------
 # 공통 픽스처
@@ -569,3 +573,73 @@ async def test_ingest_lending_stock_bulk_filters_by_market_codes(
 
     assert result.total_stocks == 2  # KOSDAQ 2건 skip
     assert client.fetch_stock_trend.await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase F-3 D-5 / D-8 신규 케이스
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_stocks_uses_helper_result(
+    session: AsyncSession,
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+) -> None:
+    """active 종목 0개 시 _empty_bulk_result helper 로 위임 후 DTO 필드 일관성 검증.
+
+    Phase F-3 D-5: _empty_bulk_result private helper 추출 (lending_service.py).
+    active stock 이 없을 때 bulk result 의 필드가 zero 값으로 일관적으로 채워져야 한다.
+    구현에서 empty path 가 helper 로 위임되면 green, 그렇지 않으면 AttributeError 또는 불일치.
+    """
+    from app.application.service.lending_service import (
+        IngestLendingStockBulkUseCase,
+        IngestLendingStockUseCase,
+    )
+
+    # stock 테이블 비어 있음 (autouse fixture 가 TRUNCATE 완료)
+    client = _make_lending_client_stub()
+    single_uc = IngestLendingStockUseCase(session=session, slb_client=client)
+    bulk_uc = IngestLendingStockBulkUseCase(session=session, single_use_case=single_uc)
+
+    result = await bulk_uc.execute(
+        start_date=date(2025, 5, 13),
+        end_date=date(2025, 5, 19),
+    )
+
+    # active 종목 0 → total_stocks=0 + empty outcomes
+    assert result.total_stocks == 0
+    assert result.outcomes == ()
+    assert result.total_upserted == 0
+    assert result.total_failed == 0
+    assert result.total_alphanumeric_skipped == 0
+    # D-3: errors_above_threshold 는 tuple
+    assert isinstance(result.errors_above_threshold, tuple), (
+        f"errors_above_threshold 타입이 tuple 아님: {type(result.errors_above_threshold)}"
+    )
+    # empty path → errors_above_threshold 는 빈 tuple (falsy)
+    assert not result.errors_above_threshold, (
+        f"active 종목 0개 → errors_above_threshold 빈 tuple 기대, 실제={result.errors_above_threshold}"
+    )
+
+
+def test_skipped_count_property_returns_total_alphanumeric_skipped() -> None:
+    """LendingStockBulkResult.skipped_count property = total_alphanumeric_skipped.
+
+    Phase F-3 D-8: DTO @property skipped_count (lending 측은 total_alphanumeric_skipped 참조).
+    외부 코드가 result.skipped_count 로 접근 시 total_alphanumeric_skipped 와 동일 값 반환.
+
+    미구현 시 AttributeError = red.
+    """
+    from datetime import date
+
+    from app.application.dto.lending import LendingStockBulkResult
+
+    result = LendingStockBulkResult(
+        start_date=date(2025, 5, 13),
+        end_date=date(2025, 5, 19),
+        total_stocks=10,
+        total_alphanumeric_skipped=5,
+    )
+    assert result.skipped_count == 5, (  # type: ignore[attr-defined]
+        f"skipped_count=5 기대, 실제={result.skipped_count}"  # type: ignore[attr-defined]
+    )

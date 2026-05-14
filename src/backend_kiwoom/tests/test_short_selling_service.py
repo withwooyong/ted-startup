@@ -23,6 +23,11 @@ test_ingest_daily_flow_service.py / test_sector_ohlcv_service.py 패턴 1:1 응�
 10. ovr_shrts_qty 누적 (다른 strt_dt 두 번) → UPDATE 마지막 호출 값으로
 11. partial 임계치 (5%/15%) → bulk 200 종목 10 failed → warning logger 검증
 
+Phase F-3 R2 갱신 (D-3 / D-5 / D-8):
+- errors_above_threshold bool → tuple[str, ...] 단언 갱신
+- test_empty_stocks_uses_helper_result: active 종목 0개 시 _empty_bulk_result helper 위임 검증
+- test_skipped_count_property_returns_total_skipped: skipped_count property 단언
+
 NOTE: IngestShortSellingUseCase, IngestShortSellingBulkUseCase, IngestShortSellingInput,
       ShortSellingIngestOutcome, ShortSellingBulkResult 는 Step 1 에서 작성.
       본 테스트는 import 실패가 red 의도.
@@ -39,15 +44,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
-from app.adapter.out.kiwoom.shsa import (  # type: ignore[import]  # Step 1 에서 작성
-    KiwoomShortSellingClient,
-    ShortSellingTimeType,
-)
-from app.application.service.short_selling_service import (  # type: ignore[import]  # Step 1 에서 작성
-    IngestShortSellingBulkUseCase,
-    IngestShortSellingUseCase,
-    ShortSellingIngestOutcome,
-)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -55,7 +51,16 @@ from app.adapter.out.kiwoom._exceptions import KiwoomBusinessError
 from app.adapter.out.kiwoom._records import (  # type: ignore[import]  # Step 1 에서 추가
     ShortSellingRow,
 )
+from app.adapter.out.kiwoom.shsa import (  # type: ignore[import]  # Step 1 에서 작성
+    KiwoomShortSellingClient,
+    ShortSellingTimeType,
+)
 from app.application.constants import ExchangeType
+from app.application.service.short_selling_service import (  # type: ignore[import]  # Step 1 에서 작성
+    IngestShortSellingBulkUseCase,
+    IngestShortSellingUseCase,
+    ShortSellingIngestOutcome,
+)
 
 # ---------------------------------------------------------------------------
 # 공통 fixture + helper
@@ -637,6 +642,12 @@ async def test_bulk_partial_threshold_warning(
     warn_or_error = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warn_or_error) >= 1, "5% 실패율 임계치 경고 로그 없음"
 
+    # Phase F-3 D-3: errors_above_threshold 는 tuple[str, ...] — bool 아님.
+    # 200 종목 중 10 failed = 5% → PARTIAL_WARN_THRESHOLD 이상 → 메시지 있음
+    assert isinstance(result.errors_above_threshold, tuple), (  # type: ignore[arg-type]
+        f"errors_above_threshold 타입이 tuple 아님: {type(result.errors_above_threshold)}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # ShortSellingIngestOutcome / ShortSellingBulkResult 구조 검증
@@ -656,3 +667,72 @@ def test_short_selling_ingest_outcome_is_frozen_slots() -> None:
     assert o.skipped is False
     assert o.reason is None
     assert o.error is None
+
+
+# ---------------------------------------------------------------------------
+# Phase F-3 D-3 / D-5 / D-8 신규 케이스
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_stocks_uses_helper_result(
+    session: AsyncSession,
+    session_provider: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+) -> None:
+    """active 종목 0개 시 _empty_bulk_result helper 로 위임 후 DTO 필드 일관성 검증.
+
+    Phase F-3 D-5: _empty_bulk_result private helper 추출.
+    stock 테이블이 비어 있을 때 bulk result 의 필드가 zero 값으로 일관적으로 채워져야 한다.
+    구현에서 empty path 가 helper 로 위임되면 green, 그렇지 않으면 AttributeError 또는 일관성 실패.
+    """
+
+    rows = []  # no stocks
+    client = _make_shsa_client_stub(krx_rows=rows)
+
+    single_uc = IngestShortSellingUseCase(
+        session_provider=session_provider,
+        shsa_client=client,
+    )
+    bulk_uc = IngestShortSellingBulkUseCase(
+        session_provider=session_provider,
+        single_use_case=single_uc,
+    )
+
+    result = await bulk_uc.execute(
+        start_date=date(2025, 5, 13),
+        end_date=date(2025, 5, 19),
+    )
+
+    # active 종목 0 → total_stocks=0 + empty outcomes
+    assert result.total_stocks == 0
+    assert result.krx_outcomes == ()
+    assert result.nxt_outcomes == ()
+    assert result.total_upserted == 0
+    assert result.total_failed == 0
+    # D-3: errors_above_threshold 는 tuple
+    assert isinstance(result.errors_above_threshold, tuple), (  # type: ignore[arg-type]
+        f"errors_above_threshold 타입이 tuple 아님: {type(result.errors_above_threshold)}"
+    )
+    # empty path → errors_above_threshold 는 빈 tuple (falsy)
+    assert not result.errors_above_threshold, (
+        f"active 종목 0개 → errors_above_threshold 빈 tuple 기대, 실제={result.errors_above_threshold}"
+    )
+
+
+def test_skipped_count_property_returns_total_skipped() -> None:
+    """ShortSellingBulkResult.skipped_count property = total_skipped.
+
+    Phase F-3 D-8: DTO @property skipped_count.
+    외부 코드가 result.skipped_count 로 접근 시 total_skipped 와 동일 값 반환.
+
+    미구현 시 AttributeError = red.
+    """
+    from app.application.dto.short_selling import ShortSellingBulkResult
+
+    result = ShortSellingBulkResult(
+        total_stocks=10,
+        total_skipped=3,
+    )
+    assert result.skipped_count == 3, (  # type: ignore[attr-defined]
+        f"skipped_count=3 기대, 실제={result.skipped_count}"  # type: ignore[attr-defined]
+    )

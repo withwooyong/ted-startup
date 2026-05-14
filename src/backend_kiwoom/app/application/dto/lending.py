@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from app.application.dto._shared import SkipReason
+
 
 @dataclass(frozen=True, slots=True)
 class IngestLendingMarketInput:
@@ -83,9 +85,14 @@ class LendingStockBulkResult:
       의미 분리 — pre-filter + bulk loop sentinel catch 합산. ADR § 44.9.
     - `alphanumeric_skipped_outcomes` — F-1 `FundamentalSyncResult.skipped` 패턴 1:1 미러.
       종목별 명세 보존 (stock_code + error reason). `error` 값은
-      `"alphanumeric_pre_filter"` 또는 `"sentinel_skip"`.
+      `SkipReason.ALPHANUMERIC_PRE_FILTER` 또는 `SkipReason.SENTINEL_SKIP`
+      (StrEnum 이라 string 값 그대로 비교 호환).
       `len(alphanumeric_skipped_outcomes) == total_alphanumeric_skipped` invariant.
     - `warnings / errors_above_threshold` — partial 임계치 메시지.
+
+    Phase F-3 D-8:
+    - `skipped_count` @property — `total_alphanumeric_skipped` alias. short_selling DTO
+      의 `skipped_count` 와 호출 인터페이스 통일.
     """
 
     start_date: date
@@ -101,6 +108,20 @@ class LendingStockBulkResult:
     total_alphanumeric_skipped: int = 0
     alphanumeric_skipped_outcomes: tuple[LendingStockIngestOutcome, ...] = field(default_factory=tuple)
 
+    @property
+    def skipped_count(self) -> int:
+        """skip 카운터 표준 인터페이스 (Phase F-3 D-8).
+
+        Short / Lending 의 원 필드명 비대칭 (ADR § 46.9 의도된 보존):
+        - ShortSellingBulkResult: `total_skipped` (alphanumeric + sentinel 합산)
+        - LendingStockBulkResult: `total_alphanumeric_skipped` (의미 동일, 분리 필드)
+
+        `skipped_count` 가 표준 — caller 는 두 DTO 를 동일 인터페이스로 처리 가능.
+        원 필드 (`total_skipped` / `total_alphanumeric_skipped`) 는 historical alias —
+        미래 통일 rename 후속 chunk 후보 (ADR § 46.9 보존 결정 변경 시).
+        """
+        return self.total_alphanumeric_skipped
+
 
 __all__ = [
     "IngestLendingMarketInput",
@@ -108,4 +129,5 @@ __all__ = [
     "LendingMarketIngestOutcome",
     "LendingStockBulkResult",
     "LendingStockIngestOutcome",
+    "SkipReason",
 ]

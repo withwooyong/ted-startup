@@ -57,9 +57,11 @@ async def fire_short_selling_sync(
     failure_ratio = (result.total_failed / total_outcomes) if total_outcomes > 0 else 0.0
 
     if result.errors_above_threshold:
+        # Phase F-3 D-3: errors_above_threshold 가 tuple[str, ...] 로 변경됨.
+        # lending_stock_job.py:66 패턴 1:1 미러 — 운영 알림 시 메시지 본문 보존.
         logger.error(
             "short selling sync 실패율 과다 (15%% 초과) — total_stocks=%d outcomes=%d upserted=%d failed=%d "
-            "total_skipped=%d ratio=%.2f warnings=%s",
+            "total_skipped=%d ratio=%.2f warnings=%s errors=%s",
             result.total_stocks,
             total_outcomes,
             result.total_upserted,
@@ -67,6 +69,7 @@ async def fire_short_selling_sync(
             result.total_skipped,
             failure_ratio,
             list(result.warnings),
+            list(result.errors_above_threshold),
         )
     elif result.warnings:
         logger.warning(

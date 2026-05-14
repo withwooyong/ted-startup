@@ -85,7 +85,9 @@ class ShortSellingBulkResultOut(BaseModel):
     krx_outcomes: tuple[ShortSellingIngestOutcomeOut, ...] = Field(default_factory=tuple)
     nxt_outcomes: tuple[ShortSellingIngestOutcomeOut, ...] = Field(default_factory=tuple)
     warnings: tuple[str, ...] = Field(default_factory=tuple)
-    errors_above_threshold: bool = False
+    # Phase F-3 D-3: bool → tuple[str, ...] (lending 패턴 통일).
+    # 빈 tuple → falsy (기존 truthy 체크 호환).
+    errors_above_threshold: tuple[str, ...] = Field(default_factory=tuple)
     total_upserted: int
     total_failed: int
 
@@ -269,7 +271,7 @@ async def sync_short_selling_bulk(
 
     partial 임계치 (결정 #10):
     - 실패율 5% 초과 → result.warnings + logger.warning
-    - 실패율 15% 초과 → result.errors_above_threshold=True
+    - 실패율 15% 초과 → result.errors_above_threshold 메시지 누적 (Phase F-3 D-3)
     """
     if body.start_date > body.end_date:
         raise HTTPException(
