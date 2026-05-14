@@ -3443,3 +3443,89 @@ Mac wake 시각 분포 (대부분 09:00~13:00 KST) → 06:00 새벽 cron → noo
 3. **(조건부) cross-scheduler rate limit race 별도 chunk** — 2b 2R M-1 의 운영 위반 확인 시 진입
 4. **§ 40.7 운영 모니터** — ka10014 / ka10068 / ka20068 첫 호출 검증
 5. **Phase F / G / H** — 신규 endpoint wave
+
+---
+
+## 44. Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복 (2026-05-14, ✅ 완료)
+
+> 추가일: 2026-05-14 (KST) — § 43 머지 후 운영 검증 turn 에서 다중 발견 + fix
+> 분류: ops fix (config 1줄 + 운영 회복, 코드 변경 0)
+> 선행: § 43 Phase D misfire chunk
+
+### 44.1 본 turn 목적 + 흐름
+
+§ 43 머지 후 컨테이너 재배포 + 5-15 catch-up 검증 진입. 사용자 추가 요청 (도커 불필요 이미지 정리) → 검증 중 운영 인시던트 발견 (5-13/5-14 데이터 다수 missing) → 3 트랙 (A backfill + B 5-15 체크리스트 + C 원인 분석) 병렬 진행.
+
+### 44.2 컨테이너 재배포 + Docker 정리
+
+- 신규 이미지 build (commit `79d1355` 의 Phase D 정책) + recreate → kiwoom-app healthy 09:51:48 KST 기동
+- **이미지 정리**: 26 → 9개 (1.3GB 회수) — dangling 만 (다른 프로젝트 ted-signal-* 보호로 `-a` 미사용)
+- **빌드 캐시 정리**: 15.6GB → 1.1GB (**14.5GB 회수**) — `docker builder prune -f`
+- **총 회수**: 약 15.8GB / 볼륨 미변경 (DB 데이터 안전)
+
+### 44.3 misfire=21600 노출 검증 (12/12 ✅)
+
+`/admin/scheduler/diag` → 12 cron 모두 `misfire_grace_time=21600` 정상 노출. mismatched=0.
+
+§ 43 신규 코드 (`main.py:902` jobs dump + 12 클래스 add_job kwarg) 운영 동작 확인.
+
+### 44.4 catch-up 발화 한계 발견 (가설)
+
+| 시나리오 | 결과 |
+|---|---|
+| **Mac sleep → wake (컨테이너 paused → resumed)** | APScheduler 이어서 동작 → misfire grace 효과 → catch-up 가능 (§ 43 가정) |
+| **컨테이너 재배포 / scheduler restart** | MemoryJobStore 신규 → 과거 missed cron 휘발 → catch-up ❌ |
+
+본 turn 의 신규 컨테이너 (09:51 시작) 에서 06:00~08:00 cron 6개 모두 grace 6h 안 진입 시점이었으나 **catch-up 발화 0건** 확인. 즉 § 43 효과는 sleep/resume 자연 사이클 한정.
+
+⇒ **다음 자연 cron 사이클 (5-15 06:00) 에서 본 chunk 효과 진정 검증**.
+
+### 44.5 운영 인시던트 — 5-14 새벽 kiwoom-db dead
+
+`docker inspect kiwoom-db` 결과: `2026-05-14T07:21:01 KST 종료, ExitCode 0, OOMKilled false`. 그 후 우리가 09:43 수동 `docker compose up -d kiwoom-db` 까지 약 2시간 dead.
+
+| 시각 (KST) | 이벤트 |
+|---|---|
+| ~5-14 06:00~07:21 | Mac sleep / Docker Desktop graceful stop → kiwoom-db SIGTERM (ExitCode 0) |
+| Docker 재시작 후 | kiwoom-db `restart:no` (디폴트) → 자동 복구 ❌ |
+| kiwoom-app | `restart: unless-stopped` → kiwoom-db healthy 의존성 미충족 → restart loop |
+
+**결과**: 5-14 06:00 ohlcv_daily / 06:30 daily_flow / 07:30 short_selling / 07:45 lending_market / 08:00 lending_stock cron 모두 dead 상태에서 미발화. 5-13 동일 패턴 추정 (옛 컨테이너 logs 휘발).
+
+### 44.6 Root cause = `docker-compose.yml` 의 kiwoom-db restart 정책 누락
+
+`kiwoom-db` 서비스 정의에 `restart:` 키 자체가 없음 → Docker 디폴트 `no`. 반면 `kiwoom-app` 은 `unless-stopped`. 비대칭 → 인시던트 원인.
+
+### 44.7 Fix 적용 (3 경로)
+
+1. **`docker-compose.yml`** — `kiwoom-db.healthcheck` 다음 줄에 `restart: unless-stopped` 1줄 추가 (영구)
+2. **`docker update --restart unless-stopped kiwoom-db`** — 라이브 정책 갱신 (재생성 X, backfill 보존)
+3. **검증**: `docker inspect ... RestartPolicy.Name` → `unless-stopped` (kiwoom-db + kiwoom-app 둘 다)
+
+### 44.8 5-13 backfill 회복 (보조 E 정책 발동, 5 테이블 15,898 row)
+
+backfill CLI 5개 직렬 백그라운드 실행 (`/tmp/backfill-2026-05-13.log`):
+
+| 단계 | 결과 |
+|---|---|
+| 1/5 ohlcv_daily | stock_price_krx 5-13: **4,375** row 적재 |
+| 2/5 daily_flow | stock_daily_flow 5-13: **5,008** row 적재 |
+| 3/5 short | short_selling_kw 5-13: **2,441** row / fail 307 (alphanumeric guard) / 22m |
+| 4/5 lending_market | lending_balance_kw 5-13 (scope=MARKET): 1 row / 0.2s |
+| 5/5 lending_stock | lending_balance_kw 5-13 (scope=STOCK): **4,072** row / fail 303 (alphanumeric guard) / 17m |
+
+**총 적재**: 15,897 row. KRX API 호출 약 18,500건 / 4xx-5xx 0건.
+
+### 44.9 신규 발견 — backfill_short / lending_stock 임계치 vs alphanumeric guard 충돌
+
+- `backfill_short.py` / `backfill_lending_stock.py` 의 5% 실패율 임계치 → exit 1 반환 → 본 turn 첫 시도 시 `set -e` 로 단계 4/5 미실행
+- 실제 모든 fail = `shsa.py:92` / `slb.py` 의 `stock_code 6자리 숫자만 허용` ValueError (KRX 우선주/ETN K/L suffix 종목)
+- 즉 **실제 데이터 적재 실패 = 0** / 알려진 guard 만 fail로 집계
+- **alphanumeric 비율 (~7%) > 임계치 (5%)** → 임계치 설계 결함
+- **F chunk 정리 대상**: `failed` vs `alphanumeric_skipped` 분리 + 임계치 의미 재정의 (또는 backfill 진입 시 alphanumeric pre-filter)
+
+### 44.10 다음 chunk
+
+1. **5-15 (금) 06:00 자연 cron 검증** — Mac wake 시점 catch-up + kiwoom-db restart 정책 효과 동시 검증 (체크리스트 5종 — 본 § 자매 STATUS § 5)
+2. **F chunk** — ka10001 NUMERIC overflow + sentinel + **backfill 임계치 / alphanumeric 분리** (본 turn § 44.9 추가)
+3. **(조건부) cross-scheduler rate limit race** — § 43.7 변동 없음

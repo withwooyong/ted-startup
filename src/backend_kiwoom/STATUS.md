@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-14 (Phase D — scheduler misfire_grace_time 통일 ted-run 풀 파이프라인 완료. § 42.5 옵션 C + 보조 E 채택 (노트북 + 학습 우선). 12 스케줄러 모두 `MISFIRE_GRACE_SECONDS=21600` (6h) 통일 — 9 신규 + 3 갱신. `/admin/scheduler/diag` 에 misfire 노출. 1R+2R PASS (MEDIUM 5 fix). Verification 5관문 PASS / 1199 tests / cov 86.17%. ADR § 43 신규. 컨테이너 재배포 + 5-15 cron catch-up 검증은 다음 chunk)
+> **마지막 갱신**: 2026-05-14 (Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복. 컨테이너 재배포 (commit `79d1355` 적용) → misfire 12/12 mg=21600 노출 ✅. Docker 정리 15.8GB 회수. **catch-up 한계 발견**: scheduler restart 시나리오에서 미발화 — 진정 검증 = 5-15 자연 cron. **운영 인시던트**: 5-14 07:21 kiwoom-db ExitCode 0 정상 종료 + 자동 복구 ❌ + kiwoom-app restart loop → root cause = docker-compose.yml 의 kiwoom-db `restart:` 누락. **Fix**: `restart: unless-stopped` 1줄 추가 + `docker update` 라이브 적용. **5-13 backfill**: 5 테이블 15,898 row 적재 (ohlcv 4375 / flow 5008 / short 2441 / lending_market 1 / lending_stock 4072) — KRX ~18,500 호출 / 4xx-5xx 0건. ADR § 44 신규. 신규 알려진 이슈 = backfill 임계치 5% vs alphanumeric 7% 충돌 → F chunk 정리)
 
 ---
 
@@ -12,12 +12,12 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase E 종결** (ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 완료) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
-| 마지막 완료 chunk | **Phase D — scheduler misfire_grace_time 통일** (ted-run) — § 42.5 옵션 C + 보조 E 채택 (노트북 + 학습 우선). 12 스케줄러 클래스 모두 `MISFIRE_GRACE_SECONDS: Final[int] = 21600` (6h) 통일 — 9 신규 (SectorSync/StockMaster/StockFundamental/OhlcvDaily/DailyFlow/WeeklyOhlcv/MonthlyOhlcv/YearlyOhlcv/SectorDailyOhlcv) + 3 갱신 (Short/LendingMarket/LendingStock 1800/1800/5400 → 21600). `/admin/scheduler/diag` 에 `misfire_grace_time` 노출 (2b M-2 fix). 1R 2a PASS + 2a M-1/M-2/M-3 docstring 구값 fix. 1R 2b PASS + 2b M-1 cross-scheduler race plan doc 보강 + 2b M-2 diag fix. Verification 5관문 PASS (ruff clean + mypy strict 95 files + 1199 tests + cov **86.17%**). 코드 10 파일 +78/-19 / Migration 0. ADR § 43 신규 / plan doc 신규 |
-| 다음 chunk | **컨테이너 재배포 + 5-15 (목) 06:00 OhlcvDaily 자연 cron catch-up 검증** — Mac wake 시각 (오전~정오) 안에 catch-up 발화 확인 + base_date previous_business_day 정합. 또는 **F chunk** (ka10001 NUMERIC overflow + sentinel WARN/skipped 분리, 별도 ted-run) |
+| 마지막 완료 chunk | **Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복** (turn 단위 / 코드 변경 0 / config 1줄) — § 43 신규 이미지 `79d1355` 재배포 → misfire 12/12 노출 ✅. Docker 정리 15.8GB 회수. **catch-up 한계 발견**: scheduler restart 시나리오에서 미발화 — § 43 효과는 sleep/resume 자연 사이클 한정. **운영 인시던트**: 5-14 07:21 kiwoom-db ExitCode 0 정상 종료 + 자동 복구 ❌ → root cause = `docker-compose.yml` 의 kiwoom-db `restart:` 누락. **Fix**: `restart: unless-stopped` 1줄 추가 + `docker update` 라이브 적용 (재생성 X). **5-13 backfill 회복**: ohlcv 4375 + flow 5008 + short 2441 + lending_market 1 + lending_stock 4072 = **15,898 row** / KRX ~18,500 호출 / 4xx-5xx 0건. ADR § 44 신규 |
+| 다음 chunk | **5-15 (금) 06:00 자연 cron 검증** — Mac wake 시점 catch-up + kiwoom-db restart 정책 효과 동시 검증 (체크리스트 5종: ohlcv 자연 발화 로그 / DB 5-14 적재 / 컨테이너 uptime+Restarts / misfire 노출 / pmset sleep 이력). 또는 **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 **+ backfill 임계치 vs alphanumeric guard 분리** (본 turn § 44.9 추가) |
 | 25 Endpoint 진행 | **15 / 25 완료 (60%)**. ka10014 / ka10068 / ka20068 → ✅ |
-| 누적 chunk | 53+ commits (Phase D scheduler misfire chunk 포함) |
-| 테스트 | **1199 cases** (단언만 추가 / 신규 case 0) / coverage **86.17%** / ruff PASS / mypy strict PASS |
-| 운영 검증 | ✅ **OHLCV 3 period 종합** — daily 1108 / weekly 4373 / monthly 4373 = 0 failed / 47m 33s. **5-11 NXT 보완** — 4373 stocks / NXT 74 → 628 / 0 failed / 21m 6s. **kiwoom-app 컨테이너** — Up healthy / **12 scheduler 활성** (Phase E 3 신규: short_selling 07:30 + lending_market 07:45 + lending_stock 08:00 KST). **❌ 5-13 06:00/06:30/07:00 cron dead** — 13시간 idle 후 timer 발화 0. baseline diag 정상 (12개 main_loop 동일 / timer cancelled=false) — 원인 미상. 17:30 발화 시 재현 모니터. 테스트 1186 / coverage **86.30%** / ruff PASS / mypy strict PASS |
+| 누적 chunk | 54+ commits (본 turn ops 포함) |
+| 테스트 | **1199 cases** / coverage **86.17%** / ruff PASS / mypy strict PASS (본 turn 코드 변경 0 / config 1줄만) |
+| 운영 검증 | ✅ **12 scheduler 활성 / mg=21600 노출 12/12** (`79d1355` 재배포). ✅ **5-13 backfill 회복**: 5 테이블 15,898 row / KRX ~18,500 호출 0건 에러. **❌ catch-up 발화 한계**: scheduler restart 시 미발화 (MemoryJobStore 신규) — sleep/resume 시나리오만 효과. ✅ **kiwoom-db restart 정책 fix 적용**. **다음**: 5-15 06:00 자연 cron 검증 |
 
 ---
 
@@ -136,7 +136,8 @@ P3 (선택):
 | ~~21~~ | ~~5-11 NXT 74 rows 보완~~ | ADR § 35.8 | ✅ **해소** (§ 37, `00ac3b0`) — NXT 74 → 628 / 0 failed / 21m 6s / KRX 회귀 0 |
 | **22** | `.env.prod` 의 잘못된 `KIWOOM_SCHEDULER_*` 9 env 정리 | ADR § 38.6.2' | 사용자 직접 (compose env override 로 우회 완료) |
 | **23** | 노출된 secret 4건 회전 (API_KEY/SECRET/Fernet/Docker PAT) | ADR § 38.8 #6/#7 | 사용자 즉시 — 대화 로그 영구 기록 |
-| **24** | Mac 절전 시 컨테이너 중단 (24/7 cron 누락 위험) | ADR § 38.8 #1 | 사용자 환경 결정 — 절전 차단 또는 서버 이전 |
+| ~~24~~ | ~~Mac 절전 시 컨테이너 중단 (24/7 cron 누락 위험)~~ | ADR § 38.8 #1 / § 42 / § 43 / § 44 | 🔄 **부분 해소** — § 43 misfire 21600 (sleep/resume catch-up) + § 44 kiwoom-db `restart: unless-stopped` (Docker Desktop graceful stop 후 자동 복구) + 보조 E backfill CLI 회복 검증 완료 (5-13 회복 15,898 row). **5-15 자연 cron 시 진정 효과 검증** |
+| **31** | **`backfill_short.py` / `backfill_lending_stock.py` 5% 임계치 vs alphanumeric guard (~7%) 충돌** — 실제 적재 실패 = 0 / KRX 우선주/ETN K/L suffix 종목이 guard fail 로 집계 → exit 1 → 체인 단절 | 본 turn § 44.9 | **F chunk 정리 대상** — `failed` vs `alphanumeric_skipped` 분리 + 임계치 의미 재정의 (또는 backfill 진입 시 alphanumeric pre-filter) |
 | ~~19~~ | ~~영숫자 295 종목 추가로 cron elapsed +10분 추정~~ | ADR § 33.6 → § 34.6 | ✅ **정정** — 영숫자 백필 실측 1108 종목 5m 48s = 0.31s/stock → **cron 추가 시간 ≈ 295 × 0.3 = ~1.5분** (이전 추정의 15%) |
 | **20** | NXT 우선주 sentinel 빈 row 1개 detection | ADR § 32.3 + § 33.6 | LOW — 운영 영향 0 (`nxt_enable=False` 자연 차단), 미래 chunk 검토 |
 | ~~26~~ | ~~5-13 06:00/06:30/07:00 cron dead~~ | 5-13 17:30 재현 모니터 | ✅ **자연 재현 반증** (`<this chunk>`) — 17:30 stock_master fetched=4788 정상 발화 + 18:00 stock_fundamental total=4379 정상 발화. 06:00 의 dead 는 컨테이너 재배포 직후 일회성 가설로 정리. `/admin/scheduler/diag` 진단 endpoint 유지 (운영 가치). ADR § 41 신규 § 후보 (별도, 코드 변경 0). |
@@ -151,8 +152,8 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **사용자 환경 결정** (§ 42.5 옵션 A~E) | Mac 절전 = 확정 원인. caffeinate 영구 활성 / 별도 Linux 서버 이전 / APScheduler misfire 전체 적용 / launchd cron / 현재 유지 중 결정 | 사용자 결정 |
-| **2** | **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** | § 4 #29. Migration 신규 (NUMERIC(8,4) precision 확대 — overflow 종목 값 분석 선행) + WARN/skipped 분리 + result.errors 의 full exception type/메시지 로그 보강 | 별도 ted-run (Mac 절전 결정과 독립) |
+| **1** | **5-15 (금) 06:00 자연 cron 검증** | 본 turn ADR § 44.10 — § 43 + § 44 효과 진정 검증 시점. 체크리스트 5종 (ohlcv 자연 발화 / DB 5-14 / 컨테이너 uptime+Restarts / misfire / pmset sleep) | 운영 / 코드 0 |
+| **2** | **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 + backfill 임계치/alphanumeric 분리** | § 4 #29 + #31. Migration 신규 + WARN/skipped 분리 + backfill CLI 임계치 의미 재정의 (또는 alphanumeric pre-filter) | 별도 ted-run |
 | 3 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 → 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 3 | **Phase F (순위 5종) — ka10027/30/31/32/23** | 신규 endpoint wave (남은 7 endpoint) | 5 endpoint 통합 1 chunk 검토 |
 | 4 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |

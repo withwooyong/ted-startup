@@ -7,6 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] ops(kiwoom): Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복
+
+§ 43 머지 후 운영 검증 turn — 컨테이너 재배포 + Docker 정리 + 5-15 catch-up 검증 진입 → 인시던트 발견 → 3 트랙 (A backfill + B 체크리스트 + C 원인 분석) 병렬 완료.
+
+### 본 turn 핵심 변경 (1 config + ADR § 44)
+
+**Config**:
+- `src/backend_kiwoom/docker-compose.yml` — `kiwoom-db.healthcheck` 다음 1줄 `restart: unless-stopped` 추가. 영구 적용 + 라이브 `docker update --restart unless-stopped kiwoom-db` 동시 적용 (재생성 X)
+
+**검증 + 발견 + 회복**:
+- Phase D 신규 이미지 (`79d1355`) 컨테이너 재배포 — kiwoom-app healthy 09:51 KST 기동
+- Docker 정리 — 이미지 26→9 (1.3GB) + 빌드 캐시 15.6→1.1GB (**14.5GB 회수**) / **총 ~15.8GB**
+- misfire=21600 노출 12/12 ✅ (`/admin/scheduler/diag`)
+- **catch-up 한계 발견**: scheduler restart 시나리오 (MemoryJobStore 신규) 에서 catch-up 미발화 — § 43 효과는 sleep/resume 자연 사이클 한정. 진정 검증 = 5-15 06:00
+- **운영 인시던트**: 5-14 07:21 KST kiwoom-db ExitCode 0 종료 → 자동 복구 ❌ → kiwoom-app restart loop (root cause = kiwoom-db restart 정책 누락)
+- **5-13 backfill 회복**: 5 테이블 15,898 row 적재 — ohlcv 4375 / daily_flow 5008 / short 2441 / lending_market 1 / lending_stock 4072. KRX API ~18,500 호출 / 4xx-5xx 0건
+- **신규 알려진 이슈**: `backfill_short.py` / `backfill_lending_stock.py` 5% 임계치 vs alphanumeric guard (~7%) 충돌 → F chunk 정리 대상 (실제 적재 실패 = 0)
+
+### ted-run 적용 여부
+
+본 turn = 운영 인시던트 후속 / 코드 변경 없음 (config 1줄 + 라이브 update). ted-run 풀 파이프라인 대상 외 (사용자 메모리 `feedback_ted_run_scope` 참조). 메타 4종 갱신 + 커밋만.
+
+### 다음 chunk
+
+1. **5-15 (금) 06:00 자연 cron 검증** — Mac wake 시점 catch-up + kiwoom-db restart 정책 효과 동시 검증 (체크리스트 5종)
+2. **F chunk** — ka10001 NUMERIC overflow + sentinel **+ backfill 임계치 / alphanumeric 분리** (본 turn 추가)
+
+---
+
 ## [2026-05-14] ops(kiwoom): Phase D — scheduler misfire_grace_time 12 cron 21600s (6h) 통일 (옵션 C 채택, ted-run 풀 파이프라인)
 
 ADR § 42 Mac 절전 dead 원인 확정 → § 42.5 옵션 C + 보조 E 채택 (노트북 + 학습 우선) → 코드 fix chunk.
