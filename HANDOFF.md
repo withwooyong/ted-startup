@@ -2,8 +2,9 @@
 
 > Last updated: 2026-05-14 (KST) — Phase F-1 ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 ted-run 풀 파이프라인 완료
 > Branch: `master`
-> Latest commit: `<pending>` (본 chunk + ADR § 45 + 메타 4종)
-> 미푸시: 본 chunk commit 1건 예정
+> Latest commit: `ced66f3` (Phase F-1 + ADR § 45 + 메타 4종)
+> 미푸시: **1건** (`ced66f3` — 사용자 명시 요청 시 푸시)
+> 본 세션 commit 2건: `b9d32a6` (Phase D 운영 검증 + kiwoom-db restart fix + 5-13 backfill) → ✅ 푸시 / `ced66f3` (Phase F-1) → 미푸시
 
 ## Current Status
 
