@@ -7,6 +7,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] ops(kiwoom): Phase D — scheduler misfire_grace_time 12 cron 21600s (6h) 통일 (옵션 C 채택, ted-run 풀 파이프라인)
+
+ADR § 42 Mac 절전 dead 원인 확정 → § 42.5 옵션 C + 보조 E 채택 (노트북 + 학습 우선) → 코드 fix chunk.
+
+### 변경 사항 (2 코드 + 8 테스트, +78/-19)
+
+**코드**:
+- `app/scheduler.py` — 12 스케줄러 클래스 모두 `MISFIRE_GRACE_SECONDS: Final[int] = 21600` 통일. 9 신규 (SectorSync / StockMaster / StockFundamental / OhlcvDaily / DailyFlow / WeeklyOhlcv / MonthlyOhlcv / YearlyOhlcv / SectorDailyOhlcv) + 3 갱신 (Short 1800→21600 / LendingMarket 1800→21600 / LendingStock 5400→21600). docstring 구값 fix (L94 / L1122).
+- `app/main.py` — `/admin/scheduler/diag` jobs dump 에 `misfire_grace_time` 노출 (2b 2R M-2 — 운영 가시화).
+
+**테스트**:
+- 7 test 파일 — `misfire_grace_time == 21600` (raw int, _PhaseEJobView wrap 없는 9 클래스) 단언 추가
+- `test_scheduler_phase_e.py` — `_30min`/`_90min` → `_6h` 통일 + docstring 갱신
+- 1199 tests / coverage **86.17%** / ruff clean / mypy --strict 95 files Success
+
+### ted-run 풀 파이프라인
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0 TDD | sonnet | 8 test 파일 단언 추가 / 9 fail red |
+| 1 구현 | opus (메인) | 12 클래스 / +52 line |
+| 2a 1차 리뷰 | sonnet | CONDITIONAL → PASS (MEDIUM 3 docstring 즉시 fix) |
+| 2b 적대적 리뷰 | opus | CONDITIONAL → PASS (MEDIUM 2 즉시 fix + 보강) |
+| 3 Verification | sonnet/haiku | 5관문 PASS |
+| 4 E2E | — | ⚪ UI 변경 0 |
+| 5 Ship | — | ADR § 43 + 메타 3종 + 커밋 |
+
+### 이중 리뷰 MEDIUM 5건 처리
+
+- **2a M-1/M-2/M-3**: docstring 구값 (90분/5400s) → 6h grace 통일 갱신
+- **2b M-1**: cross-scheduler catch-up race — KiwoomClient 인스턴스 단위 lock 한계로 5+ cron 동시 catch-up 시 KRX rate limit 위반 위험 → plan doc § 5 H-6 보강 + 운영 모니터 + 위반 시 별도 chunk
+- **2b M-2**: `/admin/scheduler/diag` `misfire_grace_time` 미노출 → main.py:902 fix
+
+### 변경 파일 (12)
+
+- 2 코드 (`app/scheduler.py` + `app/main.py`)
+- 8 test 파일
+- 1 plan doc 신규 (`docs/plans/phase-d-scheduler-misfire-grace.md`)
+- 1 ADR § 43 신규 + § 42.8 갱신
+- 3 메타 (STATUS / HANDOFF / 본 CHANGELOG)
+
+### 다음 chunk
+
+1. **컨테이너 재배포 + 5-15 (목) 06:00 catch-up 자연 발화 검증** — Mac wake 시 catch-up + base_date previous_business_day 정합
+2. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (Mac 결정과 독립)
+3. **(조건부) cross-scheduler rate limit race 별도 chunk** — 운영 위반 시 진입
+
+---
+
 ## [2026-05-14] diag(kiwoom): scheduler dead 원인 확정 — Mac 절전 (Docker Desktop VM sleep) / 코드 변경 0
 
 § 41.8 발견 (5-14 06:00/06:30 cron miss) 후속 분석. **pmset -g log** 결정적 증거로 Mac 절전 가설 ✅ 확정. APScheduler race / Docker network / healthcheck restart / Battery 가설 모두 반증.

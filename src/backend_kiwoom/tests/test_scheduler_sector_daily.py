@@ -82,6 +82,8 @@ async def test_sector_daily_enabled_registers_mon_fri_07_00_kst() -> None:
         assert fields["day_of_week"] == "mon-fri", f"day_of_week 기대 mon-fri, 실제: {fields['day_of_week']}"
         assert fields["hour"] == "7", f"hour 기대 7, 실제: {fields['hour']}"
         assert fields["minute"] == "0", f"minute 기대 0, 실제: {fields['minute']}"
+        # misfire_grace_time = 21600s (6h) — Mac 절전 catch-up (ADR § 42.5 옵션 C, plan § 3 #1)
+        assert job.misfire_grace_time == 21600  # raw apscheduler Job int (not timedelta — _PhaseEJobView wrap 별도)
     finally:
         sched.shutdown()
 

@@ -74,6 +74,8 @@ async def test_weekly_enabled_registers_saturday_07_00_kst() -> None:
         assert fields["day_of_week"] == "sat"
         assert fields["hour"] == "7"
         assert fields["minute"] == "0"
+        # misfire_grace_time = 21600s (6h) — Mac 절전 catch-up (ADR § 42.5 옵션 C, plan § 3 #1)
+        assert job.misfire_grace_time == 21600  # raw apscheduler Job int (not timedelta — _PhaseEJobView wrap 별도)
     finally:
         sched.shutdown()
 
@@ -123,6 +125,8 @@ async def test_monthly_enabled_registers_first_day_03_00_kst() -> None:
         assert fields["day"] == "1"
         assert fields["hour"] == "3"
         assert fields["minute"] == "0"
+        # misfire_grace_time = 21600s (6h) — Mac 절전 catch-up (ADR § 42.5 옵션 C, plan § 3 #1)
+        assert job.misfire_grace_time == 21600  # raw apscheduler Job int (not timedelta — _PhaseEJobView wrap 별도)
     finally:
         sched.shutdown()
 

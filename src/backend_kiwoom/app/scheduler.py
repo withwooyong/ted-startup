@@ -91,7 +91,7 @@ LENDING_MARKET_SYNC_JOB_ID: Final[str] = "lending_market_sync_daily"
 """일간 시장 대차거래 (ka10068) sync job 의 고유 ID (Phase E). KST mon-fri 07:45."""
 
 LENDING_STOCK_SYNC_JOB_ID: Final[str] = "lending_stock_sync_daily"
-"""일간 종목 대차거래 (ka20068) sync job 의 고유 ID (Phase E). KST mon-fri 08:00, misfire 90분."""
+"""일간 종목 대차거래 (ka20068) sync job 의 고유 ID (Phase E). KST mon-fri 08:00, misfire 6h (ADR § 42.5 옵션 C)."""
 
 
 class _PhaseEJobView:
@@ -132,6 +132,10 @@ class SectorSyncScheduler:
     enabled=False 일 때는 AsyncIOScheduler 자체를 만들지만 start 를 호출 안 함 →
     is_running=False, job_count=0.
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up) + plan-d-scheduler-misfire-grace § 3 #1.
+    Mac sleep 시 timer 미발화 → wake 후 grace 안에 catch-up."""
 
     def __init__(
         self,
@@ -192,6 +196,7 @@ class SectorSyncScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -226,6 +231,9 @@ class StockMasterScheduler:
 
     cron: KST mon-fri 17:30 (장 마감 후 신규 상장/상장폐지 반영, §7.2).
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up)."""
 
     def __init__(
         self,
@@ -279,6 +287,7 @@ class StockMasterScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -311,6 +320,9 @@ class StockFundamentalScheduler:
 
     enabled=False 시 start no-op.
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up)."""
 
     def __init__(
         self,
@@ -364,6 +376,7 @@ class StockFundamentalScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -395,6 +408,9 @@ class OhlcvDailyScheduler:
 
     enabled=False 시 start no-op.
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up). 06:00 cron → noon 안 catch-up."""
 
     def __init__(
         self,
@@ -448,6 +464,7 @@ class OhlcvDailyScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -480,6 +497,9 @@ class DailyFlowScheduler:
 
     enabled=False 시 start no-op.
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up). 06:30 cron → noon+30m 안 catch-up."""
 
     def __init__(
         self,
@@ -533,6 +553,7 @@ class DailyFlowScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -564,6 +585,9 @@ class WeeklyOhlcvScheduler:
 
     enabled=False 시 start no-op.
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up)."""
 
     def __init__(
         self,
@@ -617,6 +641,7 @@ class WeeklyOhlcvScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -644,6 +669,9 @@ class MonthlyOhlcvScheduler:
 
     WeeklyOhlcvScheduler 와 동일 패턴. cron: KST **매월 1일 03:00** (다른 cron 없는 시간).
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up). 03:00 새벽 cron 가장 위험."""
 
     def __init__(
         self,
@@ -697,6 +725,7 @@ class MonthlyOhlcvScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -726,6 +755,9 @@ class YearlyOhlcvScheduler:
 
     NXT skip 정책은 UseCase 가드 (plan § 12.2 #3 yearly_nxt_disabled). KRX 만 호출.
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up). 03:00 새벽 cron."""
 
     def __init__(
         self,
@@ -780,6 +812,7 @@ class YearlyOhlcvScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -812,6 +845,9 @@ class SectorDailyOhlcvScheduler:
 
     enabled=False 시 start no-op (운영 실수 방어).
     """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up)."""
 
     def __init__(
         self,
@@ -867,6 +903,7 @@ class SectorDailyOhlcvScheduler:
             max_instances=1,
             coalesce=True,
             replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
         )
         self._scheduler.start()
         self._started = True
@@ -901,8 +938,9 @@ class ShortSellingScheduler:
     enabled=False 시 start no-op (운영 실수 방어, plan § 12.2 #8).
     """
 
-    MISFIRE_GRACE_SECONDS: Final[int] = 1800
-    """plan § 12.2 #6 — 30분 grace. cron stagger 15분 (07:30 → 07:45) 안에서 흡수."""
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up) + plan-d-scheduler-misfire-grace § 3 #1.
+    이전 1800s (30분, plan § 12.2 #6) 에서 통일."""
 
     def __init__(
         self,
@@ -993,8 +1031,9 @@ class LendingMarketScheduler:
     enabled=False 시 start no-op.
     """
 
-    MISFIRE_GRACE_SECONDS: Final[int] = 1800
-    """plan § 12.2 #6 — 30분 grace (단일 호출이므로 짧음)."""
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up) + plan-d-scheduler-misfire-grace § 3 #1.
+    이전 1800s 에서 통일 (단일 호출 짧지만 sleep catch-up 일관)."""
 
     def __init__(
         self,
@@ -1080,13 +1119,14 @@ class LendingStockScheduler:
     ShortSellingScheduler 패턴 1:1 응용. cron: KST **mon-fri 08:00** (plan § 12.2 #5).
     07:45 lending_market 직후 wave. active 3000 종목 bulk — H-10 부담 (~100분 추정).
 
-    misfire_grace_time=5400s (90분) — plan § 12.2 #6 / H-10 고려. 다른 scheduler 는 default.
+    misfire_grace_time=21600s (6h) — ADR § 42.5 옵션 C (Mac 절전 catch-up). 2026-05-14 통일 (이전 5400s).
 
     enabled=False 시 start no-op.
     """
 
-    MISFIRE_GRACE_SECONDS: Final[int] = 5400
-    """plan § 12.2 #6 — active 3000 × 2s = ~100분 추정. 90분 grace 로 다음 cron 발화 흡수."""
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 42.5 옵션 C (Mac 절전 catch-up) + plan-d-scheduler-misfire-grace § 3 #1.
+    이전 5400s (90분, active 3000 × 2s ~100분 추정 plan § 12.2 #6) 에서 통일."""
 
     def __init__(
         self,

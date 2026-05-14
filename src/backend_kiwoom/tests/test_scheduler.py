@@ -209,6 +209,8 @@ async def test_scheduler_enabled_registers_weekly_cron_job() -> None:
         assert job is not None
         assert job.max_instances == 1
         assert job.coalesce is True
+        # misfire_grace_time = 21600s (6h) — Mac 절전 catch-up (ADR § 42.5 옵션 C, plan § 3 #1)
+        assert job.misfire_grace_time == 21600  # raw apscheduler Job int (not timedelta — _PhaseEJobView wrap 별도)
 
         # CronTrigger 검증 — 시각/요일/timezone
         trigger = job.trigger

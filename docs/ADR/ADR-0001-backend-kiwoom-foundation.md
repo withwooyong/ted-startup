@@ -3358,9 +3358,88 @@ sleep   1 (sleep prevented by sharingd, caffeinate, caffeinate, caffeinate, powe
 
 ### 42.8 다음 chunk
 
-1. **사용자 환경 결정** — § 42.5 옵션 A~E 중 선택. 후행 chunk 는 결정 후 진행
+1. ~~**사용자 환경 결정**~~ ✅ 옵션 C + 보조 E 채택 (5-14, § 43)
 2. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (Mac 절전 결정과 독립)
 3. **§ 40.7 운영 모니터** — ka10014 / ka10068 / ka20068 첫 호출 검증
 4. **(5-19 이후) § 36.5 1주 모니터 측정** — 12 scheduler elapsed
 5. **Phase F / G / H** — 신규 endpoint wave
 6. **Phase D-2 ka10080 분봉 (마지막 endpoint)** — 대용량 파티션 결정 동반
+
+---
+
+## 43. Phase D — scheduler misfire_grace_time 전 cron 통일 (옵션 C 채택, 2026-05-14, ✅ 완료)
+
+> 추가일: 2026-05-14 (KST) — § 42.5 옵션 C 채택 사용자 결정 후속
+> 분류: ops fix (운영 정책 변경, 코드 작음)
+> 선행: § 42 Mac 절전 dead 원인 확정 + 사용자 환경 결정 (노트북 + 학습 우선)
+> Plan doc: `src/backend_kiwoom/docs/plans/phase-d-scheduler-misfire-grace.md`
+
+### 43.1 결정
+
+12 스케줄러 클래스 모두 `MISFIRE_GRACE_SECONDS: Final[int] = 21600` (6h) 통일:
+- 9 신규: SectorSync / StockMaster / StockFundamental / OhlcvDaily / DailyFlow / WeeklyOhlcv / MonthlyOhlcv / YearlyOhlcv / SectorDailyOhlcv — 상수 + add_job kwarg 추가
+- 3 갱신: ShortSelling (1800→21600) / LendingMarket (1800→21600) / LendingStock (5400→21600)
+
+Mac wake 시각 분포 (대부분 09:00~13:00 KST) → 06:00 새벽 cron → noon 안 catch-up.
+
+### 43.2 영향 범위 (10 파일 / +78 -19)
+
+**코드 (2 파일)**:
+- `app/scheduler.py` — 12 클래스 정책 통일 + L94 / L1122 docstring 구값 갱신 (2a M-1/M-3)
+- `app/main.py` — `/admin/scheduler/diag` endpoint 의 jobs dump 에 `misfire_grace_time` 노출 (2b M-2)
+
+**테스트 (8 파일)**:
+- `test_scheduler.py` / `test_stock_master_scheduler.py` / `test_stock_fundamental_scheduler.py` / `test_ohlcv_daily_scheduler.py` / `test_daily_flow_scheduler.py` / `test_weekly_monthly_ohlcv_scheduler.py` / `test_scheduler_sector_daily.py` — `misfire_grace_time == 21600` 단언 추가 (raw int — _PhaseEJobView wrap 없는 클래스)
+- `test_scheduler_phase_e.py` — `_30min`/`_90min` → `_6h` 통일 + docstring 갱신 (2a M-2)
+
+### 43.3 이중 리뷰 결과
+
+- **2a (sonnet) CONDITIONAL → PASS**: CRITICAL 0 / HIGH 0 / MEDIUM 3 (docstring 구값 잔존) 즉시 fix / LOW 3
+- **2b (opus) CONDITIONAL → PASS**: CRITICAL 0 / HIGH 0 / MEDIUM 2 즉시 fix + 보강 / LOW 4
+
+**MEDIUM 5건 처리**:
+| # | 출처 | 항목 | 처리 |
+|---|------|------|------|
+| M-1 | 2a | scheduler.py L94 docstring `misfire 90분` 구값 | docstring 갱신 |
+| M-2 | 2a | test_scheduler_phase_e.py Scenario 9 docstring `5400s/1800s` 구값 | docstring 갱신 |
+| M-3 | 2a | LendingStockScheduler 클래스 docstring `5400s (90분)` 구값 | docstring 갱신 |
+| M-1 | 2b | cross-scheduler catch-up race — 6h grace 시 5+ cron 동시 catch-up → KRX rate limit 위반 위험 (`KiwoomClient` 인스턴스 단위 lock 한계) | **plan doc § 5 H-6 보강** + 운영 모니터 + 위반 발생 시 별도 chunk (공유 `KiwoomClient` 또는 cross-scheduler `asyncio.Semaphore`) |
+| M-2 | 2b | `/admin/scheduler/diag` 가 `misfire_grace_time` 노출 안 함 — 운영 가시성 부족 | main.py:902 jobs dump 에 1줄 추가 |
+
+### 43.4 Verification 5관문
+
+| 관문 | 결과 |
+|------|------|
+| 3-1 빌드 | pytest collection 1199 PASS |
+| 3-2 ruff | All checks passed (8 unused `import datetime` 자동 fix) |
+| 3-2 mypy --strict | Success: no issues found in 95 source files |
+| 3-3 pytest | **1199 passed** / coverage **86.17%** (≥80% 통과) |
+| 3-4 보안 스캔 | ⚪ (일반 분류 자동 생략) |
+| 3-5 런타임 | ✅ pytest collection import 검증 |
+| 4 E2E | ⚪ (UI 변경 0) |
+
+### 43.5 누적 메트릭
+
+- 코드: 2 파일 (scheduler.py + main.py) / Migration 0 / UseCase 변경 0
+- 테스트: 1199 그대로 (단언 추가만, 신규 테스트 case 0)
+- coverage: 86.17%
+- 1R: MEDIUM 5 즉시 fix → 2a/2b 모두 PASS
+- Verification: 5관문 모두 PASS
+
+### 43.6 운영 모니터 (다음 chunk)
+
+본 chunk 머지 + 컨테이너 재배포 후:
+
+- [ ] **5-15 (목) 06:00 OhlcvDaily catch-up 검증** — Mac wake 시점에 발화 + base_date=previous_business_day (5-14 수) 정합
+- [ ] **6시간 grace 안 미catch 케이스** — 정오 이후 wake 시 skip 발생 → backfill CLI 수동 회복 (보조 E)
+- [ ] **2b M-1 cross-scheduler race 모니터** — 5+ cron 동시 catch-up 시 429 / alias revoke 로그 검토. 위반 시 별도 chunk 진입
+- [ ] **`/admin/scheduler/diag` misfire_grace_time 노출 검증** — 12 cron 모두 21600 표시
+- [ ] **(5-19 이후) § 36.5 1주 모니터** — 12 cron 의 누적 elapsed / 실행 성공률 / misfire 빈도
+
+### 43.7 다음 chunk
+
+1. **(운영) 5-15 (목) 새벽 cron catch-up 검증** — 본 chunk 효과 확정
+2. **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (Mac 결정과 독립)
+3. **(조건부) cross-scheduler rate limit race 별도 chunk** — 2b 2R M-1 의 운영 위반 확인 시 진입
+4. **§ 40.7 운영 모니터** — ka10014 / ka10068 / ka20068 첫 호출 검증
+5. **Phase F / G / H** — 신규 endpoint wave

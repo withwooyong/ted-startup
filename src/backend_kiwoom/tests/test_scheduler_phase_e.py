@@ -478,9 +478,10 @@ async def test_lending_stock_disabled_not_registered_others_unaffected() -> None
 @pytest.mark.asyncio
 async def test_phase_e_job_options_max_instances_coalesce_misfire_grace() -> None:
     """3 job 모두 max_instances=1 + coalesce=True.
-    misfire_grace_time: lending_stock=5400s(90분) / short_selling=1800s(30분) / lending_market=1800s(30분).
+    misfire_grace_time: 3 cron 모두 21600s (6h) — ADR § 42.5 옵션 C (Mac 절전 catch-up) 2026-05-14 통일.
 
-    plan § 12.4 H-10 — lending_stock 은 active 3000 종목 × 2초 = ~100분 추정이므로 grace 90분.
+    plan § 12.4 H-10 (이전 결정) — lending_stock 은 active 3000 × 2초 = ~100분 추정으로 5400s 권고였으나,
+    phase-d-scheduler-misfire-grace § 3 #2 로 21600s 통일 (sleep catch-up 정합 + 일관성 ↑).
     """
     from app.scheduler import (  # type: ignore[attr-defined]
         LENDING_MARKET_SYNC_JOB_ID,
@@ -529,24 +530,24 @@ async def test_phase_e_job_options_max_instances_coalesce_misfire_grace() -> Non
         assert lm_job.coalesce is True, f"lending_market coalesce 기대 True, 실제: {lm_job.coalesce}"
         assert ls_job.coalesce is True, f"lending_stock coalesce 기대 True, 실제: {ls_job.coalesce}"
 
-        # misfire_grace_time — lending_stock 90분(5400s), 나머지 30분(1800s)
+        # misfire_grace_time = 21600s (6h) — Mac 절전 catch-up (ADR § 42.5 옵션 C, plan § 3 #1)
+        # 전체 통일: short_selling / lending_market / lending_stock 모두 6h
         import datetime
 
-        _30min = datetime.timedelta(seconds=1800)
-        _90min = datetime.timedelta(seconds=5400)
+        _6h = datetime.timedelta(seconds=21600)
 
         ss_grace = ss_job.misfire_grace_time
         lm_grace = lm_job.misfire_grace_time
         ls_grace = ls_job.misfire_grace_time
 
-        assert ss_grace == _30min, (
-            f"short_selling misfire_grace_time 기대 30분(1800s), 실제: {ss_grace}"
+        assert ss_grace == _6h, (
+            f"short_selling misfire_grace_time 기대 6h(21600s), 실제: {ss_grace}"
         )
-        assert lm_grace == _30min, (
-            f"lending_market misfire_grace_time 기대 30분(1800s), 실제: {lm_grace}"
+        assert lm_grace == _6h, (
+            f"lending_market misfire_grace_time 기대 6h(21600s), 실제: {lm_grace}"
         )
-        assert ls_grace == _90min, (
-            f"lending_stock misfire_grace_time 기대 90분(5400s), 실제: {ls_grace}"
+        assert ls_grace == _6h, (
+            f"lending_stock misfire_grace_time 기대 6h(21600s), 실제: {ls_grace}"
         )
     finally:
         ss_sched.shutdown()

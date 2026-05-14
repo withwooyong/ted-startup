@@ -225,6 +225,8 @@ async def test_scheduler_enabled_registers_one_cron_job() -> None:
         assert job is not None
         assert isinstance(job.trigger, CronTrigger)
         assert job.trigger.timezone == KST
+        # misfire_grace_time = 21600s (6h) — Mac 절전 catch-up (ADR § 42.5 옵션 C, plan § 3 #1)
+        assert job.misfire_grace_time == 21600  # raw apscheduler Job int (not timedelta — _PhaseEJobView wrap 별도)
     finally:
         sched.shutdown(wait=False)
 

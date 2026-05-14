@@ -900,6 +900,8 @@ def create_app() -> FastAPI:
                             "next_run_time": j.next_run_time.isoformat() if j.next_run_time else None,
                             "pending": j.pending,
                             "trigger": str(j.trigger),
+                            # 2b 2R M-2 — misfire_grace_time 노출 (ADR § 42.5 옵션 C 운영 가시화)
+                            "misfire_grace_time": j.misfire_grace_time,
                         }
                         for j in inner.get_jobs()
                     ],
