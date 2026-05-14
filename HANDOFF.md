@@ -1,10 +1,10 @@
 # Session Handoff
 
-> Last updated: 2026-05-14 (KST) — Phase F-3 R2 inherit 7건 정리 ted-run 풀 파이프라인 완료
+> Last updated: 2026-05-14 (KST) — Phase F-3 R2 inherit 7건 정리 ted-run 풀 파이프라인 완료 + push 완료
 > Branch: `master`
-> Latest commit: `43af892` (Phase F-3 + ADR § 47 + 메타 4종 + plan doc 2 신규)
-> 미푸시: **3건** (`ced66f3` F-1 + `8f6b453` F-2 + `43af892` F-3 — 사용자 명시 요청 시 푸시)
-> 본 세션 commit: 1건 (Phase F-3, `43af892`) → 미푸시
+> Latest commit: `619a144` (HANDOFF finalize) ← `43af892` (Phase F-3 + ADR § 47 + 메타 4종 + plan doc 2 신규)
+> **미푸시: 0건** (F-1 `ced66f3` + F-2 `8f6b453` + F-3 `43af892` + 3 finalize 모두 origin/master 반영, 5-14 KST)
+> 본 세션 commit: 2건 (`43af892` F-3 + `619a144` finalize) → ✅ pushed
 
 ## Current Status
 
