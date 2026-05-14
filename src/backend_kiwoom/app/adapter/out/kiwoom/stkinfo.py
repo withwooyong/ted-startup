@@ -36,6 +36,24 @@ VALID_MRKT_TP: Final[tuple[str, ...]] = ("0", "1", "2", "4", "7")
 0: 코스피(거래소) / 1: 코스닥 / 2: KOSPI200 / 4: KOSPI100 / 7: KRX100
 """
 
+__all__ = [
+    "KiwoomStkInfoClient",
+    "NormalizedFundamental",
+    "NormalizedStock",
+    "SectorListRequest",
+    "SectorListResponse",
+    "SectorRow",
+    "SentinelStockCodeError",
+    "StockBasicInfoRequest",
+    "StockBasicInfoResponse",
+    "StockListRequest",
+    "StockListResponse",
+    "StockLookupRequest",
+    "StockLookupResponse",
+    "STK_CD_CHART_PATTERN",
+    "STK_CD_LOOKUP_PATTERN",
+]
+
 
 class SectorListRequest(BaseModel):
     """ka10101 요청 본문."""
@@ -236,6 +254,22 @@ _STK_CD_LOOKUP_RE = re.compile(STK_CD_LOOKUP_PATTERN)
 _STK_CD_CHART_RE = re.compile(STK_CD_CHART_PATTERN)
 
 
+class SentinelStockCodeError(ValueError):
+    """sentinel 종목코드 거부 — 운영 의도된 skip (Phase F-1).
+
+    설계: phase-f-1-ka10001-numeric-sentinel.md § 4 결정 #4.
+
+    감지 대상 sentinel 패턴 (§ 2.3):
+    - NXT 우선주 sentinel: ``0000D0`` / ``0000H0`` / ``0000J0`` / ``0000Y0`` / ``0000Z0``
+      (4자리 0 + 1문자 + 1자리 0)
+    - KRX 우선주 / ETN K/L suffix: ``26490K`` / ``28513K`` / ``0070X0`` 등
+
+    상속:
+    - ``ValueError`` 상속 — 기존 ``except ValueError:`` caller 호환 유지.
+    - service layer 는 본 예외를 별도 catch → ``result.skipped`` 적재 (failed 분리).
+    """
+
+
 def _validate_stk_cd_for_lookup(stk_cd: str) -> None:
     """ka10100/ka10001 stk_cd 사전 검증 — 6자리 ASCII 숫자만. 호출 자체 차단.
 
@@ -244,9 +278,12 @@ def _validate_stk_cd_for_lookup(stk_cd: str) -> None:
 
     예외 메시지의 입력값은 50자 cap (B-γ-1 2R A-L1) — 거대 입력 / 제어문자 박힌 입력이
     log line 폭주 / RTL override 등 공격 시 message 자체를 dos 수단으로 쓰는 것 차단.
+
+    Phase F-1: ``SentinelStockCodeError(ValueError)`` raise — ValueError 상속이라
+    기존 ``except ValueError:`` 호환. service layer 는 별도 catch → ``result.skipped``.
     """
     if not _STK_CD_LOOKUP_RE.fullmatch(stk_cd):
-        raise ValueError(f"stk_cd 는 6자리 ASCII 숫자만 허용: {stk_cd[:50]!r}")
+        raise SentinelStockCodeError(f"stk_cd 는 6자리 ASCII 숫자만 허용: {stk_cd[:50]!r}")
 
 
 def _validate_stk_cd_for_chart(stk_cd: str) -> None:

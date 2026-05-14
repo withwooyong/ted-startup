@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-14 (Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복. 컨테이너 재배포 (commit `79d1355` 적용) → misfire 12/12 mg=21600 노출 ✅. Docker 정리 15.8GB 회수. **catch-up 한계 발견**: scheduler restart 시나리오에서 미발화 — 진정 검증 = 5-15 자연 cron. **운영 인시던트**: 5-14 07:21 kiwoom-db ExitCode 0 정상 종료 + 자동 복구 ❌ + kiwoom-app restart loop → root cause = docker-compose.yml 의 kiwoom-db `restart:` 누락. **Fix**: `restart: unless-stopped` 1줄 추가 + `docker update` 라이브 적용. **5-13 backfill**: 5 테이블 15,898 row 적재 (ohlcv 4375 / flow 5008 / short 2441 / lending_market 1 / lending_stock 4072) — KRX ~18,500 호출 / 4xx-5xx 0건. ADR § 44 신규. 신규 알려진 이슈 = backfill 임계치 5% vs alphanumeric 7% 충돌 → F chunk 정리)
+> **마지막 갱신**: 2026-05-14 (Phase F-1 — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 ted-run 풀 파이프라인 완료. § 4 #29 (5-13 18:00 cron 7.2% 실패) + § 44.9 해소. `trade_compare_rate Numeric(8,4)→(12,4)` + `low_250d_pre_rate Numeric(8,4)→(10,4)` Migration 017 운영 적용 ✅. `SentinelStockCodeError(ValueError)` 신설 + bulk loop 별도 catch → `FundamentalSyncResult.skipped: tuple[...]` 분리. `failed` 의미 = 실제 실패 (sentinel 제외) → 알람 임계치 회복. 1R+2R PASS (MEDIUM 3 fix). Verification 5관문 PASS / **1236 tests** / cov **86.19%**. 코드 5 production + Migration 017 + 7 테스트 = 12 파일 +775 -16. ADR § 45 신규)
 
 ---
 
@@ -12,12 +12,12 @@
 | 항목 | 값 |
 |------|-----|
 | 진행 Phase | **Phase E 종결** (ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 완료) / D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
-| 마지막 완료 chunk | **Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복** (turn 단위 / 코드 변경 0 / config 1줄) — § 43 신규 이미지 `79d1355` 재배포 → misfire 12/12 노출 ✅. Docker 정리 15.8GB 회수. **catch-up 한계 발견**: scheduler restart 시나리오에서 미발화 — § 43 효과는 sleep/resume 자연 사이클 한정. **운영 인시던트**: 5-14 07:21 kiwoom-db ExitCode 0 정상 종료 + 자동 복구 ❌ → root cause = `docker-compose.yml` 의 kiwoom-db `restart:` 누락. **Fix**: `restart: unless-stopped` 1줄 추가 + `docker update` 라이브 적용 (재생성 X). **5-13 backfill 회복**: ohlcv 4375 + flow 5008 + short 2441 + lending_market 1 + lending_stock 4072 = **15,898 row** / KRX ~18,500 호출 / 4xx-5xx 0건. ADR § 44 신규 |
-| 다음 chunk | **5-15 (금) 06:00 자연 cron 검증** — Mac wake 시점 catch-up + kiwoom-db restart 정책 효과 동시 검증 (체크리스트 5종: ohlcv 자연 발화 로그 / DB 5-14 적재 / 컨테이너 uptime+Restarts / misfire 노출 / pmset sleep 이력). 또는 **F chunk** — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 **+ backfill 임계치 vs alphanumeric guard 분리** (본 turn § 44.9 추가) |
-| 25 Endpoint 진행 | **15 / 25 완료 (60%)**. ka10014 / ka10068 / ka20068 → ✅ |
-| 누적 chunk | 54+ commits (본 turn ops 포함) |
-| 테스트 | **1199 cases** / coverage **86.17%** / ruff PASS / mypy strict PASS (본 turn 코드 변경 0 / config 1줄만) |
-| 운영 검증 | ✅ **12 scheduler 활성 / mg=21600 노출 12/12** (`79d1355` 재배포). ✅ **5-13 backfill 회복**: 5 테이블 15,898 row / KRX ~18,500 호출 0건 에러. **❌ catch-up 발화 한계**: scheduler restart 시 미발화 (MemoryJobStore 신규) — sleep/resume 시나리오만 효과. ✅ **kiwoom-db restart 정책 fix 적용**. **다음**: 5-15 06:00 자연 cron 검증 |
+| 마지막 완료 chunk | **Phase F-1 — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리** (ted-run 풀 파이프라인) — § 4 #29 (5-13 18:00 cron 7.2% 실패) + § 44.9 해소. `trade_compare_rate` `Numeric(8,4)→(12,4)` (실측 max 8950 × 10000배 여유) + `low_250d_pre_rate` `Numeric(8,4)→(10,4)` (실측 5745 × 175배). Migration 017 운영 적용 ✅. `SentinelStockCodeError(ValueError)` 신설 + bulk loop 별도 catch → `FundamentalSyncResult.skipped: tuple[...]` 필드 분리. router `FundamentalSyncResultOut.skipped_count` + `skipped` 노출 + `refresh_fundamental` sentinel catch (2a/2b MEDIUM 3 fix). 1R 2a PASS + 2a M-1/M-2 fix. 1R 2b PASS + 2b M-1 fix. Verification 5관문 PASS (ruff clean + mypy strict 95 files + **1236 tests** + cov **86.19%**). 코드 5 production + Migration 017 신규 + 7 테스트 = 12 파일 +775/-16. ADR § 45 신규 |
+| 다음 chunk | **F-2 backfill 임계치 / alphanumeric guard 분리** — § 44.9 / `backfill_short.py` + `backfill_lending_stock.py` 5% 임계치 vs alphanumeric 7% 충돌 (별도 ted-run). 또는 **5-15 (금) 06:00 자연 cron 검증** (§ 43 + § 44 + § 45 효과 동시) / **Phase F 순위 5종** (신규 endpoint wave 25→20/25 80%) |
+| 25 Endpoint 진행 | **15 / 25 완료 (60%)**. ka10014 / ka10068 / ka20068 → ✅ (ka10001 NUMERIC fix 는 endpoint 수 변동 없음 — 기존 #5 완료 항목 보강) |
+| 누적 chunk | 55+ commits (Phase F-1 포함) |
+| 테스트 | **1236 cases** (+37 신규) / coverage **86.19%** (+0.02%p) / ruff PASS / mypy strict PASS |
+| 운영 검증 | ✅ **12 scheduler 활성 / mg=21600 노출 12/12**. ✅ **5-13 backfill 회복** 5 테이블 15,898 row. ✅ **Phase F-1 Migration 017 운영 적용** (`trade_compare_rate (12,4)` + `low_250d_pre_rate (10,4)`). **5-14 18:00 cron 부터 NumericValueOutOfRangeError 11건 → 0건 예상**. **다음**: 5-15 06:00 자연 cron + 5-14 18:00 ka10001 cron 효과 검증 |
 
 ---
 
@@ -144,7 +144,7 @@ P3 (선택):
 | ~~27~~ | ~~ka20006 sector_daily 60% 실패~~ | 운영 검증 완료 | ✅ **운영 검증 PASS** (5-14 06:58, `<this chunk>`) — 124/124 success / 0 failed / 0 MaxPages / 0 InterfaceError. 이전 60/124 → 100%. DB 적재 123 (1 sentinel break). |
 | ~~28~~ | ~~ka10086 KOSDAQ 1814 누락~~ | 운영 검증 완료 | ✅ **운영 검증 PASS** (5-14 06:53~07:00, `<this chunk>`) — KOSDAQ 1487 KRX + 224 NXT success / 0 failed / 7m 7s. 0 MaxPages. backfill CLI `--only-market-codes 10 --resume`. |
 | ~~**30**~~ | ~~5-14 06:00 OhlcvDaily / 06:30 DailyFlow cron miss~~ | 본 chunk 분석 완료 | ✅ **원인 확정** (`<this chunk>` ADR § 42) — Mac 절전 → Docker VM sleep → APScheduler timer 미발화. pmset 5-13 20:01~21:12 반복 Sleep 증거. 해결 옵션 § 42.5 (caffeinate / 서버 이전 / misfire 전체 / launchd / 현재 유지) 사용자 환경 결정 대기 |
-| **29** | **ka10001 stock_fundamental 7.2% 실패** (5-13 18:00 cron) — 316 / 4379 (success=4063). ASYNCPG 11건 = `asyncpg.exceptions.NumericValueOutOfRangeError: precision 8 scale 4 must < 10^4` (468760/474930/0070X0 등) + sentinel 거부 2건 (`_validate_stk_cd_for_lookup` stkinfo.py:249 — 0000D0/0000H0 등) | 5-13 18:00 cron 결과 | **F chunk 별도** — Migration 신규 (NUMERIC(8,4) → precision 확대, overflow 종목 값 분석 필요) + sentinel detect 종목은 ERROR → WARN/skipped 분리 (ka20006 1R HIGH #5 `skipped 분리` 패턴 동일). E (D-1 follow-up) 와 독립 원인 / 독립 fix. |
+| ~~29~~ | ~~**ka10001 stock_fundamental 7.2% 실패** (5-13 18:00 cron)~~ | 5-13 18:00 cron | ✅ **해소** (Phase F-1, ADR § 45) — `trade_compare_rate (8,4)→(12,4)` + `low_250d_pre_rate (8,4)→(10,4)` Migration 017 + `SentinelStockCodeError(ValueError)` 신설 + `FundamentalSyncResult.skipped` 분리. 5-14 18:00 cron 부터 NumericValueOutOfRangeError 11건 → 0건 + failed=실제 실패 (sentinel 제외) 예상 |
 
 ---
 
@@ -152,8 +152,8 @@ P3 (선택):
 
 | 순위 | chunk | 근거 | 예상 규모 |
 |------|-------|------|-----------|
-| **1** | **5-15 (금) 06:00 자연 cron 검증** | 본 turn ADR § 44.10 — § 43 + § 44 효과 진정 검증 시점. 체크리스트 5종 (ohlcv 자연 발화 / DB 5-14 / 컨테이너 uptime+Restarts / misfire / pmset sleep) | 운영 / 코드 0 |
-| **2** | **F chunk — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 + backfill 임계치/alphanumeric 분리** | § 4 #29 + #31. Migration 신규 + WARN/skipped 분리 + backfill CLI 임계치 의미 재정의 (또는 alphanumeric pre-filter) | 별도 ted-run |
+| **1** | **F-2 backfill 임계치 / alphanumeric guard 분리** | § 4 #31 / ADR § 44.9 / § 45.7. `backfill_short.py` + `backfill_lending_stock.py` 5% 임계치 vs alphanumeric 7% 충돌. F-1 의 sentinel 분리 패턴 backfill CLI 에 1:1 적용 | 별도 ted-run |
+| **2** | **5-15 (금) 06:00 자연 cron 검증 + 5-14 18:00 ka10001 cron 효과 검증** | ADR § 44.10 / § 45.6. § 43 + § 44 + § 45 효과 동시 검증 시점 | 운영 / 코드 0 |
 | 3 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 9 → 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 3 | **Phase F (순위 5종) — ka10027/30/31/32/23** | 신규 endpoint wave (남은 7 endpoint) | 5 endpoint 통합 1 chunk 검토 |
 | 4 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |

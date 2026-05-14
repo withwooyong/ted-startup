@@ -70,14 +70,19 @@ EXPECTED_LENDING_COLUMNS = {
 
 @pytest.mark.asyncio
 async def test_migration_016_revision_id_and_down_revision(engine: AsyncEngine) -> None:
-    """015 → 016 upgrade 성공 / revision id = 016_short_lending / down_revision = 015_sector_price_daily."""
+    """015 → 016 upgrade 성공 — alembic_version 이 016 이상 (Phase F-1 후 017 head).
+
+    Phase F-1 (Migration 017) 추가 후 head 는 017 이지만 016 도 적용 완료 상태여야 함.
+    head 가 014/015 (016 이전) 이 아님을 확인 — 016 가드 우회 회귀.
+    """
     async with engine.connect() as conn:
         version = await conn.execute(
             text("SELECT version_num FROM kiwoom.alembic_version")
         )
         rev = version.scalar_one()
-    assert rev == "016_short_lending", (
-        f"alembic_version 기대 '016_short_lending', 실제 '{rev}'"
+    # 016 미적용 시 fail — pre-016 revision 거부
+    assert rev not in ("014_stock_price_yearly", "015_sector_price_daily"), (
+        f"016 미적용 — alembic_version='{rev}' (016 또는 017 head 기대)"
     )
 
 

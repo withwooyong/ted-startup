@@ -7,6 +7,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] feat(kiwoom): Phase F-1 — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (ted-run 풀 파이프라인)
+
+§ 4 #29 (5-13 18:00 cron 7.2% 실패) + § 44.9 (본 turn 발견 — backfill 임계치/alphanumeric guard 충돌) 의 ka10001 분기를 처리하는 ted-run 풀 파이프라인 chunk.
+
+### 변경 사항 (5 production + 7 test, +925/-22)
+
+**Production**:
+- `app/adapter/out/kiwoom/stkinfo.py` (+39/-2) — `SentinelStockCodeError(ValueError)` 신설 + `_validate_stk_cd_for_lookup` raise type 변경 + `__all__` 정의
+- `app/application/service/stock_fundamental_service.py` (+35/-2) — `FundamentalSyncResult.skipped: tuple[...]` field + `skipped_count` property + execute loop sentinel 별도 catch + 모듈 re-export
+- `app/adapter/out/persistence/models/stock_fundamental.py` (+8/-2) — `trade_compare_rate Numeric(8,4) → (12,4)` / `low_250d_pre_rate Numeric(8,4) → (10,4)`
+- `app/adapter/web/routers/fundamentals.py` (+24/-1) — `FundamentalSyncResultOut.skipped_count` + `skipped` 필드 추가 / `refresh_fundamental` 라우터에 `SentinelStockCodeError` catch 400 매핑
+- `migrations/versions/017_ka10001_numeric_precision.py` (신규 89줄) — ALTER TYPE + downgrade 가드 (9999 초과 row 존재 시 RAISE EXCEPTION)
+
+**Test**:
+- 5 신규: `test_stkinfo_sentinel.py` (+145) / `test_stock_fundamental_service_sentinel.py` (+205) / `test_stock_fundamental_repository_overflow.py` (+165) / `test_migration_017_numeric_precision.py` (+210) / `test_fundamental_router.py` (+100)
+- 2 회귀 보완: `test_migration_004.py` (+13/-4) / `test_migration_016.py` (+9/-2)
+- **1236 passed** / coverage **86.19%** (≥80%)
+
+### ted-run 풀 파이프라인
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0 TDD | sonnet | 5 신규 + 1 갱신 = 6 파일 / 27 red |
+| 1 구현 | opus | 5 production + Migration 017 운영 적용 / 1236 PASS |
+| 2a 1차 리뷰 | sonnet | CONDITIONAL → PASS (MEDIUM 2 fix) |
+| 2b 적대적 리뷰 | opus | CONDITIONAL → PASS (MEDIUM 1 fix) |
+| 3 Verification | sonnet/haiku | 5관문 PASS |
+| 4 E2E | — | ⚪ UI 변경 0 |
+| 5 Ship | 메인 | ADR § 45 + 메타 4종 + 커밋 |
+
+### 이중 리뷰 MEDIUM 3건 처리
+
+- **2a M-1**: `refresh_fundamental` 라우터에 `SentinelStockCodeError` catch 누락 (500 낙하 위험) → router 에 catch + 400 매핑
+- **2a M-2**: `stkinfo.py` `__all__` 미정의 → 13 심볼 명시
+- **2b M-1**: `FundamentalSyncResultOut` 의 `skipped` tuple 미노출 (plan § 5.3 부분 누락) → router DTO field 추가 + 매핑
+
+LOW 9건은 HANDOFF inherit (다음 chunk 정리).
+
+### Migration 017 운영 적용 완료
+
+```
+INFO  [alembic.runtime.migration] Running upgrade 016_short_lending -> 017_ka10001_numeric_precision
+017_ka10001_numeric_precision (head)
+```
+
+운영 DB 컬럼 검증: `trade_compare_rate (12,4)` + `low_250d_pre_rate (10,4)` 적용 ✅
+
+### 효과 예상 (5-14 18:00 cron 부터)
+
+- NumericValueOutOfRangeError 11건 → **0건** (precision 확대)
+- 5-13 18:00 cron 7.2% 실패 → **0%** 실적재 실패 예상
+- `failed` 의미 = 실제 실패 (sentinel 제외) → 알람 임계치 5% 회복
+
+### 다음 chunk
+
+1. **F-2 backfill 임계치 / alphanumeric guard 분리** — § 44.9 / `backfill_short.py` + `backfill_lending_stock.py`
+2. **5-15 (금) 06:00 자연 cron 검증** — § 43 + § 44 + § 45 효과 동시 검증
+3. **Phase F (순위 5종) — ka10027/30/31/32/23** — 신규 endpoint wave
+
+---
+
 ## [2026-05-14] ops(kiwoom): Phase D 운영 검증 + kiwoom-db restart 정책 fix + 5-13 backfill 회복
 
 § 43 머지 후 운영 검증 turn — 컨테이너 재배포 + Docker 정리 + 5-15 catch-up 검증 진입 → 인시던트 발견 → 3 트랙 (A backfill + B 체크리스트 + C 원인 분석) 병렬 완료.

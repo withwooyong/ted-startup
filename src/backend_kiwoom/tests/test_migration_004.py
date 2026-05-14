@@ -130,19 +130,28 @@ async def test_stock_fundamental_columns_types(engine: AsyncEngine) -> None:
     ):
         assert rows[col][0] == "bigint", f"{col} BIGINT 부재"
 
-    # B/C/D/E NUMERIC 검증 (8,4)
+    # B/C/D/E NUMERIC 검증 (8,4) — Migration 017 후 trade_compare_rate (12,4) /
+    # low_250d_pre_rate (10,4) 로 확대 (Phase F-1 ka10001 overflow 대응).
     for col in (
         "market_cap_weight",
         "foreign_holding_rate",
         "credit_rate",
         "circulating_rate",
         "high_250d_pre_rate",
-        "low_250d_pre_rate",
         "change_rate",
-        "trade_compare_rate",
     ):
         assert rows[col][0] == "numeric", f"{col} NUMERIC 부재"
         assert rows[col][2] == 8 and rows[col][3] == 4, f"{col} (8,4) 부재"
+
+    # Phase F-1 (Migration 017) — 확대된 컬럼 검증
+    assert rows["trade_compare_rate"][0] == "numeric"
+    assert rows["trade_compare_rate"][2] == 12 and rows["trade_compare_rate"][3] == 4, (
+        "trade_compare_rate (12,4) 부재 — Migration 017 미적용"
+    )
+    assert rows["low_250d_pre_rate"][0] == "numeric"
+    assert rows["low_250d_pre_rate"][2] == 10 and rows["low_250d_pre_rate"][3] == 4, (
+        "low_250d_pre_rate (10,4) 부재 — Migration 017 미적용"
+    )
 
     # C/PER PBR EV (10,2)
     for col in ("per_ratio", "pbr_ratio", "ev_ratio"):

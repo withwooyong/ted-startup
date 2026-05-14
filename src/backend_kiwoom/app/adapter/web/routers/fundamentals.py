@@ -32,7 +32,7 @@ from app.adapter.out.kiwoom._exceptions import (
     KiwoomResponseValidationError,
     KiwoomUpstreamError,
 )
-from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN
+from app.adapter.out.kiwoom.stkinfo import STK_CD_LOOKUP_PATTERN, SentinelStockCodeError
 from app.adapter.out.persistence.repositories.stock import StockRepository
 from app.adapter.out.persistence.repositories.stock_fundamental import (
     StockFundamentalRepository,
@@ -127,7 +127,14 @@ class FundamentalSyncOutcomeOut(BaseModel):
 
 
 class FundamentalSyncResultOut(BaseModel):
-    """전체 sync 결과 응답."""
+    """전체 sync 결과 응답.
+
+    Phase F-1 (§ 5.3):
+    - ``skipped_count`` — sentinel 종목코드 의도된 skip 수 (``failed`` 분리).
+    - ``skipped`` — sentinel 종목 list (운영자 가시성, plan § 5.3 2b M-1).
+      운영 알람·임계치에서 _실제 실패_ ↔ _의도 skip_ 분리 목적.
+      기본값 0 / 빈 tuple — 기존 호출자가 무시해도 동작 (backward compat).
+    """
 
     model_config = ConfigDict(frozen=True, from_attributes=True)
 
@@ -136,6 +143,8 @@ class FundamentalSyncResultOut(BaseModel):
     success: int
     failed: int
     errors: tuple[FundamentalSyncOutcomeOut, ...] = Field(default_factory=tuple)
+    skipped_count: int = 0
+    skipped: tuple[FundamentalSyncOutcomeOut, ...] = Field(default_factory=tuple)
 
 
 class FundamentalSyncRequestIn(BaseModel):
@@ -212,6 +221,8 @@ async def sync_fundamentals(
         success=result.success,
         failed=result.failed,
         errors=tuple(FundamentalSyncOutcomeOut.model_validate(e) for e in result.errors),
+        skipped_count=result.skipped_count,
+        skipped=tuple(FundamentalSyncOutcomeOut.model_validate(s) for s in result.skipped),
     )
 
 
@@ -267,6 +278,15 @@ async def refresh_fundamental(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
+        ) from None
+    except SentinelStockCodeError:
+        # Phase F-1 2a M-1 — 안전망. Path pattern `STK_CD_LOOKUP_PATTERN` 가 우선 차단
+        # 하므로 일반 입력에서는 발생 불가. 그러나 cron 등 master DB 에 sentinel 종목
+        # 이 active 로 등록된 상태에서 admin 이 수동 refresh 호출 시 도달 가능.
+        # 500 낙하 방지 위해 명시적 400 매핑.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sentinel stock_code — 6자리 숫자만 허용 (운영 의도된 skip)",
         ) from None
     # 의도적 생략: ohlcv/daily_flow refresh 와 달리 본 핸들러는 base_date 파라미터를
     # 받지 않음 (refresh_one 내부에서 today 고정). base_date ValueError 가 발생하지

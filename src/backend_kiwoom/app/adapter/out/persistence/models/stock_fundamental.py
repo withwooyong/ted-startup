@@ -89,7 +89,9 @@ class StockFundamental(Base, TimestampMixin):
     high_250d_pre_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     low_250d: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     low_250d_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    low_250d_pre_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    # Phase F-1 (§ 4 결정 #2) — Numeric(8,4) → Numeric(10,4). max 999,999.9999.
+    # 5-13 cron 실측 max=5745.71 (57.5%). 테마주 250일 점프 대응 마진.
+    low_250d_pre_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
     year_high: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     year_low: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
@@ -99,7 +101,9 @@ class StockFundamental(Base, TimestampMixin):
     prev_compare_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     change_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     trade_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    trade_compare_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    # Phase F-1 (§ 4 결정 #1) — Numeric(8,4) → Numeric(12,4). max 99,999,999.9999.
+    # 5-13 cron 18:00 NumericValueOutOfRangeError 11건 (실측 max=8950, 89.5%).
+    trade_compare_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
     open_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     high_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     low_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

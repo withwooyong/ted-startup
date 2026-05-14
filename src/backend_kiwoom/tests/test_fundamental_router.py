@@ -406,3 +406,103 @@ async def test_get_latest_rejects_invalid_stock_code() -> None:
         for invalid in ("00593", "005930_NX", "ABC123"):
             resp = await client.get(f"/api/kiwoom/stocks/{invalid}/fundamental/latest")
             assert resp.status_code == 422
+
+
+# =============================================================================
+# Phase F-1 — BulkResult skipped_count 필드 추가 TDD (Step 0, red)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_sync_result_response_includes_skipped_count_field(admin_key: str) -> None:
+    """FundamentalSyncResultOut 응답 JSON 에 skipped_count 필드가 포함되어야 함.
+
+    계획서 § 5.3: BulkResult 의 skipped_count + skipped (list 종목) 필드 추가.
+    계획서 § 4 결정 #5: SentinelStockCodeError → result.skipped 적재 분리.
+
+    현재 FundamentalSyncResultOut 에 skipped_count 없음 → body['skipped_count'] = KeyError = red.
+    Step 1 에서 DTO + 라우터 변경 후 green 전환 대상.
+    """
+    from app.application.service.stock_fundamental_service import SentinelStockCodeError  # noqa: F401
+
+    sentinel_outcome = FundamentalSyncOutcome(
+        stock_code="0000D0",
+        error_class="SentinelStockCodeError",
+    )
+    uc = AsyncMock(spec=SyncStockFundamentalUseCase)
+    uc.execute = AsyncMock(
+        return_value=FundamentalSyncResult(  # type: ignore[call-arg]
+            asof_date=date(2026, 5, 14),
+            total=4,
+            success=2,
+            failed=1,
+            errors=(
+                FundamentalSyncOutcome(stock_code="999999", error_class="KiwoomBusinessError"),
+            ),
+            skipped=(sentinel_outcome,),
+        )
+    )
+    app = _make_app(_stub_factory(uc))
+
+    async with _async_client(app) as client:
+        resp = await client.post(
+            "/api/kiwoom/fundamentals/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # 기존 필드 회귀
+    assert body["total"] == 4
+    assert body["success"] == 2
+    assert body["failed"] == 1
+    assert len(body["errors"]) == 1
+
+    # Phase F-1 신규 필드 단언 — 미존재 시 KeyError = red
+    assert "skipped_count" in body, (
+        f"응답 JSON 에 'skipped_count' 필드 없음 (Phase F-1 필수). 실제 keys: {list(body.keys())}"
+    )
+    assert body["skipped_count"] == 1, (
+        f"skipped_count=1 기대 (sentinel 1건), 실제={body.get('skipped_count')}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_result_response_skipped_count_zero_when_no_sentinels(admin_key: str) -> None:
+    """sentinel 없는 정상 실행 — 응답 JSON skipped_count=0 (기존 호환).
+
+    기존 호출자가 skipped_count 를 무시해도 동작해야 함 (optional 기본값 0).
+    """
+    uc = AsyncMock(spec=SyncStockFundamentalUseCase)
+    uc.execute = AsyncMock(
+        return_value=FundamentalSyncResult(
+            asof_date=date(2026, 5, 14),
+            total=3,
+            success=3,
+            failed=0,
+            errors=(),
+        )
+    )
+    app = _make_app(_stub_factory(uc))
+
+    async with _async_client(app) as client:
+        resp = await client.post(
+            "/api/kiwoom/fundamentals/sync?alias=test",
+            headers={"X-API-Key": admin_key},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["total"] == 3
+    assert body["success"] == 3
+    assert body["failed"] == 0
+
+    # skipped_count 필드 존재 + 0 값 (sentinel 없음)
+    assert "skipped_count" in body, (
+        f"skipped_count 필드 없음. 실제 keys: {list(body.keys())}"
+    )
+    assert body["skipped_count"] == 0, (
+        f"sentinel 없을 때 skipped_count=0 기대, 실제={body.get('skipped_count')}"
+    )

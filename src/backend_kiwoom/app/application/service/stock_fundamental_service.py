@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapter.out.kiwoom._exceptions import KiwoomError
 from app.adapter.out.kiwoom.stkinfo import (
     KiwoomStkInfoClient,
+    SentinelStockCodeError,
     normalize_basic_info,
 )
 from app.adapter.out.persistence.models import Stock, StockFundamental
@@ -78,13 +79,26 @@ class FundamentalSyncOutcome:
 
 @dataclass(frozen=True, slots=True)
 class FundamentalSyncResult:
-    """sync 실행 결과 (B-α StockMasterSyncResult 와 다른 단위 — 종목 단위 카운터)."""
+    """sync 실행 결과 (B-α StockMasterSyncResult 와 다른 단위 — 종목 단위 카운터).
+
+    Phase F-1 (§ 4 결정 #5/#6):
+    - ``skipped`` — sentinel 종목코드 (``0000D0`` / ``26490K`` 등) 의도된 skip outcome.
+      ``SentinelStockCodeError`` 캐치 시 적재. ``failed`` 미증가 (실제 실패 아님).
+    - ``failed`` 의미 = 실제 실패 (HTTP 4xx/5xx, DB 오류, 알 수 없는 예외) — sentinel 제외.
+    - ``skipped_count`` 는 ``len(skipped)`` 의 derived property.
+    """
 
     asof_date: date
     total: int
     success: int
     failed: int
     errors: tuple[FundamentalSyncOutcome, ...] = field(default_factory=tuple)
+    skipped: tuple[FundamentalSyncOutcome, ...] = field(default_factory=tuple)
+
+    @property
+    def skipped_count(self) -> int:
+        """sentinel skip 종목 수 — ``len(skipped)`` (운영 알람·임계치용)."""
+        return len(self.skipped)
 
 
 class SyncStockFundamentalUseCase:
@@ -140,12 +154,29 @@ class SyncStockFundamentalUseCase:
         success = 0
         failed = 0
         errors: list[FundamentalSyncOutcome] = []
+        skipped: list[FundamentalSyncOutcome] = []
 
         # 2. per-stock try/except — partial-failure 격리
         for stock in active_stocks:
             try:
                 await self._sync_one_stock(stock, asof_date=asof)
                 success += 1
+            except SentinelStockCodeError as exc:
+                # Phase F-1 (§ 4 결정 #5/#6) — sentinel 의도된 skip → skipped 적재.
+                # failed 미증가 (실제 실패 아님 — 운영 알람·임계치 의미 정확화).
+                # SentinelStockCodeError 가 ValueError 상속이므로 일반 KiwoomError catch
+                # 보다 먼저 분기 (좁은 catch → 넓은 catch 순서).
+                skipped.append(
+                    FundamentalSyncOutcome(
+                        stock_code=stock.stock_code,
+                        error_class=type(exc).__name__,
+                    )
+                )
+                logger.info(
+                    "ka10001 sentinel skip stock_code=%s mrkt_tp=%s",
+                    stock.stock_code,
+                    stock.market_code,
+                )
             except KiwoomError as exc:
                 failed += 1
                 err_class = type(exc).__name__
@@ -172,6 +203,7 @@ class SyncStockFundamentalUseCase:
             success=success,
             failed=failed,
             errors=tuple(errors),
+            skipped=tuple(skipped),
         )
 
     async def refresh_one(self, stock_code: str) -> StockFundamental:
@@ -246,5 +278,6 @@ class SyncStockFundamentalUseCase:
 __all__ = [
     "FundamentalSyncOutcome",
     "FundamentalSyncResult",
+    "SentinelStockCodeError",
     "SyncStockFundamentalUseCase",
 ]
