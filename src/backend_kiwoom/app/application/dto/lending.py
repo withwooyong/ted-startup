@@ -77,6 +77,14 @@ class LendingStockBulkResult:
 
     - `outcomes` — 종목별 결과 tuple (mutable list 노출 금지, R1 invariant).
     - `total_fetched / upserted / skipped / failed` — 집계 메트릭.
+    - `total_skipped` — outcome.skipped=True (inactive / stock_not_found / empty 응답) 집계.
+    - `total_alphanumeric_skipped` — Phase F-2 결정 #5: SentinelStockCodeError
+      (alphanumeric 종목) skip 카운터 (합산). `total_skipped` (empty 응답 의미) 와
+      의미 분리 — pre-filter + bulk loop sentinel catch 합산. ADR § 44.9.
+    - `alphanumeric_skipped_outcomes` — F-1 `FundamentalSyncResult.skipped` 패턴 1:1 미러.
+      종목별 명세 보존 (stock_code + error reason). `error` 값은
+      `"alphanumeric_pre_filter"` 또는 `"sentinel_skip"`.
+      `len(alphanumeric_skipped_outcomes) == total_alphanumeric_skipped` invariant.
     - `warnings / errors_above_threshold` — partial 임계치 메시지.
     """
 
@@ -90,6 +98,8 @@ class LendingStockBulkResult:
     total_failed: int = 0
     warnings: tuple[str, ...] = field(default_factory=tuple)
     errors_above_threshold: tuple[str, ...] = field(default_factory=tuple)
+    total_alphanumeric_skipped: int = 0
+    alphanumeric_skipped_outcomes: tuple[LendingStockIngestOutcome, ...] = field(default_factory=tuple)
 
 
 __all__ = [

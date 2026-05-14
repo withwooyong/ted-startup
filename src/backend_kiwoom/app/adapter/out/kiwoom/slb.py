@@ -34,6 +34,7 @@ from app.adapter.out.kiwoom._records import (
     LendingStockResponse,
     LendingStockRow,
 )
+from app.adapter.out.kiwoom.stkinfo import SentinelStockCodeError
 
 
 class KiwoomLendingClient:
@@ -131,15 +132,17 @@ class KiwoomLendingClient:
             start_date / end_date / max_pages — fetch_market_trend 와 동일.
 
         Raises:
-            ValueError: stock_code 가 6자리 숫자 외 (호출 차단).
+            SentinelStockCodeError: stock_code 가 6자리 숫자 외 (ValueError 상속, 호출 차단).
             (이외 키움 도메인 예외) — fetch_market_trend 동일.
 
         plan § 12.2 #4 — KRX only. NXT suffix (`005930_NX` 8자리) 도 거부.
         endpoint-17 § 2.2 ★ stk_cd Length=6 명세.
         """
         # 사전 검증 — 6자리 숫자 외 거부 (호출 차단). NXT suffix 등도 차단.
+        # Phase F-2: SentinelStockCodeError(ValueError) — service layer 가 별도
+        # catch → total_alphanumeric_skipped 분리 (ADR § 44.9).
         if not (len(stock_code) == 6 and stock_code.isdigit()):
-            raise ValueError(
+            raise SentinelStockCodeError(
                 f"stock_code 는 6자리 숫자만 허용 (NXT suffix 미지원) — 입력={stock_code!r}"
             )
 

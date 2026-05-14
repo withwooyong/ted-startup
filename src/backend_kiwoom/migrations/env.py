@@ -17,7 +17,10 @@ from app.config.settings import get_settings
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Phase F-2: disable_existing_loggers=False — fileConfig 기본값(True)이
+    # 기존 로거 ("app" 등) 를 disabled=True 로 만들어 후속 테스트의 caplog
+    # 캡처가 깨지는 회귀 차단 (test_migration_*.py 가 alembic 재호출 시 영향).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def _resolve_sync_url() -> str:

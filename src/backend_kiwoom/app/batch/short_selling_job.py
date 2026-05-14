@@ -59,32 +59,35 @@ async def fire_short_selling_sync(
     if result.errors_above_threshold:
         logger.error(
             "short selling sync 실패율 과다 (15%% 초과) — total_stocks=%d outcomes=%d upserted=%d failed=%d "
-            "ratio=%.2f warnings=%s",
+            "total_skipped=%d ratio=%.2f warnings=%s",
             result.total_stocks,
             total_outcomes,
             result.total_upserted,
             result.total_failed,
+            result.total_skipped,
             failure_ratio,
             list(result.warnings),
         )
     elif result.warnings:
         logger.warning(
             "short selling sync 부분 실패 (5%% 초과) — total_stocks=%d outcomes=%d upserted=%d failed=%d "
-            "ratio=%.2f warnings=%s",
+            "total_skipped=%d ratio=%.2f warnings=%s",
             result.total_stocks,
             total_outcomes,
             result.total_upserted,
             result.total_failed,
+            result.total_skipped,
             failure_ratio,
             list(result.warnings),
         )
     else:
         logger.info(
-            "short selling sync 완료 — total_stocks=%d outcomes=%d upserted=%d failed=%d",
+            "short selling sync 완료 — total_stocks=%d outcomes=%d upserted=%d failed=%d total_skipped=%d",
             result.total_stocks,
             total_outcomes,
             result.total_upserted,
             result.total_failed,
+            result.total_skipped,
         )
 
 

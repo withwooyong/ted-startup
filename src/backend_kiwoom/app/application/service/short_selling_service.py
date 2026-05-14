@@ -25,10 +25,11 @@ D-1 sector_ohlcv_service.py 의 session_provider factory 패턴 + C-2β daily_fl
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import date
-from typing import Literal
+from typing import Final, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapter.out.kiwoom._exceptions import KiwoomBusinessError, KiwoomError
 from app.adapter.out.kiwoom._records import ShortSellingTimeType
 from app.adapter.out.kiwoom.shsa import KiwoomShortSellingClient
+from app.adapter.out.kiwoom.stkinfo import SentinelStockCodeError
 from app.adapter.out.persistence.models.stock import Stock
 from app.adapter.out.persistence.repositories.short_selling import (
     ShortSellingKwRepository,
@@ -45,6 +47,11 @@ from app.application.dto.short_selling import (
     ShortSellingBulkResult,
     ShortSellingIngestOutcome,
 )
+
+# Phase F-2: alphanumeric pre-filter 정규식.
+# Step 2 2a H-1: 앵커 (`^...$`) 명시 — `fullmatch` 와 함께 사용해도 의도 명확화 (부분
+# 매치 회피). re.compile 비용은 모듈 import 시 한 번.
+_NUMERIC_STOCK_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9]{6}$")
 
 logger = logging.getLogger(__name__)
 
@@ -204,14 +211,21 @@ class IngestShortSellingBulkUseCase:
         end_date: date,
         only_market_codes: Sequence[str] | None = None,
         only_stock_codes: Sequence[str] | None = None,
+        filter_alphanumeric: bool = False,
     ) -> ShortSellingBulkResult:
         """active 종목 전체 sync. KRX + NXT (nxt_enable 게이팅).
 
+        Args:
+            filter_alphanumeric: Phase F-2 결정 #7 — True 시 ^[0-9]{6}$ 미일치 종목
+                (alphanumeric / NXT suffix 등) 호출 자체 skip. result.total_skipped 증가.
+                기본값 False — 기존 caller (scheduler 등) 영향 없음.
+
         Returns:
-            ShortSellingBulkResult — total_stocks + krx/nxt outcomes + warnings.
+            ShortSellingBulkResult — total_stocks + krx/nxt outcomes + warnings +
+            total_skipped (Phase F-2: alphanumeric pre-filter + sentinel catch 합산).
 
         per-stock try/except — partial-failure 격리. KiwoomError / 일반 예외 모두 다음
-        종목으로 진행.
+        종목으로 진행. SentinelStockCodeError 는 별도 catch → skipped 분리 (failed 아님).
         """
         # active 종목 조회
         async with self._session_provider() as session:
@@ -223,12 +237,44 @@ class IngestShortSellingBulkUseCase:
             stmt = stmt.order_by(Stock.market_code, Stock.stock_code)
             stocks = list((await session.execute(stmt)).scalars())
 
+        # Phase F-2: alphanumeric pre-filter (결정 #7).
+        # filter_alphanumeric=True 면 ^[0-9]{6}$ 미일치 종목을 호출 시점 이전에 제거.
+        # service 내부 결정 — bulk loop 의 sentinel catch 와 합산하여 total_skipped 보고.
+        pre_filter_skipped: int = 0
+        # Phase F-2 Step 2 MED-1: F-1 `FundamentalSyncResult.skipped` 패턴 미러.
+        # 종목별 명세 보존 (KOSCOM cross-check 시 사유 식별).
+        skipped_outcomes_list: list[ShortSellingIngestOutcome] = []
+        if filter_alphanumeric:
+            kept: list[Stock] = []
+            for s in stocks:
+                if _NUMERIC_STOCK_CODE_RE.fullmatch(s.stock_code):
+                    kept.append(s)
+                else:
+                    pre_filter_skipped += 1
+                    skipped_outcomes_list.append(
+                        ShortSellingIngestOutcome(
+                            stock_code=s.stock_code,
+                            exchange=ExchangeType.KRX,
+                            error="alphanumeric_pre_filter",
+                        )
+                    )
+            stocks = kept
+
         if not stocks:
             logger.info("ka10014 bulk sync — active 종목 0개")
-            return ShortSellingBulkResult(total_stocks=0)
+            return ShortSellingBulkResult(
+                total_stocks=pre_filter_skipped,
+                total_skipped=pre_filter_skipped,
+                skipped_outcomes=tuple(skipped_outcomes_list),
+            )
+
+        # NOTE: total_stocks 분모는 pre-filter 적용 후 stocks 길이 + pre_filter_skipped.
+        # 결정 #6 — 임계치 분모 = (effective bulk loop call 분모). pre-filter 로 제거된
+        # 종목은 호출 자체 안 했으므로 분모에서 제외하되, total_skipped 로 보고.
 
         krx_outcomes: list[ShortSellingIngestOutcome] = []
         nxt_outcomes: list[ShortSellingIngestOutcome] = []
+        sentinel_skipped: int = 0
 
         # BATCH_SIZE 마다 commit yield-point — 실 데이터 적재는 Single UC 가 자체
         # `session.begin()` 컨텍스트로 처리. 본 commit 은 외부 fixture/조회 session
@@ -250,6 +296,23 @@ class IngestShortSellingBulkUseCase:
                     exchange=ExchangeType.KRX,
                 )
                 krx_outcomes.append(krx_outcome)
+            except SentinelStockCodeError:
+                # Phase F-2 결정 #3 — sentinel skip 은 실패가 아님 (total_skipped 분리).
+                # KiwoomError / Exception 보다 먼저 catch (SentinelStockCodeError 가
+                # ValueError 상속이라 broader Exception 에 잡히지 않도록).
+                # Step 2 MED-1: 종목 명세 보존 (F-1 패턴).
+                sentinel_skipped += 1
+                skipped_outcomes_list.append(
+                    ShortSellingIngestOutcome(
+                        stock_code=stock.stock_code,
+                        exchange=ExchangeType.KRX,
+                        error="sentinel_skip",
+                    )
+                )
+                logger.info(
+                    "ka10014 KRX bulk sentinel skip stock_code=%s",
+                    stock.stock_code,
+                )
             except KiwoomError as exc:
                 err_class = type(exc).__name__
                 krx_outcomes.append(
@@ -288,6 +351,21 @@ class IngestShortSellingBulkUseCase:
                         exchange=ExchangeType.NXT,
                     )
                     nxt_outcomes.append(nxt_outcome)
+                except SentinelStockCodeError:
+                    # Phase F-2 결정 #3 — NXT 측도 동일 분리 (sentinel skip).
+                    # Step 2 MED-1: 종목 명세 보존.
+                    sentinel_skipped += 1
+                    skipped_outcomes_list.append(
+                        ShortSellingIngestOutcome(
+                            stock_code=stock.stock_code,
+                            exchange=ExchangeType.NXT,
+                            error="sentinel_skip",
+                        )
+                    )
+                    logger.info(
+                        "ka10014 NXT bulk sentinel skip stock_code=%s",
+                        stock.stock_code,
+                    )
                 except KiwoomError as exc:
                     err_class = type(exc).__name__
                     nxt_outcomes.append(
@@ -321,13 +399,16 @@ class IngestShortSellingBulkUseCase:
                 await _batch_visibility_commit()
                 logger.info("ka10014 bulk progress %d/%d", i, len(stocks))
 
-        # partial 임계치 계산 (결정 #10, 2R-C-2 fix).
+        # partial 임계치 계산 (결정 #10, 2R-C-2 fix + Phase F-2 결정 #6).
         # 분모 = KRX 호출만 (active 종목 전체 = 안정 기준).
         # NXT 빈 응답 (정상, 결정 #9) 이 분모에 들어가면 KRX 실패율을 희석하여
         # silent failure 회피 가능 (200 KRX 중 10 fail = 5% → NXT 200 정상 더하면 2.5%).
         # NXT outcome 의 error 도 KRX 분모에 가산하지 않음 — NXT 만의 실패율은 별도 chunk 측정.
+        # Phase F-2: sentinel skip 은 분모 / 분자 어디에도 안 들어감 (의도된 skip 분리).
         total_calls = len(krx_outcomes)
         total_failed = sum(1 for o in krx_outcomes if o.error is not None)
+        # Phase F-2 결정 #4 — pre-filter + bulk loop sentinel catch 합산.
+        total_skipped = pre_filter_skipped + sentinel_skipped
 
         warnings: list[str] = []
         errors_above_threshold = False
@@ -341,24 +422,28 @@ class IngestShortSellingBulkUseCase:
                 errors_above_threshold = True
                 msg = (
                     f"ka10014 bulk 실패율 {ratio:.2%} > {PARTIAL_ERROR_THRESHOLD:.0%} "
-                    f"(failed={total_failed}/{total_calls})"
+                    f"(failed={total_failed}/{total_calls}) "
+                    f"(alphanumeric_skipped={total_skipped})"
                 )
                 warnings.append(msg)
                 _app_logger.error(msg)
             elif ratio >= PARTIAL_WARN_THRESHOLD:
                 msg = (
                     f"ka10014 bulk 실패율 {ratio:.2%} >= {PARTIAL_WARN_THRESHOLD:.0%} "
-                    f"(failed={total_failed}/{total_calls})"
+                    f"(failed={total_failed}/{total_calls}) "
+                    f"(alphanumeric_skipped={total_skipped})"
                 )
                 warnings.append(msg)
                 _app_logger.warning(msg)
 
         return ShortSellingBulkResult(
-            total_stocks=len(stocks),
+            total_stocks=len(stocks) + pre_filter_skipped,
             krx_outcomes=tuple(krx_outcomes),
             nxt_outcomes=tuple(nxt_outcomes),
             warnings=tuple(warnings),
             errors_above_threshold=errors_above_threshold,
+            total_skipped=total_skipped,
+            skipped_outcomes=tuple(skipped_outcomes_list),
         )
 
 

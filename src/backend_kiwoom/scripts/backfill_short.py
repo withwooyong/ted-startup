@@ -159,7 +159,14 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
     started = time.monotonic()
     try:
         async with _build_use_case(alias=args.alias) as use_case:
-            result = await use_case.execute(start_date=start_date, end_date=end_date)
+            # Phase F-2: CLI 는 filter_alphanumeric=True 로 alphanumeric 종목
+            # 호출 자체 skip — 73s budget 절감 + summary 가시성 (ADR § 44.9).
+            # scheduler 는 기본값 False 유지 (변경 0).
+            result = await use_case.execute(
+                start_date=start_date,
+                end_date=end_date,
+                filter_alphanumeric=True,
+            )
     except Exception:
         logger.exception("공매도 백필 실행 중 시스템 예외")
         return 3
@@ -179,6 +186,7 @@ async def async_main(argv: Sequence[str] | None = None) -> int:
                 f"nxt_outcomes:  {len(result.nxt_outcomes)}",
                 f"total_upserted:{result.total_upserted}",
                 f"total_failed:  {result.total_failed} (ratio {failure_ratio:.2%})",
+                f"alphanumeric_skipped:{result.total_skipped}",
                 f"elapsed:       {elapsed:.1f}s",
             ]
         )

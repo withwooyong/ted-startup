@@ -36,7 +36,7 @@ from app.adapter.out.kiwoom._records import (
     ShortSellingRow,
     ShortSellingTimeType,
 )
-from app.adapter.out.kiwoom.stkinfo import build_stk_cd
+from app.adapter.out.kiwoom.stkinfo import SentinelStockCodeError, build_stk_cd
 from app.application.constants import ExchangeType
 
 
@@ -78,7 +78,7 @@ class KiwoomShortSellingClient:
             max_pages: cont-yn=Y 무한 루프 방어 cap. None 이면 SHORT_TREND_MAX_PAGES (5).
 
         Raises:
-            ValueError: stock_code 가 6자리 ASCII 숫자 외.
+            SentinelStockCodeError: stock_code 가 6자리 ASCII 숫자 외 (ValueError 상속).
             KiwoomCredentialRejectedError: 401/403.
             KiwoomBusinessError: 응답 return_code != 0.
             KiwoomRateLimitedError: 429 재시도 후 최종 실패.
@@ -89,7 +89,12 @@ class KiwoomShortSellingClient:
         # 사전 검증 — 6자리 숫자만 허용 (호출 차단). `_NX`/`_AL` suffix 입력 거부.
         # build_stk_cd 가 영숫자 (`A-Z` 포함) 까지 허용하므로 ka10014 는 별도 좁은 검증.
         if not (len(stock_code) == 6 and stock_code.isdigit()):
-            raise ValueError(f"stock_code 6자리 숫자만 허용 — 입력={stock_code!r}")
+            # Phase F-2: SentinelStockCodeError(ValueError) 로 변경 — service layer 가
+            # 별도 catch 하여 total_skipped 분리 (failed 와 의미 분리, ADR § 44.9).
+            # ValueError 상속이라 기존 `except ValueError:` caller 호환 유지.
+            raise SentinelStockCodeError(
+                f"stock_code 6자리 숫자만 허용 — 입력={stock_code!r}"
+            )
 
         # NXT/SOR suffix 합성 — build_stk_cd 위임 (KRX → "005930" / NXT → "005930_NX").
         stk_cd = build_stk_cd(stock_code, exchange)

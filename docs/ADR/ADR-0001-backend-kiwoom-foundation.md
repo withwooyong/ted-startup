@@ -3632,3 +3632,151 @@ INFO  [alembic.runtime.migration] Running upgrade 016_short_lending -> 017_ka100
 2. **5-15 (금) 06:00 자연 cron 검증** — § 43 + § 44 + § 45 효과 동시 검증
 3. **Phase F (순위 5종)** — 신규 endpoint wave (25 endpoint 60→80%)
 4. **F-1 후속 LOW chunk** — 9 LOW 정리 (선택)
+
+---
+
+## 46. Phase F-2 — backfill 임계치 / alphanumeric guard 분리 (2026-05-14)
+
+**Context**: F-1 의 sentinel WARN/skipped 패턴 (§ 45) 을 `backfill_short.py` + `backfill_lending_stock.py` 의 임계치 (lending ERROR=5% / short WARNING=5%) vs alphanumeric 자연 비율 6.75% 충돌 (§ 44.9 / Known Issue #31) 에 적용. F-1 의 stkinfo `SentinelStockCodeError` 를 shsa/slb adapter + service bulk loop + CLI 까지 확장. ted-run 풀 파이프라인 (`--force-2b`).
+
+### 46.1 결정 (10건 + 사용자 4 확정)
+
+**plan § 4 (사용자 확정 결정 D-1~D-4)**:
+
+| # | 결정 | 사용자 D | 근거 |
+|---|------|---------|------|
+| D-1 | **A + B 하이브리드** (service catch + CLI pre-filter) | ✅ | cron 임계치 회복 (A) + CLI budget -73s 절감 (B) 동시 |
+| D-2 | `LendingStockBulkResult.total_alphanumeric_skipped: int = 0` 신규 (기존 `total_skipped` empty 응답 의미 유지) | ✅ | DTO breaking 최소 |
+| D-3 | 임계치 분모 유지 + error 메시지에 `(alphanumeric_skipped=N)` 명시 | ✅ | sentinel catch 효과로 분모 의미 자연 회복 |
+| D-4 | UseCase `filter_alphanumeric: bool = False` 신규 파라미터 | ✅ | 기존 caller (scheduler) backward compat |
+
+**plan § 4 추가 결정**:
+
+| # | 결정 | 근거 |
+|---|------|------|
+| 1 | `shsa.py:92` + `slb.py:142` raise type → `SentinelStockCodeError` (F-1 신설 type 재사용) | F-1 패턴 일관성 / adapter 동일 layer import |
+| 2 | `short_selling_service` + `lending_service` bulk loop 에 `SentinelStockCodeError` 별도 catch | 의도된 skip 과 실제 실패 분리 |
+| 3 | `ShortSellingBulkResult.total_skipped: int = 0` 신규 (현재 부재) | lending 과 카운터 보유 일관성 |
+| 4 | CLI `filter_alphanumeric=True` + summary `alphanumeric_skipped:<N>` 라인 | B 의 호출 budget 절감 실현 |
+| 5 | CLI exit code 정책 (`return 1 if total_failed > 0`) 유지 | total_failed 의미 회복으로 자동 fix |
+| 6 | scheduler cron `filter_alphanumeric=False` 기본값 유지 (변경 0) | A 의 sentinel catch 만으로 임계치 의미 회복 |
+
+### 46.2 영향 범위 (9 production + 6 test 신규 + 2 test 회귀 + 1 infra)
+
+**Production 9 파일**:
+
+| # | 파일 | 변경 |
+|---|------|------|
+| 1 | `app/adapter/out/kiwoom/shsa.py` | `+9/-2` — `SentinelStockCodeError` import + raise type 교체 |
+| 2 | `app/adapter/out/kiwoom/slb.py` | `+6/-1` — 동일 |
+| 3 | `app/application/dto/short_selling.py` | `+11/-2` — `total_skipped: int = 0` + `skipped_outcomes: tuple[...]` (R2 MED-1) |
+| 4 | `app/application/dto/lending.py` | `+8/-2` — `total_alphanumeric_skipped: int = 0` + `alphanumeric_skipped_outcomes: tuple[...]` (R2 MED-1) |
+| 5 | `app/application/service/short_selling_service.py` | `+85/-7` — pre-filter (정규식 `^[0-9]{6}$`) + sentinel catch + 임계치 메시지 + outcome 적재 |
+| 6 | `app/application/service/lending_service.py` | `+88/-7` — 동일 + R2 H-1 A SQL `is_active.is_(True)` 필터 유지 |
+| 7 | `app/batch/short_selling_job.py` | `+6/-3` — cron log `total_skipped=%d` 추가 (R2 MED-2) |
+| 8 | `app/batch/lending_stock_job.py` | `+6/-3` — `alphanumeric_skipped=%d` 추가 (R2 MED-2) |
+| 9 | `scripts/backfill_short.py` + `scripts/backfill_lending_stock.py` | `+13/-1` — `filter_alphanumeric=True` 호출 + summary 라인 |
+
+**Test 6 신규 + 2 회귀**: F-2 신규 31 케이스 (29 red → green + 2 green guard) + `test_short_selling_service.py` / `test_lending_service.py` mock fixture skipped_outcomes 단언 보완
+
+**Infra 1 파일**: `migrations/env.py` (`+4/-1`) — `disable_existing_loggers=False` (`fileConfig` 후 "app" logger 가 disabled=True 로 전환되어 후속 caplog 캡처 실패하는 pre-existing infra bug surface fix. 운영 alembic 호출은 subprocess 라 영향 0)
+
+### 46.3 이중 리뷰 (R1 + R2)
+
+**R1 (1차 리뷰)**:
+
+| 페르소나 | 모델 | 판정 | C/H/M/L |
+|---------|------|------|---------|
+| 2a 일반 품질 | sonnet | CONDITIONAL | 0 / 2 / 3 / 3 |
+| 2b 적대적 보안 | opus | CONDITIONAL | 0 / 2 / 4 / 3 |
+| **양쪽 합의** | — | — | HIGH 1건 (H-1 lending `is_active` 분모 dilution) |
+
+**Step 2 fix 8건** (사용자 확정 D-1~D-4 결정 후):
+
+| Fix | 처리 |
+|-----|------|
+| H-1 A | `lending_service.py:264-273` SQL `is_active.is_(True)` 복원 + `test_bulk_total_skipped_distinct_from_alphanumeric_skipped` 재설계 (active stock + adapter empty mock 시나리오) |
+| MED-1 F-1 패턴 이식 | `skipped_outcomes: tuple[ShortSellingIngestOutcome, ...]` + `alphanumeric_skipped_outcomes: tuple[LendingStockIngestOutcome, ...]` 신규. outcome.error = `"alphanumeric_pre_filter"` / `"sentinel_skip"` |
+| MED-2 cron 가시성 | `short_selling_job.py` `total_skipped=%d` + `lending_stock_job.py` `alphanumeric_skipped=%d` 추가 (3 logger 분기 × 2 파일 = 6줄) |
+| 2a H-1 정규식 앵커 | `^[0-9]{6}$` 명시 (의도/구현 일치) |
+| 2a M-1 키워드 정렬 | 자동 충족 (변경 0) |
+| 2b M-4 alembic 결정 | `disable_existing_loggers=False` 유지 (필요한 안전 조치, 운영 alembic 은 subprocess) |
+| H-1 A 검증 | short/lending SQL 패턴 통일 — H-2 자동 해소 |
+| 2a M-2 검증 | 분모 정의 의미 통일 — 자동 해소 |
+
+**R2 (재리뷰 1회)**:
+
+| 페르소나 | 모델 | 판정 | C/H/M/L | 비고 |
+|---------|------|------|---------|------|
+| 2a 일반 품질 | sonnet | CONDITIONAL | 0 / 1 (본인 MEDIUM 강등 가능) / 2 / 2 | H-R2-1 label-field 의미 — 런타임 0, 강등 |
+| 2b 적대적 | opus | CONDITIONAL | 0 / 0 / 2 / 3 | 핵심 결함 0 / 다음 chunk 권고 |
+| **양쪽 합의** | — | **병합 가능** | — | 차단 0 / R1 HIGH/MEDIUM 모두 의도대로 해소 / 신규 발견 7건 inherit |
+
+### 46.4 Verification 5관문
+
+| 관문 | 결과 |
+|------|------|
+| 3-1 컴파일 | ✅ mypy strict 105 source files Success |
+| 3-2 정적분석 | ✅ ruff All checks passed |
+| 3-3 테스트 + cov | ✅ **1,267 passed** / cov **86.43%** (+0.24%p) |
+| 3-4 보안 스캔 | ⚪ contract 분류 자동 생략 |
+| 3-5 런타임 smoke | ✅ kiwoom-app + kiwoom-db `Up healthy 5h` / module import OK / DTO 신규 필드 default=`()` |
+| 4 E2E | ⚪ (UI 변경 0 — 백엔드 only) |
+
+### 46.5 누적 메트릭
+
+- Production: 9 파일 / `+232 / -28`
+- Test 신규: 6 파일 (31 케이스) / `+~900`
+- Test 회귀 보완: 2 파일
+- Infra: 1 파일 (`migrations/env.py`) / `+4 / -1`
+- coverage: **86.43%** (이전 86.19% → **+0.24%p**)
+- R1: HIGH 2 + MEDIUM 7 — 모두 fix (Step 2 fix 8건) / 2a+2b CONDITIONAL → PASS
+- R2: CRITICAL 0 / HIGH 0 (2a 의 1건 자체 강등) / MEDIUM 4 + LOW 5 inherit
+- Verification 5관문: 모두 PASS
+
+### 46.6 운영 검증 + 효과 예상
+
+**효과 예상** (chunk 적용 후):
+- `backfill_short.py` 재실행 시: 5-13 baseline (fail=307=12.6% / exit 1) → 알파뉴머릭 pre-filter 로 호출 자체 안 됨 → **fail=0 예상 / exit 0**
+- `backfill_lending_stock.py` 재실행 시: 5-13 baseline (fail=303=6.9% / exit 1) → **fail=0 예상 / exit 0**
+- KRX 호출 budget: pre-filter 시 alphanumeric 295 종목 호출 제외 → **-73s 단축** (rate_limit 0.25s × 295)
+- scheduler cron (5-14 07:30/08:00 ~) 의 `filter_alphanumeric=False` 기본값 유지:
+  - sentinel catch 만 작동 — 임계치 분모 의미 회복 (실제 실패만 카운트)
+  - log 에 `total_skipped=%d` / `alphanumeric_skipped=%d` 가시성 추가
+
+**운영자 가시성 향상**:
+- `total_failed` 의미 = **실제 KRX/DB 오류만** (sentinel + alphanumeric pre-filter 제외)
+- `total_skipped` (short) / `total_alphanumeric_skipped` (lending) = 의도된 skip 종목 카운트
+- `skipped_outcomes` tuple = 종목 명세 보존 (KOSCOM 대조 / 사후 디버깅 가능)
+
+§ 4 Known Issue #31 (backfill 임계치 5% vs alphanumeric guard 7% 충돌) **해소**.
+
+### 46.7 다음 chunk
+
+1. **Phase F (순위 5종) — ka10027/30/31/32/23** — 신규 endpoint wave (25 endpoint 60→80%)
+2. **F-2 R2 inherit 7건** (§ 46.8) — 다음 정리 chunk 또는 Phase F 합류 시 일괄 처리
+3. **5-15 (금) 06:00 자연 cron 검증** — § 43 + § 44 + § 45 + § 46 효과 동시
+4. **Phase D-2 ka10080 분봉** (마지막 endpoint) — 대용량 파티션 결정 동반
+
+### 46.8 R2 inherit 7건 (다음 chunk 권고)
+
+| # | 출처 | 항목 | 영향 |
+|---|------|------|------|
+| 1 | R2 2b M-A | lending 임계치 분모 (pre_filter_skipped 포함) vs short 분모 (제외) 정의 불일치 | 다음 chunk: 분모 정의 통일 (SLA 5% 와 큰 격차라 false negative 위험 낮음) |
+| 2 | R2 2b M-B | `outcome.error` 매직 스트링 (`"alphanumeric_pre_filter"` / `"sentinel_skip"`) 분산 4 사이트 | 다음 chunk: `SkipReason` Enum 또는 모듈 상수 도입 |
+| 3 | R2 2a M-R2-1 | `errors_above_threshold` 타입 비대칭 (short=bool / lending=tuple[str,...]) — Phase E 이전 기존 이슈 | 다음 chunk: 통일 |
+| 4 | R2 2a M-R2-2 | empty stocks 조기 반환 패턴 비일관 (short 와 lending) | 다음 chunk: 코드 일관성 |
+| 5 | R2 2a H-R2-1 (자체 강등) | `backfill_short.py:189` label `alphanumeric_skipped:` 인데 필드 `total_skipped` 참조 — label-field 명 mismatch (런타임 OK) | 다음 chunk: rename 또는 label 재정의 |
+| 6 | R2 2b L-A / L-B | `test_backfill_short_filter` dead 파라미터 / F-1 `skipped_count` property 부재 | LOW — 기록 |
+| 7 | R2 2b L-C | 단건 UseCase 의 `SentinelStockCodeError` 미캐치 (라우터 정규식이 ASCII 6자리 강제라 도달 경로 0, defense-in-depth 차원) | LOW — 기록 |
+
+### 46.9 네이밍 history (MED-3 사용자 확정 — 현행 유지 + 명시)
+
+`short_selling` 과 `lending` 의 alphanumeric skip 카운터 이름 비대칭:
+
+| Service | 카운터 필드 | tuple 필드 | 이유 |
+|---------|------------|-----------|------|
+| `ShortSellingBulkResult` | `total_skipped: int` | `skipped_outcomes: tuple[...]` | _합산_ (alphanumeric pre-filter + sentinel catch 통합) — 기존 부재 필드라 단일 카운터 도입 |
+| `LendingStockBulkResult` | `total_alphanumeric_skipped: int` | `alphanumeric_skipped_outcomes: tuple[...]` | _분리_ — 기존 `total_skipped` (empty 응답 의미, Phase E 부터) 유지 + 신규 필드 분리 (DTO breaking 최소화) |
+
+본 비대칭은 사용자 확정 결정 (D-2 + plan § 4 #3) 으로 의도된 것. future-service 진입 시 _합산 선호_ 가이드라인 (lending 외에는 short 패턴 적용). 통일 rename 은 R2 inherit § 46.8 #5 와 합류해 다음 chunk 에서 처리 가능.

@@ -56,32 +56,35 @@ async def fire_lending_stock_sync(
     if result.errors_above_threshold:
         logger.error(
             "lending stock sync 실패율 과다 (15%% 초과) — total_stocks=%d upserted=%d "
-            "failed=%d skipped=%d ratio=%.2f errors=%s",
+            "failed=%d skipped=%d alphanumeric_skipped=%d ratio=%.2f errors=%s",
             result.total_stocks,
             result.total_upserted,
             result.total_failed,
             result.total_skipped,
+            result.total_alphanumeric_skipped,
             failure_ratio,
             list(result.errors_above_threshold),
         )
     elif result.warnings:
         logger.warning(
             "lending stock sync 부분 실패 (5%% 초과) — total_stocks=%d upserted=%d "
-            "failed=%d skipped=%d ratio=%.2f warnings=%s",
+            "failed=%d skipped=%d alphanumeric_skipped=%d ratio=%.2f warnings=%s",
             result.total_stocks,
             result.total_upserted,
             result.total_failed,
             result.total_skipped,
+            result.total_alphanumeric_skipped,
             failure_ratio,
             list(result.warnings),
         )
     else:
         logger.info(
-            "lending stock sync 완료 — total_stocks=%d upserted=%d failed=%d skipped=%d",
+            "lending stock sync 완료 — total_stocks=%d upserted=%d failed=%d skipped=%d alphanumeric_skipped=%d",
             result.total_stocks,
             result.total_upserted,
             result.total_failed,
             result.total_skipped,
+            result.total_alphanumeric_skipped,
         )
 
 

@@ -7,6 +7,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-14] feat(kiwoom): Phase F-2 — backfill 임계치 / alphanumeric guard 분리 (ted-run 풀 파이프라인)
+
+§ 44.9 + Known Issue #31 (backfill `5%` 임계치 vs alphanumeric `6.75%` 자연 분포 충돌) 해소. F-1 의 `SentinelStockCodeError` 패턴 (§ 45) 을 `shsa.py` / `slb.py` adapter + `short_selling_service` / `lending_service` bulk loop + CLI 두 파일 + scheduler cron log 까지 확장. ted-run 풀 파이프라인 (`--force-2b`) + 사용자 4 확정 (D-1 A+B 하이브리드 / D-2 분리 신규 필드 / D-3 분모 유지 + 메시지 명시 / D-4 `filter_alphanumeric` 신규 파라미터).
+
+### 변경 사항 (9 production + 6 test 신규 + 2 test 회귀 + 1 infra, +232/-28 production)
+
+**Production 9 파일**:
+- `app/adapter/out/kiwoom/shsa.py` (+9/-2) — `SentinelStockCodeError` import + raise type 교체 (`stkinfo` re-export 재사용)
+- `app/adapter/out/kiwoom/slb.py` (+6/-1) — 동일
+- `app/application/dto/short_selling.py` (+11/-2) — `total_skipped: int = 0` + `skipped_outcomes: tuple[ShortSellingIngestOutcome, ...]` 신규
+- `app/application/dto/lending.py` (+8/-2) — `total_alphanumeric_skipped: int = 0` + `alphanumeric_skipped_outcomes: tuple[LendingStockIngestOutcome, ...]` 신규 (기존 `total_skipped` empty 응답 의미 유지)
+- `app/application/service/short_selling_service.py` (+85/-7) — 정규식 `^[0-9]{6}$` pre-filter + sentinel catch + 임계치 메시지 `(alphanumeric_skipped=N)` + outcome 적재
+- `app/application/service/lending_service.py` (+88/-7) — 동일 + SQL `is_active.is_(True)` 필터 유지 (R2 H-1 A 결정)
+- `app/batch/short_selling_job.py` (+6/-3) — cron log `total_skipped=%d` (3 분기)
+- `app/batch/lending_stock_job.py` (+6/-3) — cron log `alphanumeric_skipped=%d` (3 분기)
+- `scripts/backfill_short.py` + `scripts/backfill_lending_stock.py` (+13/-1) — `filter_alphanumeric=True` UseCase 호출 + summary `alphanumeric_skipped:<N>` 라인
+
+**Test 신규 6 (31 케이스)**:
+- `test_shsa_sentinel.py` (16 케이스) / `test_slb_sentinel.py` (16) / `test_short_selling_service_sentinel.py` (4) / `test_lending_service_alphanumeric_skipped.py` (5) / `test_backfill_short_filter.py` (3) / `test_backfill_lending_stock_filter.py` (3) — **1,267 passed** / coverage **86.43%** (+0.24%p)
+
+**Test 회귀 보완 2**: `test_short_selling_service.py` + `test_lending_service.py` (mock fixture skipped_outcomes 단언 보완)
+
+**Infra**: `migrations/env.py` (+4/-1) — `disable_existing_loggers=False` (`fileConfig` 후 "app" logger disabled=True 회귀 차단)
+
+### ted-run 풀 파이프라인
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0 TDD | sonnet (3 sub-agent 병렬) | 6 신규 / 31 케이스 / 29 red + 2 green guard |
+| 1 구현 | opus | 9 production + 1 infra / 1,267 PASS / ruff+mypy clean |
+| 2a 1차 리뷰 | sonnet | CONDITIONAL — CRITICAL 0 / HIGH 2 / MEDIUM 3 / LOW 3 |
+| 2b 적대적 리뷰 | opus | CONDITIONAL — CRITICAL 0 / HIGH 2 / MEDIUM 4 / LOW 3 |
+| 2 fix 8건 | opus | H-1 A + MED-1 F-1 패턴 + MED-2 cron + 정규식 앵커 + alembic 결정 |
+| 2a R2 | sonnet | CONDITIONAL — HIGH 1 (자체 강등) / MEDIUM 2 inherit / LOW 2 |
+| 2b R2 | opus | CONDITIONAL — CRITICAL/HIGH 0 / MEDIUM 2 inherit / LOW 3 |
+| 3 Verification | sonnet+haiku | 5관문 PASS (3-4 contract 분류 자동 생략) |
+| 4 E2E | — | ⚪ UI 변경 0 (백엔드 only) |
+| 5 Ship | 메인 | ADR § 46 + 메타 4종 + 커밋 |
+
+### R1 HIGH 2건 처리 (Step 2 fix)
+
+- **H-1 (양쪽 합의)**: lending_service `is_active` SQL 필터 복원 + `test_bulk_total_skipped_distinct_from_alphanumeric_skipped` 재설계 — `total_stocks` 분모 active-only 회복 / 5-13 baseline 비교 가능
+- **H-2 (2b)**: short/lending SQL 패턴 통일 — H-1 처리로 자동 해소
+- **2a H-1**: 정규식 `r"[0-9]{6}"` → `r"^[0-9]{6}$"` 앵커 명시 (의도/구현 일치)
+
+### R1 MEDIUM 처리 핵심 (MED-1 F-1 패턴 1:1 이식)
+
+`ShortSellingBulkResult.skipped_outcomes: tuple[ShortSellingIngestOutcome, ...]` + `LendingStockBulkResult.alphanumeric_skipped_outcomes: tuple[LendingStockIngestOutcome, ...]` — F-1 `FundamentalSyncResult.skipped: tuple[...]` 패턴 미러. outcome.error 값 `"alphanumeric_pre_filter"` / `"sentinel_skip"` 분리로 KOSCOM 대조 시 사유 식별 가능.
+
+### R2 inherit 7건 (다음 chunk)
+
+ADR § 46.8 참조 — M-A 분모 통일 / M-B `SkipReason` Enum / M-R2-1 errors_above_threshold 타입 / M-R2-2 empty 조기반환 패턴 / H-R2-1 label-field rename / L-A~C 부수.
+
+### 효과 예상
+
+- `backfill_short.py` 재실행: 5-13 baseline fail=307 → **fail=0 / exit 0** 예상 (alphanumeric pre-filter 효과)
+- `backfill_lending_stock.py` 재실행: fail=303 → **fail=0 / exit 0** 예상
+- KRX 호출 budget: **-73s** (295 종목 × 0.25s) 단축
+- scheduler cron (5-14 07:30~08:00 발화 시): `filter_alphanumeric=False` 유지하나 sentinel catch 효과로 _임계치 분모 의미 자연 회복_ (실제 실패만 카운트)
+
+### Known Issue #31 (§ 4) **해소**
+
+---
+
 ## [2026-05-14] feat(kiwoom): Phase F-1 — ka10001 NUMERIC overflow + sentinel WARN/skipped 분리 (ted-run 풀 파이프라인)
 
 § 4 #29 (5-13 18:00 cron 7.2% 실패) + § 44.9 (본 turn 발견 — backfill 임계치/alphanumeric guard 충돌) 의 ka10001 분기를 처리하는 ted-run 풀 파이프라인 chunk.
