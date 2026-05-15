@@ -3,7 +3,7 @@
 > **단일 진실 출처** — 전체 작업의 어디까지 왔고 무엇이 남았는지 한 화면에서 파악
 > **갱신 규칙**: chunk 완료 시 (커밋 직후) 본 문서 update. HANDOFF.md 와 함께 갱신.
 > **연관**: `docs/plans/master.md` (전체 설계) / `docs/plans/endpoint-NN-*.md` (endpoint 별 상세 DoD) / `HANDOFF.md` (직전 세션) / `CHANGELOG.md` (시간순 변경)
-> **마지막 갱신**: 2026-05-14 (Phase F-3 — R2 inherit 7건 정리 ted-run 풀 파이프라인 완료. § 46.8 7건 전부 해소. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). `SkipReason` StrEnum 신규 모듈 (`app/application/dto/_shared.py`) + `errors_above_threshold` 양쪽 tuple 통일 + `_empty_bulk_result` private helper + 단건 UseCase sentinel catch (D-7 defense-in-depth) + `skipped_count` property 양쪽 (비대칭 흡수) + `backfill_short.py:189` label total_skipped 일치. R1 HIGH 2 + MEDIUM 3 + LOW 2 → fix 6건 → R2 양쪽 합의 PASS / inherit 5건 (§ 47.8 — router DTO breaking ADR 명시 / coverage 설정 부재 / SkipReason 위치 통일 / lending progress log 카운터 명 / ruff auto-fix 3건). Verification 5관문 PASS / **1284 tests** (+17) / cov **86.56%** (+0.13%p) / mypy strict 106 files (+1). 코드 8 production + 4 갱신 + 3 신규 + 1 회귀 = 16 파일 +573/-230. ADR § 47 신규 (9 sub-§))
+> **마지막 갱신**: 2026-05-15 (Phase H plan doc `phase-h-integration.md` 신규 — 사용자 요청 "H 통합 (백테 view / 데이터 품질) 까지 작업, Grafana 는 마지막 chunk 로 분리 요청". 25 endpoint 100% 도달 (F-4 + D-2 + G) 후 진입 전제 + 결정 게이트 D-1~D-6 (view 전략 / 알람 채널 / SPEC.md 범위 / cron 주기 / retention / backfill view 범위) 사용자 확정 필요. 코드 변경 0, plan doc only. 본 갱신 = 2026-05-14 Phase F-3 — R2 inherit 7건 정리 ted-run 풀 파이프라인 완료 위에 누적. § 46.8 7건 전부 해소. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). `SkipReason` StrEnum 신규 모듈 (`app/application/dto/_shared.py`) + `errors_above_threshold` 양쪽 tuple 통일 + `_empty_bulk_result` private helper + 단건 UseCase sentinel catch (D-7 defense-in-depth) + `skipped_count` property 양쪽 (비대칭 흡수) + `backfill_short.py:189` label total_skipped 일치. R1 HIGH 2 + MEDIUM 3 + LOW 2 → fix 6건 → R2 양쪽 합의 PASS / inherit 5건 (§ 47.8 — router DTO breaking ADR 명시 / coverage 설정 부재 / SkipReason 위치 통일 / lending progress log 카운터 명 / ruff auto-fix 3건). Verification 5관문 PASS / **1284 tests** (+17) / cov **86.56%** (+0.13%p) / mypy strict 106 files (+1). 코드 8 production + 4 갱신 + 3 신규 + 1 회귀 = 16 파일 +573/-230. ADR § 47 신규 (9 sub-§))
 
 ---
 
@@ -13,7 +13,7 @@
 |------|-----|
 | 진행 Phase | **Phase E 종결** (ka10014 + ka10068 + ka20068 매도 측 시그널 wave 풀 구현 완료) + **F-1/F-2 ops fix 완료**. D-2 ka10080 분봉은 사용자 결정으로 마지막 endpoint 로 연기 유지 |
 | 마지막 완료 chunk | **Phase F-3 — R2 inherit 7건 정리** (ted-run 풀 파이프라인) — § 46.8 7건 전부 해소 + § 47 신규. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). `SkipReason` StrEnum 신규 모듈 (`app/application/dto/_shared.py`) + 양쪽 DTO `errors_above_threshold: tuple[str, ...]` 통일 + `_empty_bulk_result` private helper (short + lending) + 단건 UseCase `SentinelStockCodeError` catch (D-7 defense-in-depth) + `skipped_count` property 양쪽 (비대칭 흡수 — § 46.9 보존) + `backfill_short.py:189` label `total_skipped:` 일치. R1 HIGH 2 + MEDIUM 3 + LOW 2 → fix 6건 → R2 ruff auto-fix 3건 → 양쪽 합의 PASS / inherit 5건 (§ 47.8). Verification 5관문 PASS (ruff clean + mypy strict **106 files** + **1284 tests** + cov **86.56%** + 런타임 imports OK). 8 production + 4 갱신 + 3 신규 + 1 회귀 = 16 파일 +573/-230. ADR § 47 신규 (9 sub-§) |
-| 다음 chunk | **Phase F-4 — 5 ranking endpoint 통합** (plan doc 작성됨, `phase-f-4-rankings.md` — 25 endpoint 60→80%) → **5-15 06:00 자연 cron 검증** (병행 / 코드 0) → **Phase G (투자자별 3종)**. _사용자 확정_: F-4 통합 1 chunk (단 ~2,500줄 임계 초과 — ted-run 직전 분할 재검토). F-3 R2 inherit 5건 (§ 47.8) 은 Phase F-4 합류 또는 별도 chunk |
+| 다음 chunk | **Phase F-4 — 5 ranking endpoint 통합** (plan doc 작성됨, `phase-f-4-rankings.md` — 25 endpoint 60→80%) → **5-15 06:00 자연 cron 검증** (병행 / 코드 0) → **D-2 ka10080 분봉** (마지막 endpoint) → **Phase G (투자자별 3종)** → **Phase H — 통합** (`phase-h-integration.md` 작성됨 2026-05-15, Grafana 제외 사용자 명시) → (선택) **Phase H' Grafana** (사용자 마지막 chunk). _사용자 확정_: F-4 통합 1 chunk. F-3 R2 inherit 5건 (§ 47.8) 은 Phase F-4 합류 또는 별도 chunk |
 | 25 Endpoint 진행 | **15 / 25 완료 (60%)** — F-3 는 refactor 라 endpoint 수 변동 없음. Phase F-4 진입 시 80% 도달 |
 | 누적 chunk | 57+ commits (Phase F-3 포함) |
 | 테스트 | **1284 cases** (+17 신규) / coverage **86.56%** (+0.13%p) / ruff PASS / mypy strict **106 files** PASS |
@@ -147,6 +147,7 @@ P3 (선택):
 | ~~29~~ | ~~**ka10001 stock_fundamental 7.2% 실패** (5-13 18:00 cron)~~ | 5-13 18:00 cron | ✅ **해소** (Phase F-1, ADR § 45) — `trade_compare_rate (8,4)→(12,4)` + `low_250d_pre_rate (8,4)→(10,4)` Migration 017 + `SentinelStockCodeError(ValueError)` 신설 + `FundamentalSyncResult.skipped` 분리. 5-14 18:00 cron 부터 NumericValueOutOfRangeError 11건 → 0건 + failed=실제 실패 (sentinel 제외) 예상 |
 | ~~**32**~~ | ~~F-2 R2 inherit 7건~~ | ADR § 46.8 | ✅ **해소** (Phase F-3, ADR § 47) — D-1~D-8 사용자 확정 default 일괄 채택. SkipReason StrEnum 신규 모듈 + errors_above_threshold tuple 통일 + empty helper + 단건 sentinel catch + skipped_count property + backfill label fix. 16 파일 +573/-230 / **1284 tests** / cov **86.56%** |
 | **34** | F-3 R2 inherit 5건 | ADR § 47.8 | inh-1 router DTO breaking consumer 식별 / inh-2 coverage 설정 부재 / inh-3 SkipReason 위치 통일 / inh-4 lending progress log / inh-5 ruff auto-fix 기록. Phase F-4 합류 가능 |
+| **38** | Phase H 결정 게이트 D-1~D-6 (사용자 확정 필수) | `phase-h-integration.md` § 4 | view 전략 (마테/동적/이중) / 알람 채널 (Telegram/log/둘다) / SPEC.md 범위 / quality cron 주기 / retention / backfill view 범위. 25 endpoint 100% 도달 후 ted-run 진입 직전 수집 |
 
 ---
 
@@ -159,7 +160,9 @@ P3 (선택):
 | **3** | **F-3 R2 inherit 5건** (ADR § 47.8) | inh-1 router DTO breaking ADR consumer 식별 / inh-2 coverage 설정 / inh-3 SkipReason 위치 통일 / inh-4 lending progress log 카운터 명 / inh-5 ruff auto-fix 기록 | Phase F-4 합류 가능 또는 별도 |
 | 4 | (1주 후) § 36.5 측정 결과 채움 | 5-19 이후. 12 scheduler elapsed / NXT 정상 / failed / 알람 정량화 | 측정 SQL + 분석 |
 | 5 | **Phase D-2 ka10080 분봉 (마지막 endpoint)** | 사용자 결정 (5-12) — 대용량 데이터 부담. 파티션 전략 결정 동반 chunk | 신규 도메인 + 파티션 전략 |
-| 5 | Phase G (투자자별 3종) / H (통합) | 신규 endpoint wave | 각 chunk 별 신규 |
+| 6 | **Phase G (투자자별 3종 — ka10058/59/10131)** | 신규 endpoint wave. plan doc 미작성 (Phase H 진입 전 작성 필요) | 3 chunk (endpoint 각각) 또는 1 통합 chunk |
+| **7** | **Phase H — 통합 (백테 view + 데이터 품질 + README/SPEC)** — _Grafana 제외_ (`phase-h-integration.md` 작성됨 2026-05-15) | 사용자 요청 (2026-05-15). 25 endpoint 100% 도달 후 진입 (F-4 + D-2 + G 선행). 마테리얼라이즈드 view 4 + quality SQL + Telegram alert + SPEC.md. 결정 게이트 D-1~D-6 (사용자 확정 필수) | ~500-800 prod + ~300-500 test = ~1,000-1,300 line |
+| 8 | **Phase H' — Grafana 대시보드** (사용자 마지막 chunk 로 분리 요청) | Phase H view + alert 위에 시각화 layer. 사용자 별도 재요청 시점에 plan doc 작성 | 별도 chunk |
 | 6 | Phase E follow-up — partial 비교 연산자 통일 / `--max-stocks` CLI 적용 / placeholder factory 리팩토링 (§ 40.8) | 1R Defer (MEDIUM/LOW 별도 chunk) | 작음 |
 | 6 | D-1 follow-up: inds_cd echo 검증 / close_index Decimal 통일 / backfill_sector CLI | ADR § 39.8 1R MEDIUM/LOW | 운영 첫 호출 후 결정 |
 | 7 | KOSCOM cross-check 수동 | 가설 B 최종 확정 | 수동 1~2건 |
