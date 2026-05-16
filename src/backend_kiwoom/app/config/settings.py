@@ -267,6 +267,50 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Scheduler — Phase G (3 investor flow endpoint ka10058/10059/10131) ----
+    # 결정: G-2 통일 — misfire_grace_time=21600 (6h). cron: mon-fri KST 20:00/20:30/21:00.
+    # Phase F-4 사례 1:1 미러.
+    scheduler_investor_daily_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10058 투자자별 일별 매매 종목 ranking sync cron 활성 여부 (Phase G). "
+            "scheduler_enabled=True 가 전체 게이트. cron: mon-fri KST 20:00."
+        ),
+    )
+    scheduler_investor_daily_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10058 sync cron 의 키움 자격증명 alias (Phase G). "
+            "scheduler_enabled=True + scheduler_investor_daily_sync_enabled=True 인데 "
+            "빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_stock_investor_breakdown_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10059 종목별 wide breakdown sync cron 활성 여부 (Phase G). "
+            "cron: mon-fri KST 20:30 (60분 sync 예상)."
+        ),
+    )
+    scheduler_stock_investor_breakdown_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10059 sync cron 의 키움 자격증명 alias (Phase G). 빈 값이면 fail-fast."
+        ),
+    )
+    scheduler_frgn_orgn_continuous_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10131 기관/외국인 연속매매 sync cron 활성 여부 (Phase G). cron: mon-fri KST 21:00."
+        ),
+    )
+    scheduler_frgn_orgn_continuous_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10131 sync cron 의 키움 자격증명 alias (Phase G). 빈 값이면 fail-fast."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

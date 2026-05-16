@@ -344,6 +344,12 @@ async def test_lifespan_starts_both_schedulers_with_valid_aliases(
     monkeypatch.setenv("SCHEDULER_PRED_VOLUME_RANKING_SYNC_ALIAS", "pred-volume-alias")
     monkeypatch.setenv("SCHEDULER_TRADE_AMOUNT_RANKING_SYNC_ALIAS", "trade-amount-alias")
     monkeypatch.setenv("SCHEDULER_VOLUME_SDNIN_RANKING_SYNC_ALIAS", "volume-sdnin-alias")
+    # Phase G Step 2 fix R1 C-3 — 3 investor flow endpoint alias
+    monkeypatch.setenv("SCHEDULER_INVESTOR_DAILY_SYNC_ALIAS", "investor-daily-alias")
+    monkeypatch.setenv(
+        "SCHEDULER_STOCK_INVESTOR_BREAKDOWN_SYNC_ALIAS", "stock-investor-breakdown-alias"
+    )
+    monkeypatch.setenv("SCHEDULER_FRGN_ORGN_CONTINUOUS_SYNC_ALIAS", "frgn-orgn-alias")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
 

@@ -52,6 +52,8 @@ __all__ = [
     "StockLookupResponse",
     "STK_CD_CHART_PATTERN",
     "STK_CD_LOOKUP_PATTERN",
+    "build_stk_cd",
+    "strip_kiwoom_suffix",
 ]
 
 
@@ -991,3 +993,168 @@ class KiwoomStkInfoClient:
         if parsed is None:  # pragma: no cover — validation_failed 와 mutex
             raise RuntimeError("unreachable: parsed None without validation_failed")
         return parsed
+
+    # =========================================================================
+    # Phase G — ka10058 / ka10059 (투자자별 매매 흐름)
+    # =========================================================================
+    #
+    # 두 메서드 모두 ``/api/dostk/stkinfo`` 카테고리 — 본 클래스 PATH 재사용.
+    # 응답 row 타입 / enum 은 ``_records.py`` 에 정의되어 있어 본 모듈과 순환 import
+    # 회피하려면 메서드 본문에서 lazy import.
+
+    INVESTOR_DAILY_API_ID = "ka10058"
+    STOCK_INVESTOR_BREAKDOWN_API_ID = "ka10059"
+
+    async def fetch_investor_daily_trade_stocks(
+        self,
+        *,
+        strt_dt: str,
+        end_dt: str,
+        trde_tp: Any,
+        mrkt_tp: Any,
+        invsr_tp: Any,
+        stex_tp: Any,
+        max_pages: int = 10,
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """ka10058 — (투자자, 매매구분, 시장, 거래소) 종목 ranking list.
+
+        Phase G endpoint-23. 페이지네이션 결과 합치기 + business error 매핑.
+
+        Args:
+            strt_dt: 시작일자 ``YYYYMMDD``.
+            end_dt: 종료일자 ``YYYYMMDD``.
+            trde_tp: ``InvestorTradeType`` (1=순매도 / 2=순매수).
+            mrkt_tp: ``InvestorMarketType`` (001=KOSPI / 101=KOSDAQ).
+            invsr_tp: ``InvestorType`` (12 카테고리).
+            stex_tp: ``RankingExchangeType`` (1=KRX / 2=NXT / 3=통합).
+            max_pages: 페이지 cap (default 10).
+
+        Returns:
+            ``(rows, used_filters)`` — ``InvestorDailyTradeRow`` list + body dict.
+
+        Raises:
+            KiwoomBusinessError: 응답 return_code != 0.
+            KiwoomResponseValidationError: 응답 row Pydantic 검증 실패.
+        """
+        # circular import 회피 — `_records.py` 가 본 모듈의 helper 를 import.
+        from app.adapter.out.kiwoom._exceptions import KiwoomBusinessError
+        from app.adapter.out.kiwoom._records import (
+            InvestorDailyTradeResponse,
+            InvestorDailyTradeRow,
+        )
+
+        body: dict[str, Any] = {
+            "strt_dt": strt_dt,
+            "end_dt": end_dt,
+            "trde_tp": trde_tp.value if hasattr(trde_tp, "value") else str(trde_tp),
+            "mrkt_tp": mrkt_tp.value if hasattr(mrkt_tp, "value") else str(mrkt_tp),
+            "invsr_tp": invsr_tp.value if hasattr(invsr_tp, "value") else str(invsr_tp),
+            "stex_tp": stex_tp.value if hasattr(stex_tp, "value") else str(stex_tp),
+        }
+
+        all_rows: list[InvestorDailyTradeRow] = []
+        async for page in self._client.call_paginated(
+            api_id=self.INVESTOR_DAILY_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=max_pages,
+        ):
+            validation_failed = False
+            parsed: InvestorDailyTradeResponse | None = None
+            try:
+                parsed = InvestorDailyTradeResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(
+                    f"{self.INVESTOR_DAILY_API_ID} 응답 검증 실패"
+                )
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+            if parsed.return_code != 0:
+                raise KiwoomBusinessError(
+                    api_id=self.INVESTOR_DAILY_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+            all_rows.extend(parsed.invsr_daly_trde_stk)
+
+        return all_rows, body
+
+    async def fetch_stock_investor_breakdown(
+        self,
+        *,
+        dt: str,
+        stk_cd: str,
+        amt_qty_tp: Any,
+        trde_tp: Any,
+        unit_tp: Any,
+        stex_tp: Any,
+        max_pages: int = 5,
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """ka10059 — 종목 단위 wide breakdown (12 investor net).
+
+        Phase G endpoint-24. D-16 — 응답 단일 row 기대지만 ``max_pages=5`` 페이지네이션
+        가드 유지 (cont-yn=Y 발화 시 방어).
+
+        Args:
+            dt: 일자 ``YYYYMMDD``.
+            stk_cd: 종목코드 (Length=6, NXT ``_NX`` suffix 허용 Length=20).
+            amt_qty_tp: ``AmountQuantityType`` (1=금액 / 2=수량 — ka10131 과 _반대_).
+            trde_tp: ``StockInvestorTradeType`` (0=순매수 / 1=매수 / 2=매도).
+            unit_tp: ``UnitType`` (1000=천주 / 1=단주).
+            stex_tp: ``RankingExchangeType``.
+            max_pages: D-16 가드 (default 5).
+
+        Returns:
+            ``(rows, used_filters)`` — ``StockInvestorBreakdownRow`` list + body dict.
+
+        Raises:
+            KiwoomBusinessError: 응답 return_code != 0.
+            KiwoomResponseValidationError: 응답 row Pydantic 검증 실패.
+        """
+        from app.adapter.out.kiwoom._exceptions import KiwoomBusinessError
+        from app.adapter.out.kiwoom._records import (
+            StockInvestorBreakdownResponse,
+            StockInvestorBreakdownRow,
+        )
+
+        body: dict[str, Any] = {
+            "dt": dt,
+            "stk_cd": stk_cd,
+            "amt_qty_tp": amt_qty_tp.value if hasattr(amt_qty_tp, "value") else str(amt_qty_tp),
+            "trde_tp": trde_tp.value if hasattr(trde_tp, "value") else str(trde_tp),
+            "unit_tp": unit_tp.value if hasattr(unit_tp, "value") else str(unit_tp),
+            "stex_tp": stex_tp.value if hasattr(stex_tp, "value") else str(stex_tp),
+        }
+
+        all_rows: list[StockInvestorBreakdownRow] = []
+        async for page in self._client.call_paginated(
+            api_id=self.STOCK_INVESTOR_BREAKDOWN_API_ID,
+            endpoint=self.PATH,
+            body=body,
+            max_pages=max_pages,
+        ):
+            validation_failed = False
+            parsed: StockInvestorBreakdownResponse | None = None
+            try:
+                parsed = StockInvestorBreakdownResponse.model_validate(page.body)
+            except ValidationError:
+                validation_failed = True
+
+            if validation_failed:
+                raise KiwoomResponseValidationError(
+                    f"{self.STOCK_INVESTOR_BREAKDOWN_API_ID} 응답 검증 실패"
+                )
+            if parsed is None:  # pragma: no cover — validation_failed 와 mutex
+                raise RuntimeError("unreachable: parsed None without validation_failed")
+            if parsed.return_code != 0:
+                raise KiwoomBusinessError(
+                    api_id=self.STOCK_INVESTOR_BREAKDOWN_API_ID,
+                    return_code=parsed.return_code,
+                    message=parsed.return_msg,
+                )
+            all_rows.extend(parsed.stk_invsr_orgn)
+
+        return all_rows, body

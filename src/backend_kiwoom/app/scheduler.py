@@ -32,12 +32,15 @@ from app.adapter.web._deps import (
     IngestDailyFlowUseCaseFactory,
     IngestDailyOhlcvUseCaseFactory,
     IngestFluRtBulkUseCaseFactory,
+    IngestFrgnOrgnBulkUseCaseFactory,
+    IngestInvestorDailyBulkUseCaseFactory,
     IngestLendingMarketUseCaseFactory,
     IngestLendingStockBulkUseCaseFactory,
     IngestPeriodicOhlcvUseCaseFactory,
     IngestPredVolumeBulkUseCaseFactory,
     IngestSectorDailyBulkUseCaseFactory,
     IngestShortSellingBulkUseCaseFactory,
+    IngestStockInvestorBreakdownBulkUseCaseFactory,
     IngestTodayVolumeBulkUseCaseFactory,
     IngestTradeAmountBulkUseCaseFactory,
     IngestVolumeSdninBulkUseCaseFactory,
@@ -46,6 +49,11 @@ from app.adapter.web._deps import (
     SyncStockMasterUseCaseFactory,
 )
 from app.batch.daily_flow_job import fire_daily_flow_sync
+from app.batch.investor_flow_jobs import (
+    fire_frgn_orgn_continuous_sync,
+    fire_investor_daily_sync,
+    fire_stock_investor_breakdown_sync,
+)
 from app.batch.lending_market_job import fire_lending_market_sync
 from app.batch.lending_stock_job import fire_lending_stock_sync
 from app.batch.monthly_ohlcv_job import fire_monthly_ohlcv_sync
@@ -120,6 +128,16 @@ TRDE_PRICA_RANKING_SYNC_JOB_ID: Final[str] = "trde_prica_ranking_sync_daily"
 
 VOLUME_SDNIN_RANKING_SYNC_JOB_ID: Final[str] = "volume_sdnin_ranking_sync_daily"
 """ka10023 거래량 급증 ranking sync — mon-fri KST 19:50."""
+
+# Phase G — 3 investor flow endpoint cron (mon-fri KST 20:00/20:30/21:00, misfire 21600s G-2)
+INVESTOR_DAILY_SYNC_JOB_ID: Final[str] = "investor_daily_sync_daily"
+"""ka10058 투자자별 일별 매매 종목 ranking sync — mon-fri KST 20:00 (D-11)."""
+
+STOCK_INVESTOR_BREAKDOWN_SYNC_JOB_ID: Final[str] = "stock_investor_breakdown_sync_daily"
+"""ka10059 종목별 wide breakdown sync — mon-fri KST 20:30 (3000 종목 60분 sync, D-11)."""
+
+FRGN_ORGN_CONTINUOUS_SYNC_JOB_ID: Final[str] = "frgn_orgn_continuous_sync_daily"
+"""ka10131 기관/외국인 연속매매 ranking sync — mon-fri KST 21:00 (D-11)."""
 
 
 class _PhaseEJobView:
@@ -1421,9 +1439,177 @@ class VolumeSdninRankingScheduler(_RankingScheduler):
         super().__init__(factory=factory, alias=alias, enabled=enabled)
 
 
+class _InvestorFlowScheduler:
+    """Phase G 3 investor flow scheduler 공통 베이스 — cron mon-fri KST 20:00/20:30/21:00.
+
+    설계: phase-g-investor-flow.md § 5.9 + D-11 (cron 시점).
+    G-2 통일 misfire_grace_time = 21600s (6h).
+
+    F-4 ``_RankingScheduler`` 패턴과 유사하나, Phase G 의 ``fire_*_sync`` 콜백 시그니처가
+    ``(*, snapshot_at: datetime)`` 라 ``factory`` / ``alias`` 를 kwargs 로 넘기지 않는다.
+    cron 콜백 내부에서 ``get_ingest_*_bulk_factory()`` 로 lazy lookup — Step 2 R1 C-1
+    fix 의 일부 (테스트 mocking 호환성 유지).
+
+    factory / alias 는 lifespan 게이트 (alias_checks fail-fast) 용으로만 보관 — 실제
+    cron job 호출 시 사용 안 함. 그러나 alias 가 빈 값이면 fail-fast 검증을 통과하지
+    못해 ``enabled=True`` 환경에선 lifespan 가 raise.
+    """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — G-2 통일 (F-4 + Phase E 와 일관, ADR § 42.5 옵션 C)."""
+
+    _JOB_ID: str = ""
+    _CRON_HOUR: int = 20
+    _CRON_MINUTE: int = 0
+    _CALLBACK: Any = None
+    _LABEL: str = ""
+
+    def __init__(
+        self,
+        *,
+        factory: Any,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        # factory / alias 는 lifespan 게이트 + 테스트 가시화용 — cron job kwargs 로 전달 안 함.
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Any:
+        job = self._scheduler.get_job(job_id)
+        if job is None:
+            return None
+        return _PhaseEJobView(job)
+
+    def start(self) -> None:
+        if not self._enabled:
+            logger.info("%s scheduler disabled — start 무시", self._LABEL)
+            return
+        if self._started:
+            logger.debug("%s scheduler 이미 시작됨 — start 무시", self._LABEL)
+            return
+
+        # cron 발화 시점 KST datetime 을 ``snapshot_at`` 으로 callback 에 주입.
+        # APScheduler 는 trigger 의 next_fire_time 을 콜백에 전달하지 않으므로 lambda 가
+        # ``datetime.now(KST)`` 로 캡처 — Phase F-4 ranking_jobs `_fire_ranking_sync`
+        # 패턴 미러. is_trading_day 가드는 콜백 내부 책임.
+        callback = self.__class__._CALLBACK
+
+        async def _wrapper() -> None:
+            snapshot_at = datetime.datetime.now(tz=KST)
+            await callback(snapshot_at=snapshot_at)
+
+        self._scheduler.add_job(
+            _wrapper,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=self._CRON_HOUR,
+                minute=self._CRON_MINUTE,
+                timezone=KST,
+            ),
+            id=self._JOB_ID,
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "%s scheduler 시작 — job=%s alias=%s cron=mon-fri %02d:%02d KST misfire=%ds",
+            self._LABEL,
+            self._JOB_ID,
+            self._alias,
+            self._CRON_HOUR,
+            self._CRON_MINUTE,
+            self.MISFIRE_GRACE_SECONDS,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001
+            logger.exception("%s scheduler shutdown 예외", self._LABEL)
+        finally:
+            self._started = False
+
+
+class InvestorDailyScheduler(_InvestorFlowScheduler):
+    """ka10058 투자자별 일별 매매 종목 ranking — mon-fri KST 20:00 (Phase G D-11)."""
+
+    _JOB_ID = INVESTOR_DAILY_SYNC_JOB_ID
+    _CRON_HOUR = 20
+    _CRON_MINUTE = 0
+    _CALLBACK = staticmethod(fire_investor_daily_sync)
+    _LABEL = "investor_daily"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestInvestorDailyBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
+class StockInvestorBreakdownScheduler(_InvestorFlowScheduler):
+    """ka10059 종목별 wide breakdown — mon-fri KST 20:30 (3000 종목 60분, Phase G D-11)."""
+
+    _JOB_ID = STOCK_INVESTOR_BREAKDOWN_SYNC_JOB_ID
+    _CRON_HOUR = 20
+    _CRON_MINUTE = 30
+    _CALLBACK = staticmethod(fire_stock_investor_breakdown_sync)
+    _LABEL = "stock_investor_breakdown"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestStockInvestorBreakdownBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
+class FrgnOrgnContinuousScheduler(_InvestorFlowScheduler):
+    """ka10131 기관/외국인 연속매매 ranking — mon-fri KST 21:00 (Phase G D-11)."""
+
+    _JOB_ID = FRGN_ORGN_CONTINUOUS_SYNC_JOB_ID
+    _CRON_HOUR = 21
+    _CRON_MINUTE = 0
+    _CALLBACK = staticmethod(fire_frgn_orgn_continuous_sync)
+    _LABEL = "frgn_orgn_continuous"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestFrgnOrgnBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
 __all__ = [
     "DAILY_FLOW_SYNC_JOB_ID",
     "FLU_RT_RANKING_SYNC_JOB_ID",
+    "FRGN_ORGN_CONTINUOUS_SYNC_JOB_ID",
+    "INVESTOR_DAILY_SYNC_JOB_ID",
     "KST",
     "LENDING_MARKET_SYNC_JOB_ID",
     "LENDING_STOCK_SYNC_JOB_ID",
@@ -1434,6 +1620,7 @@ __all__ = [
     "SECTOR_SYNC_JOB_ID",
     "SHORT_SELLING_SYNC_JOB_ID",
     "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
+    "STOCK_INVESTOR_BREAKDOWN_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
     "TODAY_VOLUME_RANKING_SYNC_JOB_ID",
     "TRDE_PRICA_RANKING_SYNC_JOB_ID",
@@ -1442,6 +1629,8 @@ __all__ = [
     "YEARLY_OHLCV_SYNC_JOB_ID",
     "DailyFlowScheduler",
     "FluRtRankingScheduler",
+    "FrgnOrgnContinuousScheduler",
+    "InvestorDailyScheduler",
     "LendingMarketScheduler",
     "LendingStockScheduler",
     "MonthlyOhlcvScheduler",
@@ -1451,6 +1640,7 @@ __all__ = [
     "SectorSyncScheduler",
     "ShortSellingScheduler",
     "StockFundamentalScheduler",
+    "StockInvestorBreakdownScheduler",
     "StockMasterScheduler",
     "TodayVolumeRankingScheduler",
     "TrdePricaRankingScheduler",

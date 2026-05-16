@@ -725,28 +725,490 @@ class VolumeSdninResponse(BaseModel):
     return_msg: Annotated[str, Field(max_length=200)] = ""
 
 
+# =============================================================================
+# Phase G — 투자자별 매매 흐름 (ka10058 / ka10059 / ka10131)
+# =============================================================================
+#
+# 9 enum + 3 Row / 3 Response + 3 Normalized dataclass + `_to_decimal_div_100` helper.
+# 설계: phase-g-investor-flow.md § 5.4 + endpoint-23/24/25.
+# 사용자 결정 D-15 (amt_qty_tp 반대 의미) — `AmountQuantityType` (ka10059 1/2) vs
+# `ContinuousAmtQtyType` (ka10131 0/1) 별도 enum 분리. enum 분리가 컴파일 타임 가드.
+
+
+def _to_decimal_div_100(value: str) -> Decimal | None:
+    """ka10059 flu_rt "우측 2자리 소수점" 정규화 — ``+698`` → ``Decimal("6.98")``.
+
+    ka10058 의 ``pre_rt = "+7.43"`` 와 다른 표기 — ka10059 응답은 100 곱해서 정수로 옴
+    (운영 검증 1순위 — master.md § 12 + 본 helper docstring 기록).
+
+    `_to_decimal` (부호 흡수 + 천단위 콤마 + NaN/Infinity 차단) 후 100 나눔. 빈 입력 /
+    sentinel (`-` / `+`) → None. 잘못된 입력 → None (caller 가 NULL 영속화).
+
+    예:
+        "+698"   → Decimal("6.98")
+        "-580"   → Decimal("-5.80")
+        "0"      → Decimal("0")
+        ""       → None
+        "-"      → None
+        "abc"    → None
+    """
+    d = _to_decimal(value)
+    if d is None:
+        return None
+    return d / Decimal(100)
+
+
+# ---------- 9 enum ----------
+
+
+class InvestorType(StrEnum):
+    """ka10058 invsr_tp — 12 카테고리 (개인/외국인/기관계 + 9 기관 세부)."""
+
+    INDIVIDUAL = "8000"
+    """개인."""
+    FOREIGN = "9000"
+    """외국인."""
+    INSTITUTION_TOTAL = "9999"
+    """기관계 (= 금융투자 + 보험 + 투신 + 기타금융 + 은행 + 연기금 + 국가 합산 추정)."""
+    FINANCIAL_INV = "1000"
+    """금융투자."""
+    INSURANCE = "2000"
+    """보험."""
+    INVESTMENT_TRUST = "3000"
+    """투신."""
+    PRIVATE_FUND = "3100"
+    """사모펀드."""
+    BANK = "4000"
+    """은행."""
+    OTHER_FINANCIAL = "5000"
+    """기타금융."""
+    PENSION_FUND = "6000"
+    """연기금."""
+    NATION = "7000"
+    """국가."""
+    OTHER_CORP = "7100"
+    """기타법인."""
+
+
+class InvestorTradeType(StrEnum):
+    """ka10058 trde_tp — 순매도/순매수 2종."""
+
+    NET_SELL = "1"
+    NET_BUY = "2"
+
+
+class InvestorMarketType(StrEnum):
+    """ka10058/ka10131 mrkt_tp — D-17 신규 enum (코스피/코스닥 만, 전체 ``000`` 불가)."""
+
+    KOSPI = "001"
+    KOSDAQ = "101"
+
+
+class AmountQuantityType(StrEnum):
+    """ka10059 amt_qty_tp — 금액/수량 (★ ka10131 의 amt_qty_tp 와 반대 의미)."""
+
+    AMOUNT = "1"
+    QUANTITY = "2"
+
+
+class StockInvestorTradeType(StrEnum):
+    """ka10059 trde_tp — 순매수/매수/매도 3종 (ka10058 의 2종보다 1종 많음)."""
+
+    NET_BUY = "0"
+    BUY = "1"
+    SELL = "2"
+
+
+class UnitType(StrEnum):
+    """ka10059 unit_tp — 단위 (천주/단주)."""
+
+    THOUSAND_SHARES = "1000"
+    SINGLE_SHARE = "1"
+
+
+class ContinuousPeriodType(StrEnum):
+    """ka10131 dt — 연속 윈도 7종.
+
+    PERIOD (0) 일 때만 strt_dt / end_dt 사용. 나머지는 응답 시점 기준 N일.
+    """
+
+    LATEST = "1"
+    DAYS_3 = "3"
+    DAYS_5 = "5"
+    DAYS_10 = "10"
+    DAYS_20 = "20"
+    DAYS_120 = "120"
+    PERIOD = "0"
+
+
+class ContinuousAmtQtyType(StrEnum):
+    """ka10131 amt_qty_tp — 금액/수량 (★ ka10059 의 amt_qty_tp 와 _반대_ 의미, D-15).
+
+    ka10059 AmountQuantityType: AMOUNT="1" / QUANTITY="2"
+    ka10131 ContinuousAmtQtyType: AMOUNT="0" / QUANTITY="1"  ← 반대!
+
+    enum 분리가 컴파일 타임 가드 — 두 endpoint 간 실수 혼용 차단.
+    """
+
+    AMOUNT = "0"
+    QUANTITY = "1"
+
+
+class StockIndsType(StrEnum):
+    """ka10131 stk_inds_tp — 종목/업종 (D-14: 본 chunk 는 STOCK 만 운영)."""
+
+    STOCK = "0"
+    INDUSTRY = "1"
+
+
+# ---------- ka10058 InvestorDailyTradeRow / Response / Normalized ----------
+
+
+class InvestorDailyTradeRow(BaseModel):
+    """ka10058 응답 row — 11 필드 (B-γ-1 max_length 강제 패턴)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    stk_cd: Annotated[str, Field(max_length=20)] = ""
+    stk_nm: Annotated[str, Field(max_length=100)] = ""
+    netslmt_qty: Annotated[str, Field(max_length=32)] = ""
+    netslmt_amt: Annotated[str, Field(max_length=32)] = ""
+    prsm_avg_pric: Annotated[str, Field(max_length=32)] = ""
+    cur_prc: Annotated[str, Field(max_length=32)] = ""
+    pre_sig: Annotated[str, Field(max_length=4)] = ""
+    pred_pre: Annotated[str, Field(max_length=32)] = ""
+    avg_pric_pre: Annotated[str, Field(max_length=32)] = ""
+    pre_rt: Annotated[str, Field(max_length=32)] = ""
+    dt_trde_qty: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        stock_id: int | None,
+        as_of_date: date,
+        investor_type: InvestorType,
+        trade_type: InvestorTradeType,
+        market_type: InvestorMarketType,
+        exchange_type: RankingExchangeType,
+        rank: int,
+    ) -> NormalizedInvestorDailyTrade:
+        """ka10058 row → NormalizedInvestorDailyTrade.
+
+        - 부호 + 이중 부호: ``_strip_double_sign_int`` 재사용 (ka10086 가설 B 정착됨).
+        - ``prsm_avg_pric`` 은 양수 추정 평균가 → ``_to_int``.
+        - ``pre_rt`` (``+7.43``) → ``_to_decimal`` (ka10059 의 ``+698`` 표기와 다름).
+        """
+        return NormalizedInvestorDailyTrade(
+            as_of_date=as_of_date,
+            stock_id=stock_id,
+            stock_code_raw=self.stk_cd,
+            investor_type=investor_type,
+            trade_type=trade_type,
+            market_type=market_type,
+            exchange_type=exchange_type,
+            rank=rank,
+            net_volume=_strip_double_sign_int(self.netslmt_qty),
+            net_amount=_strip_double_sign_int(self.netslmt_amt),
+            estimated_avg_price=_to_int(self.prsm_avg_pric),
+            current_price=_strip_double_sign_int(self.cur_prc),
+            prev_compare_sign=self.pre_sig or None,
+            prev_compare_amount=_strip_double_sign_int(self.pred_pre),
+            avg_price_compare=_strip_double_sign_int(self.avg_pric_pre),
+            prev_compare_rate=_to_decimal(self.pre_rt),
+            period_volume=_to_int(self.dt_trde_qty),
+            stock_name=self.stk_nm,
+        )
+
+
+class InvestorDailyTradeResponse(BaseModel):
+    """ka10058 응답 wrapper — `invsr_daly_trde_stk` list."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    invsr_daly_trde_stk: list[InvestorDailyTradeRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedInvestorDailyTrade:
+    """ka10058 정규화 도메인 — Repository 가 보는 형태."""
+
+    as_of_date: date
+    stock_id: int | None
+    stock_code_raw: str
+    investor_type: InvestorType
+    trade_type: InvestorTradeType
+    market_type: InvestorMarketType
+    exchange_type: RankingExchangeType
+    rank: int
+    net_volume: int | None
+    net_amount: int | None
+    estimated_avg_price: int | None
+    current_price: int | None
+    prev_compare_sign: str | None
+    prev_compare_amount: int | None
+    avg_price_compare: int | None
+    prev_compare_rate: Decimal | None
+    period_volume: int | None
+    stock_name: str
+
+
+# ---------- ka10059 StockInvestorBreakdownRow / Response / Normalized ----------
+
+
+class StockInvestorBreakdownRow(BaseModel):
+    """ka10059 응답 row — 20 필드 wide (12 net 카테고리 + OHLCV + 메타)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    dt: Annotated[str, Field(max_length=8)] = ""
+    cur_prc: Annotated[str, Field(max_length=32)] = ""
+    pre_sig: Annotated[str, Field(max_length=4)] = ""
+    pred_pre: Annotated[str, Field(max_length=32)] = ""
+    flu_rt: Annotated[str, Field(max_length=32)] = ""
+    acc_trde_qty: Annotated[str, Field(max_length=32)] = ""
+    acc_trde_prica: Annotated[str, Field(max_length=32)] = ""
+    # 12 투자자 카테고리 net (부호 포함)
+    ind_invsr: Annotated[str, Field(max_length=32)] = ""
+    frgnr_invsr: Annotated[str, Field(max_length=32)] = ""
+    orgn: Annotated[str, Field(max_length=32)] = ""
+    fnnc_invt: Annotated[str, Field(max_length=32)] = ""
+    insrnc: Annotated[str, Field(max_length=32)] = ""
+    invtrt: Annotated[str, Field(max_length=32)] = ""
+    etc_fnnc: Annotated[str, Field(max_length=32)] = ""
+    bank: Annotated[str, Field(max_length=32)] = ""
+    penfnd_etc: Annotated[str, Field(max_length=32)] = ""
+    samo_fund: Annotated[str, Field(max_length=32)] = ""
+    natn: Annotated[str, Field(max_length=32)] = ""
+    etc_corp: Annotated[str, Field(max_length=32)] = ""
+    natfor: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        stock_id: int | None,
+        amt_qty_tp: AmountQuantityType,
+        trade_type: StockInvestorTradeType,
+        unit_tp: UnitType,
+        exchange_type: RankingExchangeType,
+    ) -> NormalizedStockInvestorBreakdown:
+        """ka10059 row → NormalizedStockInvestorBreakdown.
+
+        - ``flu_rt`` (``+698``) → ``_to_decimal_div_100`` (6.98). ka10058 ``pre_rt`` 와
+          다른 표기 — endpoint-24 § 11.2 운영 검증 1순위.
+        - 12 net 카테고리: ``_strip_double_sign_int`` (이중 부호 ``--714`` 가설 B 재사용).
+        - ``trading_date`` 빈 입력 → ``date.min`` (Repository skip 안전망).
+        """
+        return NormalizedStockInvestorBreakdown(
+            stock_id=stock_id,
+            trading_date=_parse_yyyymmdd(self.dt) or date.min,
+            amt_qty_tp=amt_qty_tp,
+            trade_type=trade_type,
+            unit_tp=unit_tp,
+            exchange_type=exchange_type,
+            current_price=_strip_double_sign_int(self.cur_prc),
+            prev_compare_sign=self.pre_sig or None,
+            prev_compare_amount=_strip_double_sign_int(self.pred_pre),
+            change_rate=_to_decimal_div_100(self.flu_rt),
+            acc_trade_volume=_to_int(self.acc_trde_qty),
+            acc_trade_amount=_to_int(self.acc_trde_prica),
+            net_individual=_strip_double_sign_int(self.ind_invsr),
+            net_foreign=_strip_double_sign_int(self.frgnr_invsr),
+            net_institution_total=_strip_double_sign_int(self.orgn),
+            net_financial_inv=_strip_double_sign_int(self.fnnc_invt),
+            net_insurance=_strip_double_sign_int(self.insrnc),
+            net_investment_trust=_strip_double_sign_int(self.invtrt),
+            net_other_financial=_strip_double_sign_int(self.etc_fnnc),
+            net_bank=_strip_double_sign_int(self.bank),
+            net_pension_fund=_strip_double_sign_int(self.penfnd_etc),
+            net_private_fund=_strip_double_sign_int(self.samo_fund),
+            net_nation=_strip_double_sign_int(self.natn),
+            net_other_corp=_strip_double_sign_int(self.etc_corp),
+            net_dom_for=_strip_double_sign_int(self.natfor),
+        )
+
+
+class StockInvestorBreakdownResponse(BaseModel):
+    """ka10059 응답 wrapper — `stk_invsr_orgn` list."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    stk_invsr_orgn: list[StockInvestorBreakdownRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedStockInvestorBreakdown:
+    """ka10059 정규화 도메인 — Repository 가 보는 형태 (Phase G — 12 net 카테고리)."""
+
+    stock_id: int | None
+    trading_date: date
+    amt_qty_tp: AmountQuantityType
+    trade_type: StockInvestorTradeType
+    unit_tp: UnitType
+    exchange_type: RankingExchangeType
+    current_price: int | None
+    prev_compare_sign: str | None
+    prev_compare_amount: int | None
+    change_rate: Decimal | None
+    acc_trade_volume: int | None
+    acc_trade_amount: int | None
+    # 12 투자자 카테고리 net
+    net_individual: int | None
+    net_foreign: int | None
+    net_institution_total: int | None
+    net_financial_inv: int | None
+    net_insurance: int | None
+    net_investment_trust: int | None
+    net_other_financial: int | None
+    net_bank: int | None
+    net_pension_fund: int | None
+    net_private_fund: int | None
+    net_nation: int | None
+    net_other_corp: int | None
+    net_dom_for: int | None
+
+
+# ---------- ka10131 ContinuousFrgnOrgnRow / Response / Normalized ----------
+
+
+class ContinuousFrgnOrgnRow(BaseModel):
+    """ka10131 응답 row — 19 필드 (기관/외국인/합계 × 5 metric + rank + 메타)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    rank: Annotated[str, Field(max_length=8)] = ""
+    stk_cd: Annotated[str, Field(max_length=20)] = ""
+    stk_nm: Annotated[str, Field(max_length=100)] = ""
+    prid_stkpc_flu_rt: Annotated[str, Field(max_length=32)] = ""
+    # 기관 5
+    orgn_nettrde_amt: Annotated[str, Field(max_length=32)] = ""
+    orgn_nettrde_qty: Annotated[str, Field(max_length=32)] = ""
+    orgn_cont_netprps_dys: Annotated[str, Field(max_length=32)] = ""
+    orgn_cont_netprps_qty: Annotated[str, Field(max_length=32)] = ""
+    orgn_cont_netprps_amt: Annotated[str, Field(max_length=32)] = ""
+    # 외국인 5
+    frgnr_nettrde_qty: Annotated[str, Field(max_length=32)] = ""
+    frgnr_nettrde_amt: Annotated[str, Field(max_length=32)] = ""
+    frgnr_cont_netprps_dys: Annotated[str, Field(max_length=32)] = ""
+    frgnr_cont_netprps_qty: Annotated[str, Field(max_length=32)] = ""
+    frgnr_cont_netprps_amt: Annotated[str, Field(max_length=32)] = ""
+    # 합계 5
+    nettrde_qty: Annotated[str, Field(max_length=32)] = ""
+    nettrde_amt: Annotated[str, Field(max_length=32)] = ""
+    tot_cont_netprps_dys: Annotated[str, Field(max_length=32)] = ""
+    tot_cont_nettrde_qty: Annotated[str, Field(max_length=32)] = ""
+    tot_cont_netprps_amt: Annotated[str, Field(max_length=32)] = ""
+
+    def to_normalized(
+        self,
+        *,
+        stock_id: int | None,
+        as_of_date: date,
+        period_type: ContinuousPeriodType,
+        market_type: InvestorMarketType,
+        amt_qty_tp: ContinuousAmtQtyType,
+        stk_inds_tp: StockIndsType,
+        exchange_type: RankingExchangeType,
+    ) -> NormalizedFrgnOrgnConsecutive:
+        """ka10131 row → NormalizedFrgnOrgnConsecutive.
+
+        - ``rank``: ``_to_int`` (양수 정수). 빈 입력 → 0 (caller 가 skip).
+        - ``prid_stkpc_flu_rt`` (``-5.80``) → ``_to_decimal`` (ka10059 ``+698`` 표기와 다름).
+        - 15 metric: ``_strip_double_sign_int`` (이중 부호 처리).
+        - ``tot_cont_netprps_dys = orgn + frgnr`` 정합성은 raw 적재 (운영 검증).
+        """
+        return NormalizedFrgnOrgnConsecutive(
+            stock_id=stock_id,
+            stock_code_raw=self.stk_cd,
+            stock_name=self.stk_nm,
+            as_of_date=as_of_date,
+            period_type=period_type,
+            market_type=market_type,
+            amt_qty_tp=amt_qty_tp,
+            stk_inds_tp=stk_inds_tp,
+            exchange_type=exchange_type,
+            rank=_to_int(self.rank) or 0,
+            period_stock_price_flu_rt=_to_decimal(self.prid_stkpc_flu_rt),
+            orgn_net_amount=_strip_double_sign_int(self.orgn_nettrde_amt),
+            orgn_net_volume=_strip_double_sign_int(self.orgn_nettrde_qty),
+            orgn_cont_days=_strip_double_sign_int(self.orgn_cont_netprps_dys),
+            orgn_cont_volume=_strip_double_sign_int(self.orgn_cont_netprps_qty),
+            orgn_cont_amount=_strip_double_sign_int(self.orgn_cont_netprps_amt),
+            frgnr_net_volume=_strip_double_sign_int(self.frgnr_nettrde_qty),
+            frgnr_net_amount=_strip_double_sign_int(self.frgnr_nettrde_amt),
+            frgnr_cont_days=_strip_double_sign_int(self.frgnr_cont_netprps_dys),
+            frgnr_cont_volume=_strip_double_sign_int(self.frgnr_cont_netprps_qty),
+            frgnr_cont_amount=_strip_double_sign_int(self.frgnr_cont_netprps_amt),
+            total_net_volume=_strip_double_sign_int(self.nettrde_qty),
+            total_net_amount=_strip_double_sign_int(self.nettrde_amt),
+            total_cont_days=_strip_double_sign_int(self.tot_cont_netprps_dys),
+            total_cont_volume=_strip_double_sign_int(self.tot_cont_nettrde_qty),
+            total_cont_amount=_strip_double_sign_int(self.tot_cont_netprps_amt),
+        )
+
+
+class ContinuousFrgnOrgnResponse(BaseModel):
+    """ka10131 응답 wrapper — `orgn_frgnr_cont_trde_prst` list."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    orgn_frgnr_cont_trde_prst: list[ContinuousFrgnOrgnRow] = Field(default_factory=list)
+    return_code: int = 0
+    return_msg: Annotated[str, Field(max_length=200)] = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedFrgnOrgnConsecutive:
+    """ka10131 정규화 도메인 — Repository 가 보는 형태 (Phase G — 15 metric)."""
+
+    stock_id: int | None
+    stock_code_raw: str
+    stock_name: str
+    as_of_date: date
+    period_type: ContinuousPeriodType
+    market_type: InvestorMarketType
+    amt_qty_tp: ContinuousAmtQtyType
+    stk_inds_tp: StockIndsType
+    exchange_type: RankingExchangeType
+    rank: int
+    period_stock_price_flu_rt: Decimal | None
+    # 기관 5
+    orgn_net_amount: int | None
+    orgn_net_volume: int | None
+    orgn_cont_days: int | None
+    orgn_cont_volume: int | None
+    orgn_cont_amount: int | None
+    # 외국인 5
+    frgnr_net_volume: int | None
+    frgnr_net_amount: int | None
+    frgnr_cont_days: int | None
+    frgnr_cont_volume: int | None
+    frgnr_cont_amount: int | None
+    # 합계 5
+    total_net_volume: int | None
+    total_net_amount: int | None
+    total_cont_days: int | None
+    total_cont_volume: int | None
+    total_cont_amount: int | None
+
+
 __all__ = [
+    # Phase C — ka10086 daily market
     "DailyMarketResponse",
     "DailyMarketRow",
+    "NormalizedDailyFlow",
+    # Phase F-4 — 5 ranking enums + rows + responses
     "FluRtSortType",
     "FluRtUpperResponse",
     "FluRtUpperRow",
-    "LendingMarketResponse",
-    "LendingMarketRow",
-    "LendingScope",
-    "LendingStockResponse",
-    "LendingStockRow",
-    "NormalizedDailyFlow",
-    "NormalizedLendingMarket",
-    "NormalizedShortSelling",
     "PredVolumeUpperResponse",
     "PredVolumeUpperRow",
     "RankingExchangeType",
     "RankingMarketType",
     "RankingType",
-    "ShortSellingResponse",
-    "ShortSellingRow",
-    "ShortSellingTimeType",
     "TodayVolumeSortType",
     "TodayVolumeUpperResponse",
     "TodayVolumeUpperRow",
@@ -756,5 +1218,36 @@ __all__ = [
     "VolumeSdninRow",
     "VolumeSdninSortType",
     "VolumeSdninTimeType",
+    # Phase E — short selling + lending
+    "LendingMarketResponse",
+    "LendingMarketRow",
+    "LendingScope",
+    "LendingStockResponse",
+    "LendingStockRow",
+    "NormalizedLendingMarket",
+    "NormalizedShortSelling",
+    "ShortSellingResponse",
+    "ShortSellingRow",
+    "ShortSellingTimeType",
+    # Phase G — 투자자별 매매 흐름 (ka10058/10059/10131)
+    "AmountQuantityType",
+    "ContinuousAmtQtyType",
+    "ContinuousFrgnOrgnResponse",
+    "ContinuousFrgnOrgnRow",
+    "ContinuousPeriodType",
+    "InvestorDailyTradeResponse",
+    "InvestorDailyTradeRow",
+    "InvestorMarketType",
+    "InvestorTradeType",
+    "InvestorType",
+    "NormalizedFrgnOrgnConsecutive",
+    "NormalizedInvestorDailyTrade",
+    "NormalizedStockInvestorBreakdown",
+    "StockIndsType",
+    "StockInvestorBreakdownResponse",
+    "StockInvestorBreakdownRow",
+    "StockInvestorTradeType",
+    "UnitType",
     "_strip_double_sign_int",
+    "_to_decimal_div_100",
 ]

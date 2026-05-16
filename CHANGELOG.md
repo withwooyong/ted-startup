@@ -7,6 +7,85 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-16] feat(kiwoom): Phase G — 투자자별 매매 흐름 3 endpoint 통합 (ka10058/10059/10131 + Migration 019 + 3 테이블 + KiwoomForeignClient 신규 + 9 라우터 + 3 cron) (ted-run 풀 파이프라인, **메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk**)
+
+25 endpoint **23/25 (92%)** 도달. 사용자 D-1~D-17 권고 default 일괄 채택. R1 sonnet 5.8 RETRY + opus 적대적 4.5 D (CRITICAL 8 + HIGH 7, 적대적 시뮬레이션 7 PASS + 1 N/A) → fix 17건 (G-1 즉시 일괄 / G-2 misfire 21600 통일 / G-3 단건 모드 분리) → R2 sonnet 9.2 PASS + opus 8.4 B+ CONDITIONAL / inherit 5건 (inh-1 ka10059 트랜잭션 오염 / D-11 임계치 / N-1 NULL distinct / N-2 lookup miss 모니터 / H-5 `_unwrap_client_rows`). **1596 PASS** (+172) / cov **84%** (-1.0%p, 대량 신규 코드 dip) / mypy strict **114 files** (+11) / ruff clean. ADR § 49 신규 (9 sub-§). **본 chunk = backend_kiwoom 최대 chunk** (~4,600 production + 4,829 test 라인).
+
+### 변경 사항 (22 production (신규 16 + 갱신 6) + 14 test 신규 + 메타 4종 + ADR = ~40 파일)
+
+#### Migration / DB
+- `migrations/versions/019_investor_flow.py` 신규 — 3 테이블 통합 (`investor_flow_daily` + `stock_investor_breakdown` 12 net 컬럼 + `frgn_orgn_consecutive` 15 metric) + UNIQUE 3 + INDEX 8 (partial `WHERE stock_id IS NOT NULL`) + COMMENT ON + downgrade row-count 가드
+
+#### Core (22 production 파일 = 신규 16 + 갱신 6)
+
+**ORM Model 3 신규**:
+- `app/adapter/out/persistence/models/investor_flow_daily.py` (100줄, ka10058)
+- `app/adapter/out/persistence/models/stock_investor_breakdown.py` (102줄, ka10059 12 net)
+- `app/adapter/out/persistence/models/frgn_orgn_consecutive.py` (122줄, ka10131 15 metric)
+
+**Repository 3 신규** (`_chunked_upsert` 200 + 도메인 조회):
+- `app/adapter/out/persistence/repositories/investor_flow_daily.py` (151줄, `get_top_stocks`)
+- `app/adapter/out/persistence/repositories/stock_investor_breakdown.py` (168줄, `get_range` + `get_range_optional_stock` NULL 조회 H-2)
+- `app/adapter/out/persistence/repositories/frgn_orgn_consecutive.py` (173줄, `get_top_by_total_days` desc + nulls_last)
+
+**Adapter** (2 갱신 + 1 신규):
+- `app/adapter/out/kiwoom/stkinfo.py` (+167줄) — KiwoomStkInfoClient 에 `fetch_investor_daily_trade_stocks` (ka10058) + `fetch_stock_investor_breakdown` (ka10059) 2 메서드 추가
+- `app/adapter/out/kiwoom/frgnistt.py` 신규 (131줄) — `KiwoomForeignClient` (`/api/dostk/frgnistt` 첫 endpoint, `fetch_continuous` ka10131)
+- `app/adapter/out/kiwoom/_records.py` (+515줄) — 9 enum (InvestorType 12 + InvestorTradeType + InvestorMarketType + AmountQuantityType + StockInvestorTradeType + UnitType + ContinuousPeriodType 7 + ContinuousAmtQtyType (D-15 반대 의미) + StockIndsType) + 3 Row + 3 Response + 3 Normalized dataclass + `_to_decimal_div_100` 신규 helper (ka10059 `flu_rt "+698" → Decimal("6.98")`)
+
+**DTO 1 신규**:
+- `app/application/dto/investor_flow.py` (192줄) — 3 Outcome (InvestorIngestOutcome / StockInvestorBreakdownOutcome / FrgnOrgnConsecutiveOutcome) + 3 BulkResult (F-3 `errors_above_threshold: tuple[str, ...]` + `skipped_count` property)
+
+**Service 1 신규**:
+- `app/application/service/investor_flow_service.py` (699줄) — 6 UseCase (3 단건 + 3 Bulk) + `_empty_bulk_result` helper (F-3) + 단건 SentinelStockCodeError catch (F-3 D-7) + `_persist_common` 패턴 (F-4 sonnet H-2 통일). docstring 정정 (D-12 옵션 A — SAVEPOINT/flush 광고 제거, inh-1 별도 chunk 명시)
+
+**Router 1 신규**:
+- `app/adapter/web/routers/investor_flow.py` (581줄) — 9 endpoint (3 × sync 단건 stock_id lookup / bulk-sync 매트릭스 또는 active 종목 / GET top·range) + `_invoke_single` × 3 (G-3 패턴) + `require_admin_key` 모든 POST + ka10059 단건 stock_id lookup (C-7) + Pydantic v2 syntax (H-1)
+
+**Batch 1 신규**:
+- `app/batch/investor_flow_jobs.py` (167줄) — 3 cron callback (`fire_investor_daily_sync` 20:00 / `fire_stock_investor_breakdown_sync` 20:30 60min sync / `fire_frgn_orgn_continuous_sync` 21:00) + `_build_active_stock_targets` (active 종목 빌드, C-5) + `is_trading_day` KST timezone (H-7) + alias settings 읽기 (C-8b)
+
+**Scheduler 1 갱신**:
+- `app/scheduler.py` (+~140줄) — `_InvestorFlowScheduler` 베이스 + 3 subclass (`InvestorDailyScheduler` / `StockInvestorBreakdownScheduler` / `FrgnOrgnContinuousScheduler`). `MISFIRE_GRACE_SECONDS=21600` (G-2 통일). max_instances=1, coalesce=True
+
+**DI 1 갱신**:
+- `app/adapter/web/_deps.py` (+257줄) — 6 factory (3 단건 + 3 Bulk) + lazy `_missing_factory` 패턴 (F-4 H-2) + reset_token_manager 에 6 global 추가 (F-4 H-1)
+
+**App entry 1 갱신**:
+- `app/main.py` (+~315줄) — lifespan 6 setter + 3 scheduler instance + 6 reset + 20 state.schedulers + investor_flow_router include + alias_checks 3 Phase G fail-fast (C-1/C-2/C-3)
+
+**Settings 1 갱신**:
+- `app/config/settings.py` (+44줄) — 6 env (3 enabled + 3 alias): `scheduler_investor_daily_sync_{enabled,alias}` / `scheduler_stock_investor_breakdown_sync_{enabled,alias}` / `scheduler_frgn_orgn_continuous_sync_{enabled,alias}` (F-4 C-2 패턴 1:1 미러)
+
+#### Test (14 신규 / ~185 케이스 / +4,829 라인)
+- `tests/test_migration_019.py` (~10 케이스, testcontainers PG16)
+- `tests/test_records_investor.py` (~25 케이스, 9 enum + 3 Row to_normalized)
+- `tests/test_stkinfo_investor_client.py` (~15 케이스, ka10058+10059)
+- `tests/test_frgnistt_client.py` (~13 케이스, ka10131)
+- `tests/test_investor_flow_daily_repository.py` (~9 케이스)
+- `tests/test_stock_investor_breakdown_repository.py` (~8 케이스)
+- `tests/test_frgn_orgn_consecutive_repository.py` (~10 케이스)
+- `tests/test_investor_flow_dto.py` (~8 케이스)
+- `tests/test_ingest_investor_daily_use_case.py` (~10 케이스)
+- `tests/test_ingest_stock_investor_breakdown_use_case.py` (~8 케이스)
+- `tests/test_ingest_frgn_orgn_continuous_use_case.py` (~12 케이스)
+- `tests/test_investor_flow_router.py` (~12 케이스)
+- `tests/test_investor_flow_jobs.py` (~10 케이스)
+- `tests/integration/test_investor_flow_e2e.py` (~10 케이스, testcontainers e2e)
+
+#### 메타 갱신 4종
+- ADR-0001 § 49 신규 (9 sub-§)
+- STATUS.md § 0 / § 1 / § 2 (80% → 92%) / § 4 (#42/#43 신규) / § 5 (재정렬) / § 6 (Phase G 추가)
+- HANDOFF.md rewrite
+- plan doc § 11~15 누적 갱신 (`phase-g-investor-flow.md`)
+
+### 운영 적용 후 발화 시점
+- **5-17 (월) 19:30 KST** — F-4 5 ranking 첫 cron 자연 발화 (전 chunk 효과)
+- **5-18 (월) 20:00 / 20:30 / 21:00 KST** — Phase G 3 cron 자연 발화 (본 chunk 효과)
+- **5-18~5-22 (5거래일) dry-run** — ka10059 60분 sync 완주율 / inh-1 PG abort 발화 빈도 측정 → 5-25 (월) inh-1 (D-12) 별도 chunk 진입
+
+---
+
 ## [2026-05-16] feat(kiwoom): Phase F-4 — 5 ranking endpoint 통합 (ka10027/30/31/32/23 + Migration 018 + ranking_snapshot + JSONB payload + 15 라우터 + 5 cron) (ted-run 풀 파이프라인, Agent tool)
 
 25 endpoint **20/25 (80%)** 도달. 사용자 D-1~D-14 일괄 + G-1/G-2/G-3 추가 확정 (본 chunk 일괄 fix / misfire 21600 통일 / 단건 모드 분리). R1 sonnet 8.0 + opus 5.5 D (CRITICAL 3 + HIGH 5 + MED 6) → fix 10건 → R2 sonnet 9.2 PASS + opus 8.6 B+ CONDITIONAL / inherit 5건. **1424 PASS** (+140) / cov **85.00%** (-1.56%p, 대량 신규 코드 dip) / mypy strict **103 files** / ruff clean. ADR § 48 신규 (9 sub-§). 메모리 정책 update 2건 (추천 정책 진화 + chunk = plan doc + ted-run 명시 호출).

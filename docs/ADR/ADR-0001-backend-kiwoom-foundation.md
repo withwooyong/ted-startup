@@ -4037,3 +4037,138 @@ INFO  [alembic.runtime.migration] Running upgrade 016_short_lending -> 017_ka100
 **chunk 분할 견적 vs 실측**: plan doc § 5 견적 ~2,300-2,500줄 → 실측 Step 1 ~1,500줄 + Step 2 fix R1 +~570 = ~2,070 라인. `feedback_chunk_split_for_pipelines` 임계 1,500줄 _초과_ 했으나 사용자 G-1(a) 명시 확정 후 본 chunk 일괄 진행.
 
 **Commit**: `4fc78a5` (2026-05-16, 36 files / +9,312 / -217).
+
+---
+
+## 49. Phase G — 투자자별 매매 흐름 3 endpoint 통합 (ka10058/10059/10131 + Migration 019 + 3 테이블 + KiwoomForeignClient 신규 + 9 라우터 + 3 cron) (2026-05-16, ✅ 완료)
+
+### 49.1 결정 사항
+
+**사용자 D-1~D-17 권고 default 일괄 채택 (2026-05-16, Step 0 진입 시)**:
+- D-1 통합 1 chunk (옵션 A) — 견적 ~2,500줄 임계 (F-4 패턴 미러)
+- D-2 Migration 019 단일 + 3 테이블 (`investor_flow_daily` / `stock_investor_breakdown` / `frgn_orgn_consecutive`)
+- D-3 ka10058 default `invsr_tp = {INDIVIDUAL(8000), FOREIGN(9000), INSTITUTION_TOTAL(9999)}` 3종
+- D-4 ka10058 default `trde_tp = {NET_BUY(2), NET_SELL(1)}` 2종 모두
+- D-5 3 endpoint default `mrkt_tp = {001, 101}` (KOSPI+KOSDAQ) — ka10058/131 은 `000` 미지원
+- D-6 3 endpoint default `stex_tp = 3` (UNIFIED, `RankingExchangeType` F-4 재사용)
+- D-7 ka10059 default scope = active 종목 ~3,000 (단, 토큰 만료/트랜잭션 오염/cron 충돌 위험 명시)
+- D-8 ka10059 default 조합 = 1조합 (QUANTITY / NET_BUY / THOUSAND_SHARES)
+- D-9 ka10131 default `period_type = LATEST` 만
+- D-10 ka10131 default `amt_qty_tp = {AMOUNT(0), QUANTITY(1)}` 2종 모두 — ★ ka10059 `(1=금액/2=수량)` 와 반대 의미
+- D-11 cron 20:00 / 20:30 / 21:00 KST mon-fri (F-4 19:50 + 10분 gap chain), misfire 21600 (G-2 통일)
+- D-12 inh-1 Bulk 트랜잭션 오염 — **본 chunk dry-run 후 별도 chunk** (BATCH=50 commit 으로 부분 mitigate, 옵션 A)
+- D-13 ka10059 60분 sync 토큰 만료 — 기존 TokenManager 자동 refresh 신뢰
+- D-14 ka10131 `stk_inds_tp=1` (업종) — 본 chunk skip (STOCK 만)
+- D-15 `amt_qty_tp` 반대 의미 — **별도 enum 분리** (`AmountQuantityType` vs `ContinuousAmtQtyType`, 컴파일 타임 가드)
+- D-16 ka10059 응답 단일 row 가정 + max_pages=5 페이지네이션 가드 (방어)
+- D-17 `InvestorMarketType` (001/101 만) **신규 enum** 분리 (vs F-4 `RankingMarketType` 000/001/101 재사용 X)
+
+**Migration 번호 정정**: 본 chunk = head 018 → 신규 **019_investor_flow** (3 테이블 통합).
+
+### 49.2 Step 2 R1 finding (이중 리뷰)
+
+**sonnet python-reviewer R1 (5.8/10, RETRY)**: CRITICAL 3 (main.py lifespan / scheduler.py 3 class / alias_checks 모두 미연결) + HIGH 3 (fire_stock_investor_breakdown_sync stock_codes=[] / router stock_id=0 / service docstring 허위 광고) + MED 5 + LOW 4.
+
+**opus 적대적 R1 (4.5/10, 운영 D)**:
+- **CRITICAL 8 (운영 차단)**: C-1 lifespan 미연결 / C-2 router include 미연결 / C-3 alias_checks 미연결 / C-4 scheduler.py 3 class 미정의 / C-5 ka10059 cron stock_codes=[] 하드코딩 / C-6 ka10059 bulk-sync 라우터 동일 / C-7 ka10059 단건 stock_id=0 / C-8 service docstring 허위 광고 (SAVEPOINT/flush 광고만, 실제 미구현) / C-8b alias 하드코딩 `"prod-main"`
+- HIGH 7: H-1~H-7 (Pydantic v2 syntax / get_range stock_id=ge(1) 강제 / UseCase 시그니처 int 강제 / state.schedulers 미추가 / `_unwrap_client_rows` 휴리스틱 / 단건 docstring "Bulk 만 권장" / `is_trading_day` KST timezone)
+- 적대적 시뮬레이션 8 케이스: 보안 7 PASS / DoS 1 N/A (60분 sync 호출 자체 부재로 시뮬레이션 불능 — 역설적 safety)
+
+**양쪽 독립 리뷰 동일 결론**: Step 1 sub-agent 가 시인한 _운영 통합 4축 (lifespan + scheduler + batch payload + router payload) 동시 미완성_. F-4 R1 (5.5/D) 와 유사 패턴 — verification pytest 1596 PASS 통과하지만 mock-on-mock 으로 운영 결함 catch 못 함.
+
+### 49.3 Step 2 fix R1 결과 (17 fix 일괄)
+
+| ID | 변경 위치 | 라인 |
+|----|----------|------|
+| C-1 lifespan 통합 | `main.py:1050-1234,1245-1250,1409-1432,1473-1475,1486-1488,1503-1508` (6 factory 빌드 + 6 setter + 3 scheduler instance + 3 state 등록 + 3 shutdown + 6 reset) | +~280 |
+| C-2 router include | `main.py:1623` | +~3 |
+| C-3 alias_checks 3 Phase G | `main.py:282-296` | +~15 |
+| C-4 3 Scheduler class 신규 | `scheduler.py:1428-1567` (`_InvestorFlowScheduler` 베이스 + 3 subclass) | +~140 |
+| C-5 fire_stock_investor_breakdown active 종목 | `investor_flow_jobs.py:97-114,130-148` (`_build_active_stock_targets`) | +~30 |
+| C-6 ka10059 bulk-sync router stock_codes | `routers/investor_flow.py:140-156,397-434` (body 옵션 + active 종목 fallback) | +~40 |
+| C-7 ka10059 단건 stock_id lookup | `routers/investor_flow.py:362-380` + `service:367` `int \| None` | +~20 |
+| C-8 SAVEPOINT/flush docstring 정정 (옵션 A) | `service.py:1-20,56-58,257-260,491-494` (D-12 별도 chunk 명시) | ±~30 |
+| C-8b alias 하드코딩 제거 | `investor_flow_jobs.py:75-77,132-134,175-177` (settings 에서 읽기) | ±~10 |
+| H-1~H-2 + H-6~H-7 | Pydantic v2 syntax / get_range_optional_stock 신규 / docstring 정정 / KST timezone | +~50 |
+| M-1 + L-1/L-2 | extra="forbid" / 테스트 assertion 강화 | +~20 |
+
+**소계**: 17 fix (CRITICAL 8 + HIGH 6 inherit H-5 / MED 3 / LOW 2) / 8 파일 +~700 / -~100. 사용자 G-1 패턴 미러 (즉시 일괄 fix).
+
+### 49.4 R2 inherit 5건 (§ 47.8 / § 48.8 패턴 미러)
+
+| ID | 항목 | 후속 chunk |
+|----|------|-----------|
+| **inh-1** | **ka10059 Bulk 트랜잭션 오염 (3000 호출 1 세션 — Phase E/F-4 상속, D-12 옵션 A 채택)** | **5-18~5-22 dry-run 후 5-25 (월) 별도 chunk** — SAVEPOINT (begin_nested) vs 단건당 별도 세션 결정 |
+| **inh-2** | `errors_above_threshold` D-11 임계치 미도입 (3 BulkResult 항상 `()`) | Phase H 통합 chunk — F-3/F-4 와 함께 단일 정책 결정 |
+| **inh-3** | `stock_investor_breakdown` UNIQUE NULL distinct 위험 (N-1 — 단건 router 시 동일 NULL stk_id 반복 호출 duplicate) | Migration 020 후속 — D-12 chunk 통합 가능 |
+| **inh-4** | lookup miss 종목 list 운영 모니터 미노출 (N-2 — `total_failed` 만 카운트, 누락 종목 list 미노출) | Phase H 데이터 품질 모니터 chunk |
+| **inh-5** | `_unwrap_client_rows` 휴리스틱 → Protocol 분기 (H-5 본 chunk 신규 결함 아님, F-3/F-4 동일) | Phase F-5 router polish 또는 별도 type-safety chunk |
+
+### 49.5 Verification 측정값 / 운영 등급 변화
+
+| 항목 | F-4 baseline | **Phase G** | 변화 |
+|------|--------------|---------|------|
+| pytest count | 1424 | **1596** | +172 (185 TDD red → green / Step 2 fix 회귀 차단) |
+| coverage | 85.00% | **84%** | -1.0%p (대량 신규 코드 dip, main.py 신규 45% 영향) |
+| mypy strict files | 103 | **114** | +11 (Phase G 신규/갱신) |
+| ruff | clean | **clean** | — |
+| 25 endpoint 진행률 | 20/25 (80%) | **23/25 (92%)** | +3 |
+| 누적 chunk | 58+ | **59+** | +1 |
+| **운영 등급 (opus 적대적)** | F-4 R2 8.6 B+ | **R2 8.4 B+** (R1 4.5 D → R2 8.4 B+) | F-4 동등 향상 (CRITICAL/HIGH 0 잔존, inh-1 dry-run 후속) |
+
+### 49.6 운영 효과 / Router 변경
+
+**lifespan 통합**: `main.py` 6 setter (3 단건 + 3 Bulk factory) + 3 InvestorFlowScheduler 인스턴스 + 20 state.schedulers (F-4 17 → +3). 운영 적용 시 다음 영업일 (5-18 월) 20:00 KST 첫 cron 발화 → 20:30 ka10059 60분 sync → 21:00 ka10131.
+
+**Router DTO** (9 endpoint × admin key):
+- `/api/kiwoom/investor/daily/{sync,bulk-sync,top}` (ka10058)
+- `/api/kiwoom/investor/stock/{sync,bulk-sync,range}` (ka10059, `range` 는 stock_id NULL 조회 지원 — H-2)
+- `/api/kiwoom/foreign/continuous/{sync,bulk-sync,top}` (ka10131)
+- **SemVer minor** (dev pre-release, 외부 호출자 없음)
+
+**Cron**: 3 신규 (20:00/20:30/21:00 KST mon-fri / misfire 21600 통일). F-4 19:50 + 10분 gap. ka10014 07:30 / ka10068 07:45 / ka20068 08:00 무충돌.
+
+**Migration 019**: 3 테이블 (`investor_flow_daily` + `stock_investor_breakdown` + `frgn_orgn_consecutive`) + UNIQUE 3 + INDEX 8 (partial `WHERE stock_id IS NOT NULL` 적용 — lookup miss row 인덱스 진입 차단). downgrade row count 가드 (§ 47/48 패턴 미러).
+
+### 49.7 다음 chunk
+
+| 후보 | 시점 | 비고 |
+|------|------|------|
+| **5-18~5-22 (5거래일) dry-run** | 5-18 (월) 20:00 자동 발화 | 운영 검증 (응답 schema / lookup miss / inh-1 발화 빈도 / netslmt_qty 부호 / flu_rt 표기 / amt_qty_tp 반대 의미 / tot_cont_days 합산 / _NX Length=6) |
+| **inh-1 (D-12) 별도 chunk** | 5-25 (월) | dry-run 결과 후 SAVEPOINT vs 단건당 별도 세션 결정 |
+| **D-2 ka10080 분봉 (마지막 endpoint)** | inh-1 chunk 직후 | 대용량 파티션 전략 동반 — 25 endpoint 100% 도달 |
+| **Phase H — 통합** (백테 view + 데이터 품질 + README/SPEC, _Grafana 분리_) | 25 endpoint 100% 도달 후 | plan doc `phase-h-integration.md` 작성됨 |
+| (선택) **Phase H' — Grafana 대시보드** | 사용자 마지막 chunk | view + alert 위에 시각화 |
+
+### 49.8 R2 inherit 5건 상세
+
+| # | 출처 | 항목 | 영향 |
+|---|------|------|------|
+| 1 | opus R2 inh-1 | ka10059 Bulk 트랜잭션 오염 (Phase E/F-4 상속, D-12 옵션 A) | _3000 호출 / 1 세션_ — 1 호출 PG abort 시 후속 호출 오염 가능. service.py:479-490 try/except 는 kiwoom 예외만 격리, PG abort 격리 불가 |
+| 2 | opus R2 inh-2 | `errors_above_threshold` 항상 `()` (D-11 임계치 미도입) | 운영 알람 무력 — Phase H 통합 정책 결정 시 도입 |
+| 3 | opus R2 N-1 (LOW) | `stock_investor_breakdown` UNIQUE NULL distinct | 단건 router 시 동일 (NULL, date, ...) 반복 호출 duplicate row 무제한. 운영 시나리오상 발생 어려움 (운영자 의도된 lookup miss 반복) — D-12 chunk 통합 가능 |
+| 4 | opus R2 N-2 (LOW) | lookup miss 종목 list 운영 모니터 미노출 | `total_failed` 카운트만 — 누락 종목 list 추적 불가. Phase H 데이터 품질 chunk |
+| 5 | opus R2 H-5 inherit | `_unwrap_client_rows` 휴리스틱 (`isinstance(result, tuple) and len(result) == 2`) | 향후 client 시그니처 변경 시 silent fail. F-3/F-4 와 동일 패턴 — 본 chunk 신규 결함 아님. Phase F-5 또는 type-safety chunk |
+
+### 49.9 ted-run 풀 파이프라인 메트릭 + 메모리 정책 정착 첫 chunk
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0a 자산 점검 + Migration 019 골격 | 메인 | head 018 확인 / F-3/F-4 helper 시그니처 / Migration 018 패턴 |
+| 0b TDD red 작성 | **sonnet sub-agent** | 14 테스트 파일 / 4,829 라인 / ~185 케이스 / 13 collection error (의도된 red) |
+| 0c pytest collection red 확인 | 메인 | 10 collected + 13 ImportError |
+| 1 구현 | **opus sub-agent** | 22 파일 (신규 16 + 갱신 6) / +~3,900 라인 / pytest 1596 PASS / mypy strict 114 / coverage 85% |
+| 2a R1 | sonnet sub-agent | 5.8/10 RETRY / CRITICAL 3 + HIGH 3 + MED 5 + LOW 4 |
+| 2b R1 | opus sub-agent | 4.5/10 D / CRITICAL 8 + HIGH 7 / 적대적 시뮬레이션 7 PASS + 1 N/A |
+| 2 fix R1 | opus sub-agent | 17 fix (G-1 즉시 일괄) / 8 파일 +~700/-100 / pytest 1596 PASS 유지 |
+| 2a R2 | sonnet sub-agent | 9.2/10 PASS / 17/17 fix 정확성 / 신규 결함 0 |
+| 2b R2 | opus sub-agent | 8.4/10 B+ CONDITIONAL / CRITICAL 0 + HIGH 0 / 적대적 시뮬레이션 4.5/5 / inherit 5 |
+| 3 Verification | 메인 | 5관문 PASS (ruff / mypy 114 / pytest 1596 / cov 84% / scheduler smoke 20 schedulers / lifespan import) |
+| 4 E2E | — | ⚪ UI 변경 0 |
+| 5 Ship | 메인 | ADR § 49 + plan doc § 11~15 + 메타 4종 + 한글 커밋 |
+
+**메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk** (2026-05-16):
+- plan doc 신규 작성 (`phase-g-investor-flow.md` 485줄) → 결정 게이트 17건 사용자 확정 (AskUserQuestion Recommended 포함 — `feedback_recommendation_over_question` 진화) → `/ted-run` skill **명시 호출** (Agent tool ad-hoc spawn 자제) → Step 0~5 자동화 → 메타 4종 동시 commit.
+- **F-4 와 차이**: F-4 는 Agent tool 로 진행 (메모리 정책 미정착), 본 chunk 부터 ted-run skill 명시 호출 정착.
+
+**chunk 분할 견적 vs 실측**: plan doc § 5 견적 ~2,400-2,700줄 → 실측 Step 1 ~3,900줄 (production) + Step 2 fix R1 +~700 = **~4,600 라인** (production), F-4 (~2,070) 대비 +120%. `feedback_chunk_split_for_pipelines` 임계 1,500줄 _크게 초과_ 했으나 사용자 D-1(a) 명시 확정 후 일괄 진행. test 4,829 라인 별도. **본 chunk = backend_kiwoom 최대 chunk**.

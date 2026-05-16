@@ -406,6 +406,10 @@ async def test_lifespan_startup_and_shutdown_cycle_with_scheduler_enabled(
     monkeypatch.setenv("SCHEDULER_PRED_VOLUME_RANKING_SYNC_ALIAS", "smoke-test-alias")
     monkeypatch.setenv("SCHEDULER_TRADE_AMOUNT_RANKING_SYNC_ALIAS", "smoke-test-alias")
     monkeypatch.setenv("SCHEDULER_VOLUME_SDNIN_RANKING_SYNC_ALIAS", "smoke-test-alias")
+    # Phase G Step 2 fix R1 C-3 — 3 investor flow endpoint alias (default _enabled=True 라 필수)
+    monkeypatch.setenv("SCHEDULER_INVESTOR_DAILY_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_STOCK_INVESTOR_BREAKDOWN_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_FRGN_ORGN_CONTINUOUS_SYNC_ALIAS", "smoke-test-alias")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings

@@ -30,17 +30,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapter.out.kiwoom._client import KiwoomClient
 from app.adapter.out.kiwoom.auth import KiwoomAuthClient
 from app.adapter.out.kiwoom.chart import KiwoomChartClient
+from app.adapter.out.kiwoom.frgnistt import KiwoomForeignClient
 from app.adapter.out.kiwoom.mrkcond import KiwoomMarketCondClient
 from app.adapter.out.kiwoom.rkinfo import KiwoomRkInfoClient
 from app.adapter.out.kiwoom.shsa import KiwoomShortSellingClient
 from app.adapter.out.kiwoom.slb import KiwoomLendingClient
 from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
+from app.adapter.out.persistence.repositories.frgn_orgn_consecutive import (
+    FrgnOrgnConsecutiveRepository,
+)
+from app.adapter.out.persistence.repositories.investor_flow_daily import (
+    InvestorFlowDailyRepository,
+)
+from app.adapter.out.persistence.repositories.stock import StockRepository
+from app.adapter.out.persistence.repositories.stock_investor_breakdown import (
+    StockInvestorBreakdownRepository,
+)
 from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
     require_admin_key,
     reset_ingest_daily_flow_factory,
     reset_ingest_flu_rt_bulk_factory,
     reset_ingest_flu_rt_factory,
+    reset_ingest_frgn_orgn_bulk_factory,
+    reset_ingest_frgn_orgn_factory,
+    reset_ingest_investor_daily_bulk_factory,
+    reset_ingest_investor_daily_factory,
     reset_ingest_lending_market_factory,
     reset_ingest_lending_stock_bulk_factory,
     reset_ingest_lending_stock_single_factory,
@@ -52,6 +67,8 @@ from app.adapter.web._deps import (
     reset_ingest_sector_single_factory,
     reset_ingest_short_selling_bulk_factory,
     reset_ingest_short_selling_single_factory,
+    reset_ingest_stock_investor_breakdown_bulk_factory,
+    reset_ingest_stock_investor_breakdown_factory,
     reset_ingest_today_volume_bulk_factory,
     reset_ingest_today_volume_factory,
     reset_ingest_trade_amount_bulk_factory,
@@ -65,6 +82,10 @@ from app.adapter.web._deps import (
     set_ingest_daily_flow_factory,
     set_ingest_flu_rt_bulk_factory,
     set_ingest_flu_rt_factory,
+    set_ingest_frgn_orgn_bulk_factory,
+    set_ingest_frgn_orgn_factory,
+    set_ingest_investor_daily_bulk_factory,
+    set_ingest_investor_daily_factory,
     set_ingest_lending_market_factory,
     set_ingest_lending_stock_bulk_factory,
     set_ingest_lending_stock_single_factory,
@@ -76,6 +97,8 @@ from app.adapter.web._deps import (
     set_ingest_sector_single_factory,
     set_ingest_short_selling_bulk_factory,
     set_ingest_short_selling_single_factory,
+    set_ingest_stock_investor_breakdown_bulk_factory,
+    set_ingest_stock_investor_breakdown_factory,
     set_ingest_today_volume_bulk_factory,
     set_ingest_today_volume_factory,
     set_ingest_trade_amount_bulk_factory,
@@ -92,6 +115,7 @@ from app.adapter.web._deps import (
 from app.adapter.web.routers.auth import router as auth_router
 from app.adapter.web.routers.daily_flow import router as daily_flow_router
 from app.adapter.web.routers.fundamentals import router as fundamentals_router
+from app.adapter.web.routers.investor_flow import router as investor_flow_router
 from app.adapter.web.routers.lending import router as lending_router
 from app.adapter.web.routers.ohlcv import router as ohlcv_router
 from app.adapter.web.routers.ohlcv_periodic import router as ohlcv_periodic_router
@@ -102,6 +126,14 @@ from app.adapter.web.routers.short_selling import router as short_selling_router
 from app.adapter.web.routers.stocks import router as stocks_router
 from app.application.constants import DailyMarketDisplayMode
 from app.application.service.daily_flow_service import IngestDailyFlowUseCase
+from app.application.service.investor_flow_service import (
+    IngestFrgnOrgnConsecutiveBulkUseCase,
+    IngestFrgnOrgnConsecutiveUseCase,
+    IngestInvestorDailyTradeBulkUseCase,
+    IngestInvestorDailyTradeUseCase,
+    IngestStockInvestorBreakdownBulkUseCase,
+    IngestStockInvestorBreakdownUseCase,
+)
 from app.application.service.lending_service import (
     IngestLendingMarketUseCase,
     IngestLendingStockBulkUseCase,
@@ -145,6 +177,8 @@ from app.observability.logging import setup_logging
 from app.scheduler import (
     DailyFlowScheduler,
     FluRtRankingScheduler,
+    FrgnOrgnContinuousScheduler,
+    InvestorDailyScheduler,
     LendingMarketScheduler,
     LendingStockScheduler,
     MonthlyOhlcvScheduler,
@@ -154,6 +188,7 @@ from app.scheduler import (
     SectorSyncScheduler,
     ShortSellingScheduler,
     StockFundamentalScheduler,
+    StockInvestorBreakdownScheduler,
     StockMasterScheduler,
     TodayVolumeRankingScheduler,
     TrdePricaRankingScheduler,
@@ -257,6 +292,22 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 "scheduler_volume_sdnin_ranking_sync_alias",
                 settings.scheduler_volume_sdnin_ranking_sync_alias,
                 settings.scheduler_volume_sdnin_ranking_sync_enabled,
+            ),
+            # Phase G Step 2 fix R1 C-3 — 3 investor flow endpoint alias (개별 _enabled flag 게이팅)
+            (
+                "scheduler_investor_daily_sync_alias",
+                settings.scheduler_investor_daily_sync_alias,
+                settings.scheduler_investor_daily_sync_enabled,
+            ),
+            (
+                "scheduler_stock_investor_breakdown_sync_alias",
+                settings.scheduler_stock_investor_breakdown_sync_alias,
+                settings.scheduler_stock_investor_breakdown_sync_enabled,
+            ),
+            (
+                "scheduler_frgn_orgn_continuous_sync_alias",
+                settings.scheduler_frgn_orgn_continuous_sync_alias,
+                settings.scheduler_frgn_orgn_continuous_sync_enabled,
             ),
         ]
         missing_aliases = [name for name, value, job_enabled in alias_checks if job_enabled and not value]
@@ -1032,6 +1083,209 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     set_ingest_volume_sdnin_factory(_ingest_volume_sdnin_single_factory)
     set_ingest_volume_sdnin_bulk_factory(_ingest_volume_sdnin_bulk_factory)
 
+    # =========================================================================
+    # Phase G — 3 investor flow endpoint factory (ka10058/10059/10131)
+    # F-4 패턴 1:1 미러 — 단건 + Bulk 각 3 = 6 factory.
+    # ka10058 / ka10059 → KiwoomStkInfoClient, ka10131 → KiwoomForeignClient.
+    # 단건 UseCase 는 stock_repository (lookup) + session 필요 — sessionmaker 안에서 빌드.
+    # =========================================================================
+
+    # ---- ka10058 investor_daily — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_investor_daily_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestInvestorDailyTradeUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                investor_repo = InvestorFlowDailyRepository(session)
+                stock_repo = StockRepository(session)
+                yield IngestInvestorDailyTradeUseCase(
+                    client=stkinfo,
+                    repository=investor_repo,
+                    stock_repository=stock_repo,
+                    session=session,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_investor_daily_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestInvestorDailyTradeBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                investor_repo = InvestorFlowDailyRepository(session)
+                stock_repo = StockRepository(session)
+                single = IngestInvestorDailyTradeUseCase(
+                    client=stkinfo,
+                    repository=investor_repo,
+                    stock_repository=stock_repo,
+                    session=session,
+                )
+                yield IngestInvestorDailyTradeBulkUseCase(single_use_case=single)
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # ---- ka10059 stock_investor_breakdown — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_stock_investor_breakdown_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestStockInvestorBreakdownUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                breakdown_repo = StockInvestorBreakdownRepository(session)
+                yield IngestStockInvestorBreakdownUseCase(
+                    client=stkinfo,
+                    repository=breakdown_repo,
+                    session=session,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_stock_investor_breakdown_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestStockInvestorBreakdownBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            stkinfo = KiwoomStkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                breakdown_repo = StockInvestorBreakdownRepository(session)
+                single = IngestStockInvestorBreakdownUseCase(
+                    client=stkinfo,
+                    repository=breakdown_repo,
+                    session=session,
+                )
+                yield IngestStockInvestorBreakdownBulkUseCase(single_use_case=single)
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # ---- ka10131 frgn_orgn — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_frgn_orgn_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestFrgnOrgnConsecutiveUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            foreign = KiwoomForeignClient(kiwoom_client)
+            async with sessionmaker() as session:
+                frgn_repo = FrgnOrgnConsecutiveRepository(session)
+                stock_repo = StockRepository(session)
+                yield IngestFrgnOrgnConsecutiveUseCase(
+                    client=foreign,
+                    repository=frgn_repo,
+                    stock_repository=stock_repo,
+                    session=session,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_frgn_orgn_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestFrgnOrgnConsecutiveBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            foreign = KiwoomForeignClient(kiwoom_client)
+            async with sessionmaker() as session:
+                frgn_repo = FrgnOrgnConsecutiveRepository(session)
+                stock_repo = StockRepository(session)
+                single = IngestFrgnOrgnConsecutiveUseCase(
+                    client=foreign,
+                    repository=frgn_repo,
+                    stock_repository=stock_repo,
+                    session=session,
+                )
+                yield IngestFrgnOrgnConsecutiveBulkUseCase(single_use_case=single)
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # 6 setter — 3 단건 + 3 Bulk (Phase G R1 C-1)
+    set_ingest_investor_daily_factory(_ingest_investor_daily_single_factory)
+    set_ingest_investor_daily_bulk_factory(_ingest_investor_daily_bulk_factory)
+    set_ingest_stock_investor_breakdown_factory(_ingest_stock_investor_breakdown_single_factory)
+    set_ingest_stock_investor_breakdown_bulk_factory(_ingest_stock_investor_breakdown_bulk_factory)
+    set_ingest_frgn_orgn_factory(_ingest_frgn_orgn_single_factory)
+    set_ingest_frgn_orgn_bulk_factory(_ingest_frgn_orgn_bulk_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
     # alias fail-fast 검증은 lifespan 진입 직후로 이동 (B-γ-2 2R H-1) — set_*_factory 후
     # raise 시 cleanup 우회 차단.
@@ -1164,8 +1418,34 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     volume_sdnin_ranking_scheduler.start()
 
-    # 인시던트 진단용 — /admin/scheduler/diag 가 17 scheduler 의 _eventloop / next_run_time /
-    # _timeout 상태를 노출. (12 Phase A~E + 5 Phase F-4 ranking)
+    # Phase G — 3 investor flow scheduler — mon-fri KST 20:00/20:30/21:00 (D-11 cron chain).
+    # 각 scheduler 의 개별 enabled env 가 False 면 settings.scheduler_enabled 와 AND 결합.
+    investor_daily_scheduler = InvestorDailyScheduler(
+        factory=_ingest_investor_daily_bulk_factory,
+        alias=settings.scheduler_investor_daily_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_investor_daily_sync_enabled,
+    )
+    investor_daily_scheduler.start()
+
+    stock_investor_breakdown_scheduler = StockInvestorBreakdownScheduler(
+        factory=_ingest_stock_investor_breakdown_bulk_factory,
+        alias=settings.scheduler_stock_investor_breakdown_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_stock_investor_breakdown_sync_enabled,
+    )
+    stock_investor_breakdown_scheduler.start()
+
+    frgn_orgn_continuous_scheduler = FrgnOrgnContinuousScheduler(
+        factory=_ingest_frgn_orgn_bulk_factory,
+        alias=settings.scheduler_frgn_orgn_continuous_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_frgn_orgn_continuous_sync_enabled,
+    )
+    frgn_orgn_continuous_scheduler.start()
+
+    # 인시던트 진단용 — /admin/scheduler/diag 가 20 scheduler 의 _eventloop / next_run_time /
+    # _timeout 상태를 노출. (12 Phase A~E + 5 Phase F-4 ranking + 3 Phase G investor flow)
     _app.state.schedulers = {
         "sector_sync": scheduler,
         "stock_master": stock_scheduler,
@@ -1184,14 +1464,21 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         "pred_volume_ranking": pred_volume_ranking_scheduler,
         "trde_prica_ranking": trde_prica_ranking_scheduler,
         "volume_sdnin_ranking": volume_sdnin_ranking_scheduler,
+        "investor_daily": investor_daily_scheduler,
+        "stock_investor_breakdown": stock_investor_breakdown_scheduler,
+        "frgn_orgn_continuous": frgn_orgn_continuous_scheduler,
     }
 
     try:
         yield
     finally:
-        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4 / D-1 / Phase E / F-4: scheduler 먼저 정지 — 실행 중 cron
-        # job 의 KiwoomClient 호출이 graceful token revoke 와 충돌하지 않도록 보장.
-        # Phase F-4 ranking schedulers 먼저 (가장 늦은 cron 19:50 부터 역순).
+        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4 / D-1 / Phase E / F-4 / G:
+        # scheduler 먼저 정지 — 실행 중 cron job 의 KiwoomClient 호출이 graceful token
+        # revoke 와 충돌하지 않도록 보장. 가장 늦은 cron 부터 역순:
+        # Phase G (21:00 / 20:30 / 20:00) → Phase F-4 (19:50..19:30) → Phase E → ...
+        frgn_orgn_continuous_scheduler.shutdown(wait=True)
+        stock_investor_breakdown_scheduler.shutdown(wait=True)
+        investor_daily_scheduler.shutdown(wait=True)
         volume_sdnin_ranking_scheduler.shutdown(wait=True)
         trde_prica_ranking_scheduler.shutdown(wait=True)
         pred_volume_ranking_scheduler.shutdown(wait=True)
@@ -1210,8 +1497,15 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
 
-        # 1R 2b M4 / D-1 / Phase E / F-4: factory 싱글톤 unset — close 후 stale factory 가 라우터에
-        # 노출되지 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 (factory 미초기화) 반환.
+        # 1R 2b M4 / D-1 / Phase E / F-4 / G: factory 싱글톤 unset — close 후 stale factory 가
+        # 라우터에 노출되지 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 반환.
+        # Phase G — 3 단건 + 3 Bulk = 6 factory reset (R1 C-1)
+        reset_ingest_frgn_orgn_bulk_factory()
+        reset_ingest_frgn_orgn_factory()
+        reset_ingest_stock_investor_breakdown_bulk_factory()
+        reset_ingest_stock_investor_breakdown_factory()
+        reset_ingest_investor_daily_bulk_factory()
+        reset_ingest_investor_daily_factory()
         # Phase F-4 — 5 단건 + 5 Bulk = 10 factory reset
         reset_ingest_volume_sdnin_factory()
         reset_ingest_volume_sdnin_bulk_factory()
@@ -1289,6 +1583,7 @@ def create_app() -> FastAPI:
     app.include_router(short_selling_router)
     app.include_router(lending_router)
     app.include_router(rankings_router)
+    app.include_router(investor_flow_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -1299,7 +1594,7 @@ def create_app() -> FastAPI:
         dependencies=[Depends(require_admin_key)],
     )
     async def scheduler_diag(request: Request) -> dict[str, object]:
-        """12 scheduler 인스턴스의 _eventloop / _timeout / next_run_time 상태 dump.
+        """20 scheduler 인스턴스의 _eventloop / _timeout / next_run_time 상태 dump.
 
         9 scheduler dead (2026-05-13 06:00 KST 첫 cron 발화 누락) 원인 추적용. 메인
         loop id 와 각 인스턴스의 _eventloop id 비교 → 동일 루프 잡았는지 검증.

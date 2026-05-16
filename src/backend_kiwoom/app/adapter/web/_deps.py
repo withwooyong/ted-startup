@@ -23,6 +23,14 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from fastapi import Depends, Header, HTTPException, status
 
 from app.application.service.daily_flow_service import IngestDailyFlowUseCase
+from app.application.service.investor_flow_service import (
+    IngestFrgnOrgnConsecutiveBulkUseCase,
+    IngestFrgnOrgnConsecutiveUseCase,
+    IngestInvestorDailyTradeBulkUseCase,
+    IngestInvestorDailyTradeUseCase,
+    IngestStockInvestorBreakdownBulkUseCase,
+    IngestStockInvestorBreakdownUseCase,
+)
 from app.application.service.lending_service import (
     IngestLendingMarketUseCase,
     IngestLendingStockBulkUseCase,
@@ -225,6 +233,40 @@ IngestVolumeSdninUseCaseFactory = Callable[
 ]
 """ka10023 거래량 급증 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
 
+# =============================================================================
+# Phase G — 3 investor flow endpoint factory (ka10058/10059/10131)
+# =============================================================================
+
+IngestInvestorDailyBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestInvestorDailyTradeBulkUseCase]
+]
+"""ka10058 투자자별 일별 매매 종목 Bulk factory (Phase G)."""
+
+IngestInvestorDailyUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestInvestorDailyTradeUseCase]
+]
+"""ka10058 단건 factory (Phase G G-3 단건 모드)."""
+
+IngestStockInvestorBreakdownBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestStockInvestorBreakdownBulkUseCase]
+]
+"""ka10059 종목별 wide breakdown Bulk factory (Phase G)."""
+
+IngestStockInvestorBreakdownUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestStockInvestorBreakdownUseCase]
+]
+"""ka10059 단건 factory (Phase G G-3 단건 모드)."""
+
+IngestFrgnOrgnBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestFrgnOrgnConsecutiveBulkUseCase]
+]
+"""ka10131 외국인/기관 연속매매 Bulk factory (Phase G)."""
+
+IngestFrgnOrgnUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestFrgnOrgnConsecutiveUseCase]
+]
+"""ka10131 단건 factory (Phase G G-3 단건 모드)."""
+
 
 def get_settings_dep() -> Settings:
     return get_settings()
@@ -283,6 +325,13 @@ _ingest_today_volume_factory: IngestTodayVolumeUseCaseFactory | None = None
 _ingest_pred_volume_factory: IngestPredVolumeUseCaseFactory | None = None
 _ingest_trade_amount_factory: IngestTradeAmountUseCaseFactory | None = None
 _ingest_volume_sdnin_factory: IngestVolumeSdninUseCaseFactory | None = None
+# Phase G — 3 investor flow endpoint (단건 3 + Bulk 3 = 6 factory singletons)
+_ingest_investor_daily_factory: IngestInvestorDailyUseCaseFactory | None = None
+_ingest_investor_daily_bulk_factory: IngestInvestorDailyBulkUseCaseFactory | None = None
+_ingest_stock_investor_breakdown_factory: IngestStockInvestorBreakdownUseCaseFactory | None = None
+_ingest_stock_investor_breakdown_bulk_factory: IngestStockInvestorBreakdownBulkUseCaseFactory | None = None
+_ingest_frgn_orgn_factory: IngestFrgnOrgnUseCaseFactory | None = None
+_ingest_frgn_orgn_bulk_factory: IngestFrgnOrgnBulkUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -845,6 +894,175 @@ def reset_ingest_volume_sdnin_factory() -> None:
     _ingest_volume_sdnin_factory = None
 
 
+# ----------------------------------------------------------------------------
+# Phase G — 6 investor flow factory getters / setters / resets
+# router /sync endpoint 단건 + Bulk 분리 (G-3 패턴 미러).
+# lazy missing factory 패턴 통일 (F-4 H-2) — body validation 이 dependency 보다 먼저.
+# ----------------------------------------------------------------------------
+
+
+def get_ingest_investor_daily_factory() -> IngestInvestorDailyUseCaseFactory:
+    """ka10058 단건 factory (Phase G G-3)."""
+    factory = _ingest_investor_daily_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="investor_daily single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+
+        return _missing_factory
+    return factory
+
+
+def set_ingest_investor_daily_factory(factory: IngestInvestorDailyUseCaseFactory) -> None:
+    global _ingest_investor_daily_factory
+    _ingest_investor_daily_factory = factory
+
+
+def reset_ingest_investor_daily_factory() -> None:
+    global _ingest_investor_daily_factory
+    _ingest_investor_daily_factory = None
+
+
+def get_ingest_investor_daily_bulk_factory() -> IngestInvestorDailyBulkUseCaseFactory:
+    """ka10058 Bulk factory (Phase G)."""
+    factory = _ingest_investor_daily_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="investor_daily bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+
+        return _missing_factory
+    return factory
+
+
+def set_ingest_investor_daily_bulk_factory(
+    factory: IngestInvestorDailyBulkUseCaseFactory,
+) -> None:
+    global _ingest_investor_daily_bulk_factory
+    _ingest_investor_daily_bulk_factory = factory
+
+
+def reset_ingest_investor_daily_bulk_factory() -> None:
+    global _ingest_investor_daily_bulk_factory
+    _ingest_investor_daily_bulk_factory = None
+
+
+def get_ingest_stock_investor_breakdown_factory() -> IngestStockInvestorBreakdownUseCaseFactory:
+    """ka10059 단건 factory (Phase G G-3)."""
+    factory = _ingest_stock_investor_breakdown_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="stock_investor_breakdown single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+
+        return _missing_factory
+    return factory
+
+
+def set_ingest_stock_investor_breakdown_factory(
+    factory: IngestStockInvestorBreakdownUseCaseFactory,
+) -> None:
+    global _ingest_stock_investor_breakdown_factory
+    _ingest_stock_investor_breakdown_factory = factory
+
+
+def reset_ingest_stock_investor_breakdown_factory() -> None:
+    global _ingest_stock_investor_breakdown_factory
+    _ingest_stock_investor_breakdown_factory = None
+
+
+def get_ingest_stock_investor_breakdown_bulk_factory() -> IngestStockInvestorBreakdownBulkUseCaseFactory:
+    """ka10059 Bulk factory (Phase G)."""
+    factory = _ingest_stock_investor_breakdown_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="stock_investor_breakdown bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+
+        return _missing_factory
+    return factory
+
+
+def set_ingest_stock_investor_breakdown_bulk_factory(
+    factory: IngestStockInvestorBreakdownBulkUseCaseFactory,
+) -> None:
+    global _ingest_stock_investor_breakdown_bulk_factory
+    _ingest_stock_investor_breakdown_bulk_factory = factory
+
+
+def reset_ingest_stock_investor_breakdown_bulk_factory() -> None:
+    global _ingest_stock_investor_breakdown_bulk_factory
+    _ingest_stock_investor_breakdown_bulk_factory = None
+
+
+def get_ingest_frgn_orgn_factory() -> IngestFrgnOrgnUseCaseFactory:
+    """ka10131 단건 factory (Phase G G-3)."""
+    factory = _ingest_frgn_orgn_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="frgn_orgn single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+
+        return _missing_factory
+    return factory
+
+
+def set_ingest_frgn_orgn_factory(factory: IngestFrgnOrgnUseCaseFactory) -> None:
+    global _ingest_frgn_orgn_factory
+    _ingest_frgn_orgn_factory = factory
+
+
+def reset_ingest_frgn_orgn_factory() -> None:
+    global _ingest_frgn_orgn_factory
+    _ingest_frgn_orgn_factory = None
+
+
+def get_ingest_frgn_orgn_bulk_factory() -> IngestFrgnOrgnBulkUseCaseFactory:
+    """ka10131 Bulk factory (Phase G)."""
+    factory = _ingest_frgn_orgn_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="frgn_orgn bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+
+        return _missing_factory
+    return factory
+
+
+def set_ingest_frgn_orgn_bulk_factory(factory: IngestFrgnOrgnBulkUseCaseFactory) -> None:
+    global _ingest_frgn_orgn_bulk_factory
+    _ingest_frgn_orgn_bulk_factory = factory
+
+
+def reset_ingest_frgn_orgn_bulk_factory() -> None:
+    global _ingest_frgn_orgn_bulk_factory
+    _ingest_frgn_orgn_bulk_factory = None
+
+
 def reset_token_manager() -> None:
     """테스트 전용 — 모든 싱글톤 리셋 (F-4 Step 2 fix H-1: 5 ranking 단건 + 5 Bulk 포함)."""
     global \
@@ -873,7 +1091,13 @@ def reset_token_manager() -> None:
         _ingest_today_volume_factory, \
         _ingest_pred_volume_factory, \
         _ingest_trade_amount_factory, \
-        _ingest_volume_sdnin_factory
+        _ingest_volume_sdnin_factory, \
+        _ingest_investor_daily_factory, \
+        _ingest_investor_daily_bulk_factory, \
+        _ingest_stock_investor_breakdown_factory, \
+        _ingest_stock_investor_breakdown_bulk_factory, \
+        _ingest_frgn_orgn_factory, \
+        _ingest_frgn_orgn_bulk_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
@@ -901,6 +1125,13 @@ def reset_token_manager() -> None:
     _ingest_pred_volume_factory = None
     _ingest_trade_amount_factory = None
     _ingest_volume_sdnin_factory = None
+    # Phase G — 3 단건 + 3 Bulk = 6 factory reset
+    _ingest_investor_daily_factory = None
+    _ingest_investor_daily_bulk_factory = None
+    _ingest_stock_investor_breakdown_factory = None
+    _ingest_stock_investor_breakdown_bulk_factory = None
+    _ingest_frgn_orgn_factory = None
+    _ingest_frgn_orgn_bulk_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -992,6 +1223,10 @@ __all__ = [
     "IngestDailyOhlcvUseCaseFactory",
     "IngestFluRtBulkUseCaseFactory",
     "IngestFluRtUseCaseFactory",
+    "IngestFrgnOrgnBulkUseCaseFactory",
+    "IngestFrgnOrgnUseCaseFactory",
+    "IngestInvestorDailyBulkUseCaseFactory",
+    "IngestInvestorDailyUseCaseFactory",
     "IngestLendingMarketUseCaseFactory",
     "IngestLendingStockBulkUseCaseFactory",
     "IngestLendingStockUseCaseFactory",
@@ -1002,6 +1237,8 @@ __all__ = [
     "IngestSectorDailySingleUseCaseFactory",
     "IngestShortSellingBulkUseCaseFactory",
     "IngestShortSellingUseCaseFactory",
+    "IngestStockInvestorBreakdownBulkUseCaseFactory",
+    "IngestStockInvestorBreakdownUseCaseFactory",
     "IngestTodayVolumeBulkUseCaseFactory",
     "IngestTodayVolumeUseCaseFactory",
     "IngestTradeAmountBulkUseCaseFactory",
@@ -1015,6 +1252,10 @@ __all__ = [
     "get_ingest_daily_flow_factory",
     "get_ingest_flu_rt_bulk_factory",
     "get_ingest_flu_rt_factory",
+    "get_ingest_frgn_orgn_bulk_factory",
+    "get_ingest_frgn_orgn_factory",
+    "get_ingest_investor_daily_bulk_factory",
+    "get_ingest_investor_daily_factory",
     "get_ingest_lending_market_factory",
     "get_ingest_lending_stock_bulk_factory",
     "get_ingest_lending_stock_single_factory",
@@ -1026,6 +1267,8 @@ __all__ = [
     "get_ingest_sector_single_factory",
     "get_ingest_short_selling_bulk_factory",
     "get_ingest_short_selling_single_factory",
+    "get_ingest_stock_investor_breakdown_bulk_factory",
+    "get_ingest_stock_investor_breakdown_factory",
     "get_ingest_today_volume_bulk_factory",
     "get_ingest_today_volume_factory",
     "get_ingest_trade_amount_bulk_factory",
@@ -1043,6 +1286,10 @@ __all__ = [
     "reset_ingest_daily_flow_factory",
     "reset_ingest_flu_rt_bulk_factory",
     "reset_ingest_flu_rt_factory",
+    "reset_ingest_frgn_orgn_bulk_factory",
+    "reset_ingest_frgn_orgn_factory",
+    "reset_ingest_investor_daily_bulk_factory",
+    "reset_ingest_investor_daily_factory",
     "reset_ingest_lending_market_factory",
     "reset_ingest_lending_stock_bulk_factory",
     "reset_ingest_lending_stock_single_factory",
@@ -1054,6 +1301,8 @@ __all__ = [
     "reset_ingest_sector_single_factory",
     "reset_ingest_short_selling_bulk_factory",
     "reset_ingest_short_selling_single_factory",
+    "reset_ingest_stock_investor_breakdown_bulk_factory",
+    "reset_ingest_stock_investor_breakdown_factory",
     "reset_ingest_today_volume_bulk_factory",
     "reset_ingest_today_volume_factory",
     "reset_ingest_trade_amount_bulk_factory",
@@ -1068,6 +1317,10 @@ __all__ = [
     "set_ingest_daily_flow_factory",
     "set_ingest_flu_rt_bulk_factory",
     "set_ingest_flu_rt_factory",
+    "set_ingest_frgn_orgn_bulk_factory",
+    "set_ingest_frgn_orgn_factory",
+    "set_ingest_investor_daily_bulk_factory",
+    "set_ingest_investor_daily_factory",
     "set_ingest_lending_market_factory",
     "set_ingest_lending_stock_bulk_factory",
     "set_ingest_lending_stock_single_factory",
@@ -1079,6 +1332,8 @@ __all__ = [
     "set_ingest_sector_single_factory",
     "set_ingest_short_selling_bulk_factory",
     "set_ingest_short_selling_single_factory",
+    "set_ingest_stock_investor_breakdown_bulk_factory",
+    "set_ingest_stock_investor_breakdown_factory",
     "set_ingest_today_volume_bulk_factory",
     "set_ingest_today_volume_factory",
     "set_ingest_trade_amount_bulk_factory",
