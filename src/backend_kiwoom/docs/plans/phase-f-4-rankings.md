@@ -392,4 +392,166 @@ postdeploy:
 
 ---
 
-_Phase F (순위 5종) 의 본 chunk. 5 endpoint × Migration 007 × KiwoomRkInfoClient × ranking_snapshot 테이블 × JSONB payload × 15 라우터 × 5 cron. 25 endpoint 진행률 60% → 80%. F-3 정착 패턴 (SkipReason Enum / tuple errors_above_threshold / empty helper / 단건 catch) 위에서 작업._
+## 11. Step 1 (구현) 결과 — 2026-05-15 / 2026-05-16
+
+### 11.1 실제 변경면 (Step 1 sub-agent + 본 turn 검증)
+
+| 영역 | 파일 | 라인 | commit |
+|------|------|------|--------|
+| Migration | `migrations/versions/018_ranking_snapshot.py` | ~115 | (미커밋) |
+| ORM | `app/adapter/out/persistence/models/ranking_snapshot.py` | ~115 | (미커밋) |
+| Repository | `app/adapter/out/persistence/repositories/ranking_snapshot.py` | ~130 | (미커밋) |
+| Adapter | `app/adapter/out/kiwoom/rkinfo.py` | ~265 | (미커밋) |
+| _records 갱신 | `app/adapter/out/kiwoom/_records.py` | +(7 enum + 5 Row + 5 Resp) | (미커밋) |
+| DTO | `app/application/dto/ranking.py` | ~110 | (미커밋) |
+| Service | `app/application/service/ranking_service.py` | ~625 | (미커밋) |
+| Router | `app/adapter/web/routers/rankings.py` | ~430 | (미커밋) |
+| Batch | `app/batch/ranking_jobs.py` | ~115 | (미커밋) |
+| Scheduler | `app/scheduler.py` | +5 RankingScheduler subclass | (미커밋) |
+| DI | `app/adapter/web/_deps.py` | +10 factory (5 단건 + 5 Bulk) | (미커밋) |
+| App entry | `app/main.py` | +router include | (미커밋) |
+| Stock Repository | `app/adapter/out/persistence/repositories/stock.py` | +`find_by_codes` | (미커밋) |
+
+### 11.2 Migration 번호 정정
+
+plan doc § 5.1 명시 "007" 은 stale. 실제 head 가 `017_ka10001_numeric_precision` 이므로 신규 = **018_ranking_snapshot**. Step 1 에서 정정 적용.
+
+### 11.3 Step 0 (TDD red) 누적
+
+| 파일 | 케이스 |
+|------|--------|
+| test_migration_018 / test_ranking_snapshot_repository / test_stock_repository(+) / test_rkinfo_client / test_records_ranking / test_ranking_dto / test_ranking_service | 98 |
+| test_rankings_router / test_ranking_jobs / test_scheduler_phase_f_4 / tests/integration/test_ranking_snapshot_e2e | 40 |
+| **소계** | **138** (목표 = green) |
+
+---
+
+## 12. Step 2 R1 이중 리뷰 — 2026-05-16
+
+### 12.1 sonnet python-reviewer R1 (8.0/10)
+
+| ID | 위치 | 비고 |
+|----|------|------|
+| H-1 | `routers/rankings.py:241~507` | body dead parameter (5 endpoint) |
+| H-2 | `service/ranking_service.py:260` | `_persist` instance method 중복 |
+| M-1~M-5 | 다양 | inherit 검토 |
+| L-1~L-5 | 다양 | inherit 후보. L-3 = `ranking_jobs.py:58` snapshot_at 미전달 (runtime TypeError) |
+
+### 12.2 opus 적대적 R1 (5.5/10, 운영 D)
+
+| ID | 위치 | 비고 |
+|----|------|------|
+| **C-1** | `app/main.py` | lifespan factory set 5건 미호출 + RankingScheduler 5 instance 미생성 (운영 차단) |
+| **C-2** | `app/config/settings.py` | 5 alias / 5 enabled env 미정의 (운영 차단) |
+| **C-3** | `repositories/ranking_snapshot.py:88-114` | chunked_upsert 미적용 (페이지 2520 row 초과 시 asyncpg ProgramLimitExceeded) |
+| H-1 | `_deps.py:639-673` | reset_token_manager 5 ranking 누락 |
+| H-2 | `_deps.py:520-636` | lazy factory 비일관 (flu_rt 만 lazy, 4 endpoint 503 raise) |
+| H-3 | `scheduler.py:1249` | misfire 1800 vs ADR § 43 21600 |
+| H-4 | `routers/rankings.py` (5건) | body dead parameter (sonnet H-1 합의) |
+| H-5 | `dto/ranking.py:90-105` | `total_calls=-1` sentinel 패턴 |
+| M-1~M-6 | 다양 | inherit 검토 |
+
+### 12.3 사용자 결정 게이트 (2026-05-16 확정)
+
+| ID | 결정 | 옵션 |
+|----|------|------|
+| **G-1** | **(a) 본 chunk 즉시 일괄 fix** | CRITICAL 3 + HIGH 5 + sonnet 2 + 운영 통합 (lifespan + Settings + .env.prod) 모두 본 chunk |
+| **G-2** | **(a) misfire 21600 통일** | 12 scheduler + 5 ranking = 17 인스턴스 통일. plan doc § 5.8 명시 1800 → outdated. ADR § 48 통일 명시 |
+| **G-3** | **(b) 단건 모드 분리** | sync = body 의 mrkt_tp/sort_tp/stex_tp 로 1×1 호출 / bulk-sync = 매트릭스 4 호출. `_invoke_single` helper 추가 |
+
+---
+
+## 13. Step 2 fix R1 결과 — 2026-05-16 (opus sub-agent)
+
+### 13.1 fix 10건 일괄 (사용자 결정 G-1/G-2/G-3 정합)
+
+| ID | 변경 위치 | 라인 |
+|----|----------|------|
+| C-1 lifespan 통합 | `app/main.py:1024-1225` (10 setter / 5 scheduler / 10 reset) | +~280 |
+| C-2 Settings env | `app/config/settings.py:202-268` + `app/main.py:202-266` fail-fast + `.env.prod` 10 env | +~75 + ~30 |
+| C-3 chunked_upsert | `repositories/ranking_snapshot.py:38,122-127` (`_UPSERT_CHUNK_SIZE=2000`) | +~20 |
+| H-1 reset_token_manager | `_deps.py:867-903` (10 글로벌 + 10 None 할당) | +~30 |
+| H-2 lazy factory 통일 | `_deps.py:559-845` (10 getter `_missing_factory`) | +~50 |
+| H-3 misfire 21600 통일 | `scheduler.py` (14 인스턴스 21600) + `test_scheduler_phase_f_4.py` 6 단언 수정 | ~20 |
+| H-4 단건 모드 분리 | `routers/rankings.py:215-264` (`_invoke_single`) + 5 sync 시그니처 변경 + DI 5 단건 factory 추가 | +~100 |
+| H-5 sentinel → None | `dto/ranking.py:87-89` (`int | None = None`) + `__post_init__` 비교 | +~5 |
+| sonnet H-2 `_persist` 제거 | `service/ranking_service.py` (49 줄 삭제 + `_persist_common` 통합) | -~49 |
+| sonnet L-3 snapshot_at | `batch/ranking_jobs.py` (5 cron 의 `use_case.execute(snapshot_at=...)`) | +~10 |
+
+### 13.2 검증 결과 (본 turn)
+
+- pytest: **1424 PASS** / 0 failed
+- ruff: All checks passed
+- mypy --strict: Success no issues in **103 source files**
+
+---
+
+## 14. Step 2 R2 재리뷰 — 2026-05-16
+
+### 14.1 sonnet R2 (9.2/10, PASS)
+
+- R1 fix 정확성 **10/10**
+- 신규 N-1/N-2/N-3 모두 MEDIUM 이하 inherit-가능
+- 합의: **PASS**
+
+### 14.2 opus 적대적 R2 (8.6/10, 운영 B+, CONDITIONAL)
+
+- R1 → R2: 5.5 (D) → **8.6 (B+)**
+- CRITICAL 0 / HIGH 0 신규
+- 신규 MEDIUM 3건 모두 Phase E 부터 상속 (F-4 신규 결함 아님)
+- 8 적대적 시뮬레이션 모두 통과
+- 합의: **CONDITIONAL** (본 chunk 머지 가능 + inherit 후속)
+
+### 14.3 R2 inherit 5건 (§ 47.8 패턴 미러)
+
+| ID | 항목 | 후속 chunk |
+|----|------|-----------|
+| **inh-1** | Bulk 4-call 트랜잭션 오염 (Phase E 상속) | Phase G dry-run 후 (SAVEPOINT 또는 단건당 별도 세션) |
+| **inh-2** | `.env.example` 22 alias env 미문서화 (Phase A 상속) | docs chunk |
+| **inh-3** | pred/trde body.sort_tp silent ignore (G-3 도입 부수 효과) | Phase F-5 router polish |
+| **inh-4** | `strip_kiwoom_suffix` regex 가드 | 운영 1주 검증 후 |
+| **inh-5** | 잔여 MEDIUM 통합 (sonnet M-2/M-3/M-4 + opus M-2/M-4/M-5/M-6 + L 일부) | Phase F-5 / Phase H |
+
+---
+
+## 15. Step 3 Verification + Step 5 Ship — 2026-05-16 ✅ 완료
+
+Step 4 E2E ⚪ 자동 생략 (UI 변경 0).
+
+### 15.1 Step 3 Verification 5관문 결과
+
+| # | 항목 | 결과 |
+|---|------|------|
+| 3.1 | alembic upgrade head smoke | ✅ testcontainers 9 케이스 PASS 로 회귀 안전 검증 (kiwoom-db 직접 실행은 운영 적용 시점) |
+| 3.2 | ruff clean | ✅ All checks passed |
+| 3.3 | mypy --strict | ✅ Success no issues in **103 source files** |
+| 3.4 | pytest | ✅ **1424 PASS** / 0 failed |
+| 3.4 | coverage | **85.00%** (F-3 baseline 86.56% → -1.56%p, 대량 신규 코드 dip, 운영 cron 미발화 시점) |
+| 3.5 | 런타임 imports | ✅ Step 1/2 sub-agent 검증 + 본 turn 재검증 |
+
+### 15.2 Step 5 Ship 결과
+
+- ✅ ADR § 48 신규 (9 sub-§) — D-1~D-14 + G-1/G-2/G-3 + R1 fix 10건 + R2 inherit 5건 + 운영 등급 D→B+ + ted-run 메트릭 + 메모리 정책 update
+- ✅ plan doc § 11~15 누적 갱신 (본 § 15)
+- ✅ STATUS.md § 0 / § 1 / § 2 (60% → **80%**) / § 4 / § 5 / § 6 갱신
+- ✅ HANDOFF.md rewrite (본 chunk 단면 + 다음 chunk Phase G)
+- ✅ CHANGELOG.md prepend (2026-05-16 Phase F-4)
+- ✅ 메모리 정책 update 2건 — `feedback_recommendation_over_question` (진화) + `feedback_plan_doc_per_chunk` (신규)
+- ✅ MEMORY.md index 갱신 (12 → 13 entries)
+- ✅ 한글 커밋 — `<this commit>`
+- 사용자 push 명시 요청 시 push (글로벌 정책)
+
+### 15.3 운영 발화 시점
+
+- **5-17 (월) 19:30 KST** — Phase F-4 첫 cron 자연 발화 (ka10027 → 5분 chain → 19:50 ka10023)
+- 자연 발화 후 운영 결정 항목 § 6.6 검증 (응답 schema / row 수 / NXT / lookup miss / 23 필드 nested)
+
+### 15.4 다음 chunk = Phase G (메모리 정책 정착)
+
+- Phase G plan doc 신규 작성 (`phase-g-investor-flow.md`)
+- 메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk — **/ted-run skill 명시 호출**
+- inh-1 (Bulk 트랜잭션 오염, Phase E 상속) Phase G dry-run 후 별도 chunk
+
+---
+
+_Phase F (순위 5종) 의 본 chunk. 5 endpoint × Migration **018** × KiwoomRkInfoClient × ranking_snapshot 테이블 × JSONB payload × 15 라우터 × 5 cron. 25 endpoint 진행률 60% → 80%. F-3 정착 패턴 (SkipReason Enum / tuple errors_above_threshold / empty helper / 단건 catch) 위에서 작업. **2026-05-16: R2 PASS/CONDITIONAL — Step 3/5 진입 대기.**_

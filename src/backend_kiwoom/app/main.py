@@ -31,6 +31,7 @@ from app.adapter.out.kiwoom._client import KiwoomClient
 from app.adapter.out.kiwoom.auth import KiwoomAuthClient
 from app.adapter.out.kiwoom.chart import KiwoomChartClient
 from app.adapter.out.kiwoom.mrkcond import KiwoomMarketCondClient
+from app.adapter.out.kiwoom.rkinfo import KiwoomRkInfoClient
 from app.adapter.out.kiwoom.shsa import KiwoomShortSellingClient
 from app.adapter.out.kiwoom.slb import KiwoomLendingClient
 from app.adapter.out.kiwoom.stkinfo import KiwoomStkInfoClient
@@ -38,29 +39,49 @@ from app.adapter.out.persistence.session import get_engine, get_sessionmaker
 from app.adapter.web._deps import (
     require_admin_key,
     reset_ingest_daily_flow_factory,
+    reset_ingest_flu_rt_bulk_factory,
+    reset_ingest_flu_rt_factory,
     reset_ingest_lending_market_factory,
     reset_ingest_lending_stock_bulk_factory,
     reset_ingest_lending_stock_single_factory,
     reset_ingest_ohlcv_factory,
     reset_ingest_periodic_ohlcv_factory,
+    reset_ingest_pred_volume_bulk_factory,
+    reset_ingest_pred_volume_factory,
     reset_ingest_sector_daily_factory,
     reset_ingest_sector_single_factory,
     reset_ingest_short_selling_bulk_factory,
     reset_ingest_short_selling_single_factory,
+    reset_ingest_today_volume_bulk_factory,
+    reset_ingest_today_volume_factory,
+    reset_ingest_trade_amount_bulk_factory,
+    reset_ingest_trade_amount_factory,
+    reset_ingest_volume_sdnin_bulk_factory,
+    reset_ingest_volume_sdnin_factory,
     reset_lookup_stock_factory,
     reset_sync_fundamental_factory,
     reset_sync_sector_factory,
     reset_sync_stock_factory,
     set_ingest_daily_flow_factory,
+    set_ingest_flu_rt_bulk_factory,
+    set_ingest_flu_rt_factory,
     set_ingest_lending_market_factory,
     set_ingest_lending_stock_bulk_factory,
     set_ingest_lending_stock_single_factory,
     set_ingest_ohlcv_factory,
     set_ingest_periodic_ohlcv_factory,
+    set_ingest_pred_volume_bulk_factory,
+    set_ingest_pred_volume_factory,
     set_ingest_sector_daily_factory,
     set_ingest_sector_single_factory,
     set_ingest_short_selling_bulk_factory,
     set_ingest_short_selling_single_factory,
+    set_ingest_today_volume_bulk_factory,
+    set_ingest_today_volume_factory,
+    set_ingest_trade_amount_bulk_factory,
+    set_ingest_trade_amount_factory,
+    set_ingest_volume_sdnin_bulk_factory,
+    set_ingest_volume_sdnin_factory,
     set_lookup_stock_factory,
     set_revoke_use_case,
     set_sync_fundamental_factory,
@@ -74,6 +95,7 @@ from app.adapter.web.routers.fundamentals import router as fundamentals_router
 from app.adapter.web.routers.lending import router as lending_router
 from app.adapter.web.routers.ohlcv import router as ohlcv_router
 from app.adapter.web.routers.ohlcv_periodic import router as ohlcv_periodic_router
+from app.adapter.web.routers.rankings import router as rankings_router
 from app.adapter.web.routers.sector_ohlcv import router as sector_ohlcv_router
 from app.adapter.web.routers.sectors import router as sectors_router
 from app.adapter.web.routers.short_selling import router as short_selling_router
@@ -87,6 +109,18 @@ from app.application.service.lending_service import (
 )
 from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
 from app.application.service.ohlcv_periodic_service import IngestPeriodicOhlcvUseCase
+from app.application.service.ranking_service import (
+    IngestFluRtUpperBulkUseCase,
+    IngestFluRtUpperUseCase,
+    IngestPredVolumeUpperBulkUseCase,
+    IngestPredVolumeUpperUseCase,
+    IngestTodayVolumeUpperBulkUseCase,
+    IngestTodayVolumeUpperUseCase,
+    IngestTradeAmountUpperBulkUseCase,
+    IngestTradeAmountUpperUseCase,
+    IngestVolumeSdninBulkUseCase,
+    IngestVolumeSdninUseCase,
+)
 from app.application.service.sector_ohlcv_service import (
     IngestSectorDailyBulkUseCase,
     IngestSectorDailyUseCase,
@@ -110,15 +144,20 @@ from app.config.settings import get_settings
 from app.observability.logging import setup_logging
 from app.scheduler import (
     DailyFlowScheduler,
+    FluRtRankingScheduler,
     LendingMarketScheduler,
     LendingStockScheduler,
     MonthlyOhlcvScheduler,
     OhlcvDailyScheduler,
+    PredVolumeRankingScheduler,
     SectorDailyOhlcvScheduler,
     SectorSyncScheduler,
     ShortSellingScheduler,
     StockFundamentalScheduler,
     StockMasterScheduler,
+    TodayVolumeRankingScheduler,
+    TrdePricaRankingScheduler,
+    VolumeSdninRankingScheduler,
     WeeklyOhlcvScheduler,
     YearlyOhlcvScheduler,
 )
@@ -192,6 +231,32 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 "scheduler_lending_stock_sync_alias",
                 settings.scheduler_lending_stock_sync_alias,
                 settings.scheduler_lending_stock_sync_enabled,
+            ),
+            # Phase F-4 Step 2 fix C-2 — 5 ranking endpoint alias (개별 _enabled flag 게이팅)
+            (
+                "scheduler_flu_rt_ranking_sync_alias",
+                settings.scheduler_flu_rt_ranking_sync_alias,
+                settings.scheduler_flu_rt_ranking_sync_enabled,
+            ),
+            (
+                "scheduler_today_volume_ranking_sync_alias",
+                settings.scheduler_today_volume_ranking_sync_alias,
+                settings.scheduler_today_volume_ranking_sync_enabled,
+            ),
+            (
+                "scheduler_pred_volume_ranking_sync_alias",
+                settings.scheduler_pred_volume_ranking_sync_alias,
+                settings.scheduler_pred_volume_ranking_sync_enabled,
+            ),
+            (
+                "scheduler_trade_amount_ranking_sync_alias",
+                settings.scheduler_trade_amount_ranking_sync_alias,
+                settings.scheduler_trade_amount_ranking_sync_enabled,
+            ),
+            (
+                "scheduler_volume_sdnin_ranking_sync_alias",
+                settings.scheduler_volume_sdnin_ranking_sync_alias,
+                settings.scheduler_volume_sdnin_ranking_sync_enabled,
             ),
         ]
         missing_aliases = [name for name, value, job_enabled in alias_checks if job_enabled and not value]
@@ -654,6 +719,319 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     set_ingest_lending_stock_single_factory(_ingest_lending_stock_single_factory)
     set_ingest_lending_stock_bulk_factory(_ingest_lending_stock_bulk_factory)
 
+    # =========================================================================
+    # Phase F-4 — 5 ranking endpoint factory (ka10027/30/31/32/23)
+    # C-1β / D-1 / Phase E 패턴 1:1 — 매 호출마다 새 KiwoomClient + KiwoomRkInfoClient 빌드.
+    # 단건 UseCase + Bulk UseCase 둘 다 빌드 (sync = 단건 / bulk-sync = 매트릭스).
+    # =========================================================================
+
+    # ---- ka10027 flu_rt — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_flu_rt_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestFluRtUpperUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                yield IngestFluRtUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_flu_rt_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestFluRtUpperBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                single = IngestFluRtUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                yield IngestFluRtUpperBulkUseCase(
+                    session=session,
+                    single_use_case=single,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # ---- ka10030 today_volume — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_today_volume_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestTodayVolumeUpperUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                yield IngestTodayVolumeUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_today_volume_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestTodayVolumeUpperBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                single = IngestTodayVolumeUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                yield IngestTodayVolumeUpperBulkUseCase(
+                    session=session,
+                    single_use_case=single,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # ---- ka10031 pred_volume — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_pred_volume_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestPredVolumeUpperUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                yield IngestPredVolumeUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_pred_volume_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestPredVolumeUpperBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                single = IngestPredVolumeUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                yield IngestPredVolumeUpperBulkUseCase(
+                    session=session,
+                    single_use_case=single,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # ---- ka10032 trade_amount — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_trade_amount_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestTradeAmountUpperUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                yield IngestTradeAmountUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_trade_amount_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestTradeAmountUpperBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                single = IngestTradeAmountUpperUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                yield IngestTradeAmountUpperBulkUseCase(
+                    session=session,
+                    single_use_case=single,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # ---- ka10023 volume_sdnin — 단건 + Bulk ----
+    @asynccontextmanager
+    async def _ingest_volume_sdnin_single_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestVolumeSdninUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                yield IngestVolumeSdninUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    @asynccontextmanager
+    async def _ingest_volume_sdnin_bulk_factory(
+        alias: str,
+    ) -> AsyncIterator[IngestVolumeSdninBulkUseCase]:
+        async def _token_provider() -> str:
+            issued = await manager.get(alias=alias)
+            return issued.token
+
+        base_url = settings.kiwoom_base_url_prod
+        kiwoom_client = KiwoomClient(
+            base_url=base_url,
+            token_provider=_token_provider,
+            timeout_seconds=settings.kiwoom_request_timeout_seconds,
+            min_request_interval_seconds=settings.kiwoom_min_request_interval_seconds,
+            concurrent_requests=settings.kiwoom_concurrent_requests,
+        )
+        try:
+            rkinfo = KiwoomRkInfoClient(kiwoom_client)
+            async with sessionmaker() as session:
+                single = IngestVolumeSdninUseCase(
+                    session=session,
+                    rkinfo_client=rkinfo,
+                )
+                yield IngestVolumeSdninBulkUseCase(
+                    session=session,
+                    single_use_case=single,
+                )
+                await session.commit()
+        finally:
+            await kiwoom_client.close()
+
+    # 10 setter — 5 단건 + 5 Bulk
+    set_ingest_flu_rt_factory(_ingest_flu_rt_single_factory)
+    set_ingest_flu_rt_bulk_factory(_ingest_flu_rt_bulk_factory)
+    set_ingest_today_volume_factory(_ingest_today_volume_single_factory)
+    set_ingest_today_volume_bulk_factory(_ingest_today_volume_bulk_factory)
+    set_ingest_pred_volume_factory(_ingest_pred_volume_single_factory)
+    set_ingest_pred_volume_bulk_factory(_ingest_pred_volume_bulk_factory)
+    set_ingest_trade_amount_factory(_ingest_trade_amount_single_factory)
+    set_ingest_trade_amount_bulk_factory(_ingest_trade_amount_bulk_factory)
+    set_ingest_volume_sdnin_factory(_ingest_volume_sdnin_single_factory)
+    set_ingest_volume_sdnin_bulk_factory(_ingest_volume_sdnin_bulk_factory)
+
     # A3-γ: SectorSyncScheduler — settings.scheduler_enabled=True 일 때만 실제 cron 등록.
     # alias fail-fast 검증은 lifespan 진입 직후로 이동 (B-γ-2 2R H-1) — set_*_factory 후
     # raise 시 cleanup 우회 차단.
@@ -744,8 +1122,50 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     lending_stock_scheduler.start()
 
-    # 인시던트 진단용 — /admin/scheduler/diag 가 12 scheduler 의 _eventloop / next_run_time /
-    # _timeout 상태를 노출. 9 scheduler dead (5-13) 원인 추적 chunk.
+    # Phase F-4: 5 ranking scheduler — mon-fri KST 19:30/35/40/45/50 (D-6 5분 chain sequential).
+    # 각 scheduler 의 개별 enabled env 가 False 면 settings.scheduler_enabled 와 AND 결합.
+    flu_rt_ranking_scheduler = FluRtRankingScheduler(
+        factory=_ingest_flu_rt_bulk_factory,
+        alias=settings.scheduler_flu_rt_ranking_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_flu_rt_ranking_sync_enabled,
+    )
+    flu_rt_ranking_scheduler.start()
+
+    today_volume_ranking_scheduler = TodayVolumeRankingScheduler(
+        factory=_ingest_today_volume_bulk_factory,
+        alias=settings.scheduler_today_volume_ranking_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_today_volume_ranking_sync_enabled,
+    )
+    today_volume_ranking_scheduler.start()
+
+    pred_volume_ranking_scheduler = PredVolumeRankingScheduler(
+        factory=_ingest_pred_volume_bulk_factory,
+        alias=settings.scheduler_pred_volume_ranking_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_pred_volume_ranking_sync_enabled,
+    )
+    pred_volume_ranking_scheduler.start()
+
+    trde_prica_ranking_scheduler = TrdePricaRankingScheduler(
+        factory=_ingest_trade_amount_bulk_factory,
+        alias=settings.scheduler_trade_amount_ranking_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_trade_amount_ranking_sync_enabled,
+    )
+    trde_prica_ranking_scheduler.start()
+
+    volume_sdnin_ranking_scheduler = VolumeSdninRankingScheduler(
+        factory=_ingest_volume_sdnin_bulk_factory,
+        alias=settings.scheduler_volume_sdnin_ranking_sync_alias,
+        enabled=settings.scheduler_enabled
+        and settings.scheduler_volume_sdnin_ranking_sync_enabled,
+    )
+    volume_sdnin_ranking_scheduler.start()
+
+    # 인시던트 진단용 — /admin/scheduler/diag 가 17 scheduler 의 _eventloop / next_run_time /
+    # _timeout 상태를 노출. (12 Phase A~E + 5 Phase F-4 ranking)
     _app.state.schedulers = {
         "sector_sync": scheduler,
         "stock_master": stock_scheduler,
@@ -759,13 +1179,24 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         "short_selling": short_selling_scheduler,
         "lending_market": lending_market_scheduler,
         "lending_stock": lending_stock_scheduler,
+        "flu_rt_ranking": flu_rt_ranking_scheduler,
+        "today_volume_ranking": today_volume_ranking_scheduler,
+        "pred_volume_ranking": pred_volume_ranking_scheduler,
+        "trde_prica_ranking": trde_prica_ranking_scheduler,
+        "volume_sdnin_ranking": volume_sdnin_ranking_scheduler,
     }
 
     try:
         yield
     finally:
-        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4 / D-1 / Phase E: scheduler 먼저 정지 — 실행 중 cron
+        # A3-γ / B-α / B-γ-2 / C-1β / C-2β / C-3β / C-4 / D-1 / Phase E / F-4: scheduler 먼저 정지 — 실행 중 cron
         # job 의 KiwoomClient 호출이 graceful token revoke 와 충돌하지 않도록 보장.
+        # Phase F-4 ranking schedulers 먼저 (가장 늦은 cron 19:50 부터 역순).
+        volume_sdnin_ranking_scheduler.shutdown(wait=True)
+        trde_prica_ranking_scheduler.shutdown(wait=True)
+        pred_volume_ranking_scheduler.shutdown(wait=True)
+        today_volume_ranking_scheduler.shutdown(wait=True)
+        flu_rt_ranking_scheduler.shutdown(wait=True)
         lending_stock_scheduler.shutdown(wait=True)
         lending_market_scheduler.shutdown(wait=True)
         short_selling_scheduler.shutdown(wait=True)
@@ -779,8 +1210,19 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         stock_scheduler.shutdown(wait=True)
         scheduler.shutdown(wait=True)
 
-        # 1R 2b M4 / D-1 / Phase E: factory 싱글톤 unset — close 후 stale factory 가 라우터에
+        # 1R 2b M4 / D-1 / Phase E / F-4: factory 싱글톤 unset — close 후 stale factory 가 라우터에
         # 노출되지 않도록 fail-closed 강화. teardown 직전 신규 요청은 503 (factory 미초기화) 반환.
+        # Phase F-4 — 5 단건 + 5 Bulk = 10 factory reset
+        reset_ingest_volume_sdnin_factory()
+        reset_ingest_volume_sdnin_bulk_factory()
+        reset_ingest_trade_amount_factory()
+        reset_ingest_trade_amount_bulk_factory()
+        reset_ingest_pred_volume_factory()
+        reset_ingest_pred_volume_bulk_factory()
+        reset_ingest_today_volume_factory()
+        reset_ingest_today_volume_bulk_factory()
+        reset_ingest_flu_rt_factory()
+        reset_ingest_flu_rt_bulk_factory()
         reset_ingest_lending_stock_bulk_factory()
         reset_ingest_lending_stock_single_factory()
         reset_ingest_lending_market_factory()
@@ -846,6 +1288,7 @@ def create_app() -> FastAPI:
     app.include_router(daily_flow_router)
     app.include_router(short_selling_router)
     app.include_router(lending_router)
+    app.include_router(rankings_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -66,6 +67,24 @@ class StockRepository:
     async def find_by_code(self, stock_code: str) -> Stock | None:
         stmt = select(Stock).where(Stock.stock_code == stock_code).execution_options(populate_existing=True)
         return (await self._session.execute(stmt)).scalar_one_or_none()
+
+    async def find_by_codes(self, codes: Iterable[str]) -> dict[str, Stock]:
+        """N 코드 → dict[stock_code, Stock] 일괄 lookup (Phase F-4).
+
+        ka10027 sync 호출당 ~150 종목 → 단건 N번 vs bulk 1번 (성능).
+        빈 입력 → 빈 dict (early return, DB 호출 없음). 중복 코드는 set 처리 — dict 키 1개만.
+        미존재 코드는 dict 에 포함 안 됨 (caller 가 ``.get(code)`` None 체크).
+        """
+        unique_codes = list({c for c in codes if c})
+        if not unique_codes:
+            return {}
+        stmt = (
+            select(Stock)
+            .where(Stock.stock_code.in_(unique_codes))
+            .execution_options(populate_existing=True)
+        )
+        rows = list((await self._session.execute(stmt)).scalars())
+        return {row.stock_code: row for row in rows}
 
     # asyncpg bind parameter 16-bit 한도 (32767) 회피 — 14 컬럼 기준 2340 row 가 이론 한도.
     # 안전 마진 + 향후 컬럼 추가 대비 1000 per batch (실측 KOSPI 2440 / KOSDAQ ~1500 종목).

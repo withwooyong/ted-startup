@@ -62,20 +62,30 @@ def _make_alembic_cfg(database_url: str) -> Config:
 
 @pytest.mark.asyncio
 async def test_migration_017_revision_id_and_down_revision(engine: AsyncEngine) -> None:
-    """016 → 017 upgrade 성공 / revision id = 017_ka10001_numeric_precision / down_revision = 016_short_lending.
+    """Migration 017 이 revision history 에 포함되어 적용됨을 검증.
 
-    현재 head = 016_short_lending (Migration 017 미존재) → 이 테스트 도달 불가 또는 실패 = red.
-    Step 1 에서 017 생성 + conftest.py apply_migrations (upgrade head) 에 포함 후 green.
+    head 직접 비교 대신 ScriptDirectory.walk_revisions 로 revision graph 검증
+    (Phase F-4 이후 head 가 018_ranking_snapshot 으로 이동했기 때문).
     """
+    from alembic.script import ScriptDirectory
+
+    cfg = _make_alembic_cfg(str(engine.url).replace("+asyncpg", "+psycopg2"))
+    script = ScriptDirectory.from_config(cfg)
+    revisions = [rev.revision for rev in script.walk_revisions()]
+
+    assert TARGET_REVISION in revisions, (
+        f"Migration {TARGET_REVISION} 가 revision history 에 없음 — 실제 history: {revisions}"
+    )
+
+    # alembic_version head 가 017 이상 (017 이후 모든 head 허용)
     async with engine.connect() as conn:
         version = await conn.execute(
             text("SELECT version_num FROM kiwoom.alembic_version")
         )
         rev = version.scalar_one()
 
-    assert rev == TARGET_REVISION, (
-        f"alembic_version 기대 '{TARGET_REVISION}', 실제 '{rev}' — "
-        f"Migration 017 미적용 또는 revision id 불일치"
+    assert rev in revisions, (
+        f"alembic_version head '{rev}' 가 revision history 에 없음"
     )
 
 

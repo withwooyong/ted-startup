@@ -196,6 +196,77 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Scheduler — Phase F-4 (5 ranking endpoint ka10027/30/31/32/23) ----
+    # 결정: F-4 Step 2 fix C-2 — Phase E 의 sync_enabled + sync_alias 패턴 1:1 미러.
+    # cron: mon-fri KST 19:30/35/40/45/50 (D-6 5분 chain). misfire_grace_time=21600s.
+    scheduler_flu_rt_ranking_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10027 등락률 ranking sync cron job 활성 여부 (Phase F-4 추가). "
+            "scheduler_enabled=True 가 전체 게이트 — 본 env 가 False 면 미등록. cron: mon-fri KST 19:30."
+        ),
+    )
+    scheduler_flu_rt_ranking_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10027 등락률 ranking sync cron job 의 키움 자격증명 alias (Phase F-4 추가). "
+            "scheduler_enabled=True + scheduler_flu_rt_ranking_sync_enabled=True 인데 "
+            "빈 값이면 lifespan 에서 fail-fast (운영 실수 방어)."
+        ),
+    )
+    scheduler_today_volume_ranking_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10030 당일 거래량 ranking sync cron job 활성 여부 (Phase F-4 추가). cron: mon-fri KST 19:35."
+        ),
+    )
+    scheduler_today_volume_ranking_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10030 당일 거래량 ranking sync cron job 의 키움 자격증명 alias (Phase F-4 추가). "
+            "scheduler_enabled=True + 본 enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_pred_volume_ranking_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10031 전일 거래량 ranking sync cron job 활성 여부 (Phase F-4 추가). cron: mon-fri KST 19:40."
+        ),
+    )
+    scheduler_pred_volume_ranking_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10031 전일 거래량 ranking sync cron job 의 키움 자격증명 alias (Phase F-4 추가). "
+            "scheduler_enabled=True + 본 enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_trade_amount_ranking_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10032 거래대금 ranking sync cron job 활성 여부 (Phase F-4 추가). cron: mon-fri KST 19:45."
+        ),
+    )
+    scheduler_trade_amount_ranking_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10032 거래대금 ranking sync cron job 의 키움 자격증명 alias (Phase F-4 추가). "
+            "scheduler_enabled=True + 본 enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+    scheduler_volume_sdnin_ranking_sync_enabled: bool = Field(
+        default=True,
+        description=(
+            "ka10023 거래량 급증 ranking sync cron job 활성 여부 (Phase F-4 추가). cron: mon-fri KST 19:50."
+        ),
+    )
+    scheduler_volume_sdnin_ranking_sync_alias: str = Field(
+        default="",
+        description=(
+            "ka10023 거래량 급증 ranking sync cron job 의 키움 자격증명 alias (Phase F-4 추가). "
+            "scheduler_enabled=True + 본 enabled=True 인데 빈 값이면 lifespan 에서 fail-fast."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

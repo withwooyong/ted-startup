@@ -338,6 +338,12 @@ async def test_lifespan_starts_both_schedulers_with_valid_aliases(
     monkeypatch.setenv("SCHEDULER_SHORT_SELLING_SYNC_ALIAS", "short-selling-alias")  # Phase E
     monkeypatch.setenv("SCHEDULER_LENDING_MARKET_SYNC_ALIAS", "lending-market-alias")  # Phase E
     monkeypatch.setenv("SCHEDULER_LENDING_STOCK_SYNC_ALIAS", "lending-stock-alias")  # Phase E
+    # F-4 Step 2 fix C-2 — 5 ranking endpoint alias
+    monkeypatch.setenv("SCHEDULER_FLU_RT_RANKING_SYNC_ALIAS", "flu-rt-alias")
+    monkeypatch.setenv("SCHEDULER_TODAY_VOLUME_RANKING_SYNC_ALIAS", "today-volume-alias")
+    monkeypatch.setenv("SCHEDULER_PRED_VOLUME_RANKING_SYNC_ALIAS", "pred-volume-alias")
+    monkeypatch.setenv("SCHEDULER_TRADE_AMOUNT_RANKING_SYNC_ALIAS", "trade-amount-alias")
+    monkeypatch.setenv("SCHEDULER_VOLUME_SDNIN_RANKING_SYNC_ALIAS", "volume-sdnin-alias")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
 

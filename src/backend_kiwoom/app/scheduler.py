@@ -31,11 +31,16 @@ from apscheduler.triggers.cron import CronTrigger
 from app.adapter.web._deps import (
     IngestDailyFlowUseCaseFactory,
     IngestDailyOhlcvUseCaseFactory,
+    IngestFluRtBulkUseCaseFactory,
     IngestLendingMarketUseCaseFactory,
     IngestLendingStockBulkUseCaseFactory,
     IngestPeriodicOhlcvUseCaseFactory,
+    IngestPredVolumeBulkUseCaseFactory,
     IngestSectorDailyBulkUseCaseFactory,
     IngestShortSellingBulkUseCaseFactory,
+    IngestTodayVolumeBulkUseCaseFactory,
+    IngestTradeAmountBulkUseCaseFactory,
+    IngestVolumeSdninBulkUseCaseFactory,
     SyncSectorUseCaseFactory,
     SyncStockFundamentalUseCaseFactory,
     SyncStockMasterUseCaseFactory,
@@ -45,6 +50,13 @@ from app.batch.lending_market_job import fire_lending_market_sync
 from app.batch.lending_stock_job import fire_lending_stock_sync
 from app.batch.monthly_ohlcv_job import fire_monthly_ohlcv_sync
 from app.batch.ohlcv_daily_job import fire_ohlcv_daily_sync
+from app.batch.ranking_jobs import (
+    fire_flu_rt_sync,
+    fire_pred_volume_sync,
+    fire_today_volume_sync,
+    fire_trde_prica_sync,
+    fire_volume_sdnin_sync,
+)
 from app.batch.sector_daily_ohlcv_job import fire_sector_daily_sync
 from app.batch.sector_sync_job import fire_sector_sync
 from app.batch.short_selling_job import fire_short_selling_sync
@@ -92,6 +104,22 @@ LENDING_MARKET_SYNC_JOB_ID: Final[str] = "lending_market_sync_daily"
 
 LENDING_STOCK_SYNC_JOB_ID: Final[str] = "lending_stock_sync_daily"
 """일간 종목 대차거래 (ka20068) sync job 의 고유 ID (Phase E). KST mon-fri 08:00, misfire 6h (ADR § 42.5 옵션 C)."""
+
+# Phase F-4 — 5 ranking endpoint cron (mon-fri KST 19:30/35/40/45/50, misfire 30min)
+FLU_RT_RANKING_SYNC_JOB_ID: Final[str] = "flu_rt_ranking_sync_daily"
+"""ka10027 등락률 ranking sync — mon-fri KST 19:30 (D-6)."""
+
+TODAY_VOLUME_RANKING_SYNC_JOB_ID: Final[str] = "today_volume_ranking_sync_daily"
+"""ka10030 당일 거래량 ranking sync — mon-fri KST 19:35."""
+
+PRED_VOLUME_RANKING_SYNC_JOB_ID: Final[str] = "pred_volume_ranking_sync_daily"
+"""ka10031 전일 거래량 ranking sync — mon-fri KST 19:40."""
+
+TRDE_PRICA_RANKING_SYNC_JOB_ID: Final[str] = "trde_prica_ranking_sync_daily"
+"""ka10032 거래대금 ranking sync — mon-fri KST 19:45."""
+
+VOLUME_SDNIN_RANKING_SYNC_JOB_ID: Final[str] = "volume_sdnin_ranking_sync_daily"
+"""ka10023 거래량 급증 ranking sync — mon-fri KST 19:50."""
 
 
 class _PhaseEJobView:
@@ -1206,30 +1234,227 @@ class LendingStockScheduler:
             self._started = False
 
 
+class _RankingScheduler:
+    """Phase F-4 5 ranking scheduler 공통 베이스 — cron 19:MM KST mon-fri + misfire 21600s.
+
+    설계: phase-f-4-rankings.md § 5.9 + D-6 / D-14.
+    F-4 Step 2 fix G-2/H-3: misfire_grace_time = 21600s (6h) — 12 scheduler 통일
+    (ADR § 43 옵션 C). 이전 1800s (plan § 5.8 명시값) 에서 통일.
+
+    Generic factory type 으로 5 ranking 모두 (FluRt / TodayVolume / PredVolume /
+    TrdePrica / VolumeSdnin) 통합. add_job 시 자식 클래스의 _JOB_ID / _CRON_MINUTE /
+    _CALLBACK / _LABEL 만 결정.
+    """
+
+    MISFIRE_GRACE_SECONDS: Final[int] = 21600
+    """6h grace — ADR § 43 옵션 C (Mac 절전 catch-up) + plan-d-scheduler-misfire-grace § 3 #1.
+    F-4 Step 2 fix G-2/H-3 — 12 scheduler 통일 (이전 1800s plan § 5.8 명시값에서 변경)."""
+
+    _JOB_ID: str = ""
+    _CRON_MINUTE: int = 0
+    _CALLBACK: Any = None
+    _LABEL: str = ""
+
+    def __init__(
+        self,
+        *,
+        factory: Any,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        self._factory = factory
+        self._alias = alias
+        self._enabled = enabled
+        self._scheduler = AsyncIOScheduler(timezone=KST)
+        self._started = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._started and self._scheduler.running
+
+    @property
+    def job_count(self) -> int:
+        return len(self._scheduler.get_jobs())
+
+    def get_job(self, job_id: str) -> Any:
+        job = self._scheduler.get_job(job_id)
+        if job is None:
+            return None
+        return _PhaseEJobView(job)
+
+    def start(self) -> None:
+        if not self._enabled:
+            logger.info("%s scheduler disabled — start 무시", self._LABEL)
+            return
+        if self._started:
+            logger.debug("%s scheduler 이미 시작됨 — start 무시", self._LABEL)
+            return
+
+        self._scheduler.add_job(
+            self.__class__._CALLBACK,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=19,
+                minute=self._CRON_MINUTE,
+                timezone=KST,
+            ),
+            id=self._JOB_ID,
+            kwargs={
+                "factory": self._factory,
+                "alias": self._alias,
+            },
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            misfire_grace_time=self.MISFIRE_GRACE_SECONDS,
+        )
+        self._scheduler.start()
+        self._started = True
+        logger.info(
+            "%s scheduler 시작 — job=%s alias=%s cron=mon-fri 19:%02d KST misfire=%ds",
+            self._LABEL,
+            self._JOB_ID,
+            self._alias,
+            self._CRON_MINUTE,
+            self.MISFIRE_GRACE_SECONDS,
+        )
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        if not self._scheduler.running:
+            self._started = False
+            return
+        try:
+            self._scheduler.shutdown(wait=wait)
+        except Exception:  # noqa: BLE001
+            logger.exception("%s scheduler shutdown 예외", self._LABEL)
+        finally:
+            self._started = False
+
+
+class FluRtRankingScheduler(_RankingScheduler):
+    """ka10027 등락률 ranking — mon-fri KST 19:30 (Phase F-4 D-6)."""
+
+    _JOB_ID = FLU_RT_RANKING_SYNC_JOB_ID
+    _CRON_MINUTE = 30
+    _CALLBACK = staticmethod(fire_flu_rt_sync)
+    _LABEL = "flu_rt_ranking"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestFluRtBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
+class TodayVolumeRankingScheduler(_RankingScheduler):
+    """ka10030 당일 거래량 ranking — mon-fri KST 19:35 (Phase F-4)."""
+
+    _JOB_ID = TODAY_VOLUME_RANKING_SYNC_JOB_ID
+    _CRON_MINUTE = 35
+    _CALLBACK = staticmethod(fire_today_volume_sync)
+    _LABEL = "today_volume_ranking"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestTodayVolumeBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
+class PredVolumeRankingScheduler(_RankingScheduler):
+    """ka10031 전일 거래량 ranking — mon-fri KST 19:40 (Phase F-4)."""
+
+    _JOB_ID = PRED_VOLUME_RANKING_SYNC_JOB_ID
+    _CRON_MINUTE = 40
+    _CALLBACK = staticmethod(fire_pred_volume_sync)
+    _LABEL = "pred_volume_ranking"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestPredVolumeBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
+class TrdePricaRankingScheduler(_RankingScheduler):
+    """ka10032 거래대금 ranking — mon-fri KST 19:45 (Phase F-4)."""
+
+    _JOB_ID = TRDE_PRICA_RANKING_SYNC_JOB_ID
+    _CRON_MINUTE = 45
+    _CALLBACK = staticmethod(fire_trde_prica_sync)
+    _LABEL = "trde_prica_ranking"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestTradeAmountBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
+class VolumeSdninRankingScheduler(_RankingScheduler):
+    """ka10023 거래량 급증 ranking — mon-fri KST 19:50 (Phase F-4)."""
+
+    _JOB_ID = VOLUME_SDNIN_RANKING_SYNC_JOB_ID
+    _CRON_MINUTE = 50
+    _CALLBACK = staticmethod(fire_volume_sdnin_sync)
+    _LABEL = "volume_sdnin_ranking"
+
+    def __init__(
+        self,
+        *,
+        factory: IngestVolumeSdninBulkUseCaseFactory,
+        alias: str,
+        enabled: bool,
+    ) -> None:
+        super().__init__(factory=factory, alias=alias, enabled=enabled)
+
+
 __all__ = [
     "DAILY_FLOW_SYNC_JOB_ID",
+    "FLU_RT_RANKING_SYNC_JOB_ID",
     "KST",
     "LENDING_MARKET_SYNC_JOB_ID",
     "LENDING_STOCK_SYNC_JOB_ID",
     "MONTHLY_OHLCV_SYNC_JOB_ID",
     "OHLCV_DAILY_SYNC_JOB_ID",
+    "PRED_VOLUME_RANKING_SYNC_JOB_ID",
     "SECTOR_DAILY_SYNC_JOB_ID",
     "SECTOR_SYNC_JOB_ID",
     "SHORT_SELLING_SYNC_JOB_ID",
     "STOCK_FUNDAMENTAL_SYNC_JOB_ID",
     "STOCK_MASTER_SYNC_JOB_ID",
+    "TODAY_VOLUME_RANKING_SYNC_JOB_ID",
+    "TRDE_PRICA_RANKING_SYNC_JOB_ID",
+    "VOLUME_SDNIN_RANKING_SYNC_JOB_ID",
     "WEEKLY_OHLCV_SYNC_JOB_ID",
     "YEARLY_OHLCV_SYNC_JOB_ID",
     "DailyFlowScheduler",
+    "FluRtRankingScheduler",
     "LendingMarketScheduler",
     "LendingStockScheduler",
     "MonthlyOhlcvScheduler",
     "OhlcvDailyScheduler",
+    "PredVolumeRankingScheduler",
     "SectorDailyOhlcvScheduler",
     "SectorSyncScheduler",
     "ShortSellingScheduler",
     "StockFundamentalScheduler",
     "StockMasterScheduler",
+    "TodayVolumeRankingScheduler",
+    "TrdePricaRankingScheduler",
+    "VolumeSdninRankingScheduler",
     "WeeklyOhlcvScheduler",
     "YearlyOhlcvScheduler",
 ]

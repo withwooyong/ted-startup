@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.adapter.out.persistence.models.credential import KiwoomCredential, KiwoomToken
 from app.adapter.out.persistence.models.lending_balance_kw import LendingBalanceKw
+from app.adapter.out.persistence.models.ranking_snapshot import RankingSnapshot
 from app.adapter.out.persistence.models.raw_response import RawResponse
 from app.adapter.out.persistence.models.sector import Sector
 from app.adapter.out.persistence.models.sector_price_daily import SectorPriceDaily
@@ -25,6 +26,7 @@ __all__ = [
     "KiwoomCredential",
     "KiwoomToken",
     "LendingBalanceKw",
+    "RankingSnapshot",
     "RawResponse",
     "Sector",
     "SectorPriceDaily",

@@ -380,3 +380,74 @@ async def test_deactivate_missing_with_empty_present_deactivates_all_active(
     assert count == 2
     rows = await repo.list_by_filters(market_code="0", only_active=True)
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# find_by_codes — bulk lookup (Phase F-4 신규)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_find_by_codes_returns_dict_keyed_by_code(session: AsyncSession) -> None:
+    """find_by_codes — N 코드 → dict[stock_code, Stock] 일괄 lookup.
+
+    Phase F-4: ka10027 sync 호출당 ~150 종목 → 단건 N번 vs bulk 1번 (성능).
+    """
+    repo = StockRepository(session)
+    await repo.upsert_many(
+        [
+            _row("005930", "삼성전자", "0"),
+            _row("000660", "SK하이닉스", "0"),
+            _row("373220", "LG에너지솔루션", "0"),
+        ]
+    )
+
+    result = await repo.find_by_codes(["005930", "000660", "373220"])
+
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"005930", "000660", "373220"}
+    assert result["005930"].stock_name == "삼성전자"
+    assert result["000660"].stock_name == "SK하이닉스"
+
+
+@pytest.mark.asyncio
+async def test_find_by_codes_empty_input_returns_empty_dict(
+    session: AsyncSession,
+) -> None:
+    """빈 list 입력 → 빈 dict (early return, DB 호출 없음)."""
+    repo = StockRepository(session)
+    result = await repo.find_by_codes([])
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_find_by_codes_lookup_miss_omitted_from_result(
+    session: AsyncSession,
+) -> None:
+    """일부 코드만 매칭 — 미존재 코드는 dict 에 없음 (caller 가 .get(code) None 체크)."""
+    repo = StockRepository(session)
+    await repo.upsert_many(
+        [
+            _row("005930", "삼성전자", "0"),
+        ]
+    )
+
+    result = await repo.find_by_codes(["005930", "999999", "888888"])
+
+    assert "005930" in result
+    assert "999999" not in result, "미존재 코드는 dict 에 포함 안 됨"
+    assert "888888" not in result
+
+
+@pytest.mark.asyncio
+async def test_find_by_codes_duplicate_codes_normalized(
+    session: AsyncSession,
+) -> None:
+    """중복 입력 코드 — dict 키 1개만 (set 처리 또는 idempotent)."""
+    repo = StockRepository(session)
+    await repo.upsert_many([_row("005930", "삼성전자", "0")])
+
+    result = await repo.find_by_codes(["005930", "005930", "005930"])
+
+    assert len(result) == 1
+    assert result["005930"].stock_name == "삼성전자"

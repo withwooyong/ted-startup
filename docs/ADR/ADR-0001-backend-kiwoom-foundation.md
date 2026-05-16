@@ -3918,3 +3918,120 @@ INFO  [alembic.runtime.migration] Running upgrade 016_short_lending -> 017_ka100
 | 3 Verification | sonnet+haiku | 5관문 PASS | (변경 0) |
 | 4 E2E | — | ⚪ UI 변경 0 | — |
 | 5 Ship | 메인 | ADR § 47 + 메타 4종 + 커밋 | 4 메타
+
+---
+
+## 48. Phase F-4 — 5 ranking endpoint 통합 (ka10027/30/31/32/23 + Migration 018 + ranking_snapshot + JSONB payload + 15 라우터 + 5 cron) (2026-05-16, ✅ 완료)
+
+### 48.1 결정 사항
+
+**사용자 D-1~D-14 권고 default 일괄 채택 (2026-05-14, Step 0 진입 시)**:
+- D-1 통합 1 chunk (옵션 A) — 견적 ~2,500줄 임계 초과 합의
+- D-2 ranking_snapshot 단일 테이블 + JSONB payload + ranking_type 컬럼
+- D-3 운영 default mrkt_tp = {001, 101} / D-4 stex_tp = 3 / D-5 ka10027 sort_tp = {1, 3}
+- D-6 cron 19:30/35/40/45/50 KST mon-fri (5분 chain sequential)
+- D-7 snapshot_time 초 단위 / D-8 stock lookup miss → stock_id=NULL + stock_code_raw / D-9 ka10030 23 필드 nested payload
+- D-10 SkipReason.STOCK_LOOKUP_MISS 추가 안 함 / D-11 errors_above_threshold 임계치 도입 안 함
+- D-12 primary_metric NUMERIC(20, 4) / D-13 GIN index payload 1개 / D-14 5 endpoint scheduler chain sequential
+
+**사용자 추가 결정 G-1~G-3 (2026-05-16, R1 fix 진입 시점)**:
+- **G-1 (a) 본 chunk 즉시 일괄 fix** — CRITICAL 3 + HIGH 5 + sonnet 2 + 운영 통합 모두 본 chunk
+- **G-2 (a) misfire_grace_time 21600 통일** — 17 인스턴스 통일 (ADR § 43 일관)
+- **G-3 (b) 단건 모드 분리** — sync = body 1×1 호출 / bulk-sync = 매트릭스 4 호출
+
+**Migration 번호 정정**: plan doc "007" stale → 실제 head 017 → 신규 **018_ranking_snapshot**.
+
+### 48.2 Step 2 R1 finding (이중 리뷰)
+
+**sonnet python-reviewer R1 (8.0/10)**: HIGH 2 (body dead / `_persist` 중복) + MED 5 + LOW 5 (L-3 = runtime TypeError 위험)
+
+**opus 적대적 R1 (5.5/10, 운영 D)**:
+- **CRITICAL 3 (운영 배포 차단)**: C-1 lifespan 통합 누락 / C-2 Settings 10 env 미정의 / C-3 chunked_upsert 미적용
+- HIGH 5: reset_token / lazy 비일관 / misfire / body dead (합의) / sentinel -1
+- MEDIUM 6 + LOW 5
+
+### 48.3 Step 2 fix R1 결과 (10 fix 일괄)
+
+| ID | 변경 위치 | 라인 |
+|----|----------|------|
+| C-1 lifespan 통합 | `main.py` (10 setter + 5 scheduler + 10 reset) | +~280 |
+| C-2 Settings env | `settings.py` 10 Field + `main.py` fail-fast + `.env.prod` 10 env | +~105 |
+| C-3 chunked_upsert | `repositories/ranking_snapshot.py` (`_UPSERT_CHUNK_SIZE=2000`) | +~20 |
+| H-1~H-5 + sonnet 2 | `_deps.py` / `scheduler.py` / `routers/rankings.py` / `dto/ranking.py` / `service/ranking_service.py` / `batch/ranking_jobs.py` | +~245 / -~49 |
+
+**소계**: 10 fix / 13 파일 / +~570 / -~49 = 순증 ~520 라인. 사용자 결정 G-1(a)/G-2(a)/G-3(b) 정합.
+
+### 48.4 R2 inherit 5건 (§ 47.8 패턴 미러)
+
+| ID | 항목 | 후속 chunk |
+|----|------|-----------|
+| **inh-1** | Bulk 4-call 트랜잭션 오염 (Phase E 상속, F-4 신규 아님) | Phase G dry-run 후 — SAVEPOINT 또는 단건당 별도 세션 |
+| **inh-2** | `.env.example` 22 alias env 미문서화 (Phase A 상속) | docs chunk |
+| **inh-3** | pred/trde body.sort_tp silent ignore (G-3 부수 효과) | Phase F-5 router polish |
+| **inh-4** | `strip_kiwoom_suffix` regex 가드 | 운영 1주 검증 후 |
+| **inh-5** | 잔여 MEDIUM/LOW 통합 | Phase F-5 / Phase H 분산 |
+
+### 48.5 Verification 측정값 / 운영 등급 변화
+
+| 항목 | F-3 baseline | **F-4** | 변화 |
+|------|--------------|---------|------|
+| pytest count | 1284 | **1424** | +140 (138 TDD red → green + 2 회귀) |
+| coverage | 86.56% | **85.00%** | -1.56%p (대량 신규 코드 dip) |
+| mypy strict files | 106 | **103** | -3 (모듈 통합) |
+| ruff | clean | **clean** | — |
+| 25 endpoint 진행률 | 15/25 (60%) | **20/25 (80%)** | +5 |
+| 누적 chunk | 57+ | **58+** | +1 |
+| **운영 등급 (opus 적대적)** | — | **D → B+** (R1 5.5 → R2 8.6) | CRITICAL/HIGH 0 잔존 |
+
+### 48.6 운영 효과 / Router 변경
+
+**lifespan 통합**: `main.py` 10 setter + 5 RankingScheduler 인스턴스 + 17 state.schedulers. 운영 적용 시 다음 영업일 19:30 첫 cron 발화 → 5분 chain → 19:50.
+
+**Router DTO**: 5 POST `/sync` body Pydantic `RankingSyncRequestIn` (mrkt_tp Literal["000","001","101"] / sort_tp / stex_tp Literal["1","2","3"]). 5 POST `/bulk-sync` 매트릭스. 5 GET `/snapshot` admin 무관. **SemVer minor breaking** (dev pre-release, 외부 호출자 없음).
+
+**Cron**: 5 신규 (19:30/35/40/45/50 KST mon-fri / misfire 21600 통일). ka10014 (07:30) 무충돌.
+
+**Migration 018**: GIN index payload 초기 생성 시간 ~30s~수분 모니터 필요.
+
+### 48.7 다음 chunk
+
+| 후보 | 시점 | 비고 |
+|------|------|------|
+| **Phase G** — 투자자별 3종 (ka10058/10059/10131) | 본 chunk 직후 | plan doc 신규 작성 필요. 메모리 정책 (`feedback_plan_doc_per_chunk` + ted-run skill 명시 호출) 정착 |
+| **Phase D-2** — ka10080 분봉 | 사용자 결정 | 대용량 파티션 전략 동반 |
+| **Phase H** — 통합 (백테 view + 데이터 품질) | 25 endpoint 100% 도달 후 | plan doc 작성됨, Grafana 분리 |
+| 5-17 (월) 19:30 자연 cron 검증 | 5-17 자동 | F-4 효과 검증 (코드 0) |
+| **inh-1** Bulk 트랜잭션 오염 | Phase G dry-run 후 | SAVEPOINT 패턴 |
+
+### 48.8 R2 inherit 5건 상세
+
+| # | 출처 | 항목 | 영향 |
+|---|------|------|------|
+| 1 | opus R2 N-MEDIUM-1 | Bulk 4-call `async with sessionmaker()` 공유 — 단건 실패 시 후속 PendingRollbackError | Phase E 상속. 단건당 별도 세션 또는 SAVEPOINT |
+| 2 | opus R2 N-MEDIUM-2 | `.env.example` 22 alias env 미문서화 | docs chunk — 운영 onboarding 부담 차단 |
+| 3 | opus R2 N-MEDIUM-3 | pred/trde body.sort_tp silent ignore | F-5 router polish |
+| 4 | opus R2 inh (R1 M-1) | `strip_kiwoom_suffix` regex 가드 미적용 | 운영 1주 응답 확인 후 |
+| 5 | sonnet R2 inh + opus M 통합 | 잔여 MEDIUM/LOW 9건 통합 | F-5 / Phase H 분산 |
+
+### 48.9 ted-run 풀 파이프라인 메트릭 + 메모리 정책 update
+
+| Step | 모델 | 결과 |
+|------|------|------|
+| 0 TDD (a~e) | sonnet + main | 138 케이스 / 7 신규 + 1 갱신 + 4 신규 |
+| 1 구현 | opus | 1424 PASS / 13 production 파일 |
+| 2a R1 | sonnet | 8.0 / HIGH 2 + MED 5 + LOW 5 |
+| 2b R1 | opus | 5.5, 운영 D / CRITICAL 3 + HIGH 5 + MED 6 |
+| 2 fix R1 | opus | 10 fix (G-1/G-2/G-3 정합) / 13 파일 +~570/-49 |
+| 2a R2 | sonnet | 9.2, PASS |
+| 2b R2 | opus | 8.6, 운영 B+, CONDITIONAL / inherit 5 |
+| 3 Verification | 메인 | 5관문 PASS (alembic testcontainers / ruff / mypy 103 / pytest 1424 / cov 85%) |
+| 4 E2E | — | ⚪ UI 변경 0 |
+| 5 Ship | 메인 | ADR § 48 + plan doc § 11~15 + 메타 4종 + 한글 커밋 |
+
+**메모리 정책 update (2026-05-16, 사용자 정정 2건)**:
+- `feedback_recommendation_over_question`: 추천 자제 (2026-05-12) → **복잡 결정 게이트는 Recommended 포함** (2026-05-16). G-1/G-2/G-3 같은 mutex 결정에 추천 명시 필수.
+- `feedback_plan_doc_per_chunk` (신규): 모든 chunk = plan doc 신규 → **ted-run skill 명시 호출** → 누적 갱신 (§ 11~15) → 메타 4종 동시 commit. **lesson learned**: 본 chunk (F-4) 는 Agent tool 로 진행 (메모리 정책 미정착) → 다음 chunk (Phase G / D-2 / H) 부터 ted-run skill 명시 호출.
+
+**MEMORY.md index**: 12 → 13 entries.
+
+**chunk 분할 견적 vs 실측**: plan doc § 5 견적 ~2,300-2,500줄 → 실측 Step 1 ~1,500줄 + Step 2 fix R1 +~570 = ~2,070 라인. `feedback_chunk_split_for_pipelines` 임계 1,500줄 _초과_ 했으나 사용자 G-1(a) 명시 확정 후 본 chunk 일괄 진행.

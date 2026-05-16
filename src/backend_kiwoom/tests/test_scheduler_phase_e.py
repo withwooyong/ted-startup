@@ -586,6 +586,12 @@ async def test_lifespan_startup_shutdown_with_phase_e_aliases(
     monkeypatch.setenv("SCHEDULER_SHORT_SELLING_SYNC_ALIAS", "smoke")
     monkeypatch.setenv("SCHEDULER_LENDING_MARKET_SYNC_ALIAS", "smoke")
     monkeypatch.setenv("SCHEDULER_LENDING_STOCK_SYNC_ALIAS", "smoke")
+    # Phase F-4 Step 2 fix C-2 — 5 ranking endpoint alias
+    monkeypatch.setenv("SCHEDULER_FLU_RT_RANKING_SYNC_ALIAS", "smoke")
+    monkeypatch.setenv("SCHEDULER_TODAY_VOLUME_RANKING_SYNC_ALIAS", "smoke")
+    monkeypatch.setenv("SCHEDULER_PRED_VOLUME_RANKING_SYNC_ALIAS", "smoke")
+    monkeypatch.setenv("SCHEDULER_TRADE_AMOUNT_RANKING_SYNC_ALIAS", "smoke")
+    monkeypatch.setenv("SCHEDULER_VOLUME_SDNIN_RANKING_SYNC_ALIAS", "smoke")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings

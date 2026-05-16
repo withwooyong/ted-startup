@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hmac
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import Depends, Header, HTTPException, status
 
@@ -30,6 +30,18 @@ from app.application.service.lending_service import (
 )
 from app.application.service.ohlcv_daily_service import IngestDailyOhlcvUseCase
 from app.application.service.ohlcv_periodic_service import IngestPeriodicOhlcvUseCase
+from app.application.service.ranking_service import (
+    IngestFluRtUpperBulkUseCase,
+    IngestFluRtUpperUseCase,
+    IngestPredVolumeUpperBulkUseCase,
+    IngestPredVolumeUpperUseCase,
+    IngestTodayVolumeUpperBulkUseCase,
+    IngestTodayVolumeUpperUseCase,
+    IngestTradeAmountUpperBulkUseCase,
+    IngestTradeAmountUpperUseCase,
+    IngestVolumeSdninBulkUseCase,
+    IngestVolumeSdninUseCase,
+)
 from app.application.service.sector_ohlcv_service import (
     IngestSectorDailyBulkUseCase,
     IngestSectorDailyUseCase,
@@ -156,6 +168,63 @@ active 종목 bulk — scheduler `LendingStockScheduler` + router POST /lending/
 ~3000 종목 × 2s = ~100분 추정 (plan § 12.2 H-10).
 """
 
+# =============================================================================
+# Phase F-4 — 5 ranking endpoint Bulk factory (ka10027/30/31/32/23)
+# =============================================================================
+
+IngestFluRtBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestFluRtUpperBulkUseCase]
+]
+"""ka10027 등락률 ranking Bulk factory (Phase F-4)."""
+
+IngestTodayVolumeBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestTodayVolumeUpperBulkUseCase]
+]
+"""ka10030 당일 거래량 ranking Bulk factory (Phase F-4)."""
+
+IngestPredVolumeBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestPredVolumeUpperBulkUseCase]
+]
+"""ka10031 전일 거래량 ranking Bulk factory (Phase F-4)."""
+
+IngestTradeAmountBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestTradeAmountUpperBulkUseCase]
+]
+"""ka10032 거래대금 ranking Bulk factory (Phase F-4)."""
+
+IngestVolumeSdninBulkUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestVolumeSdninBulkUseCase]
+]
+"""ka10023 거래량 급증 ranking Bulk factory (Phase F-4)."""
+
+# Phase F-4 Step 2 fix G-3 — 단건 모드 분리 (5 단건 factory).
+# router /sync endpoint 가 body 의 mrkt_tp/sort_tp/stex_tp 로 1×1 단건 호출.
+
+IngestFluRtUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestFluRtUpperUseCase]
+]
+"""ka10027 등락률 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+
+IngestTodayVolumeUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestTodayVolumeUpperUseCase]
+]
+"""ka10030 당일 거래량 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+
+IngestPredVolumeUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestPredVolumeUpperUseCase]
+]
+"""ka10031 전일 거래량 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+
+IngestTradeAmountUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestTradeAmountUpperUseCase]
+]
+"""ka10032 거래대금 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+
+IngestVolumeSdninUseCaseFactory = Callable[
+    [str], AbstractAsyncContextManager[IngestVolumeSdninUseCase]
+]
+"""ka10023 거래량 급증 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+
 
 def get_settings_dep() -> Settings:
     return get_settings()
@@ -202,6 +271,18 @@ _ingest_short_selling_bulk_factory: IngestShortSellingBulkUseCaseFactory | None 
 _ingest_lending_market_factory: IngestLendingMarketUseCaseFactory | None = None
 _ingest_lending_stock_single_factory: IngestLendingStockUseCaseFactory | None = None
 _ingest_lending_stock_bulk_factory: IngestLendingStockBulkUseCaseFactory | None = None
+# Phase F-4 — 5 ranking endpoint Bulk factory singletons
+_ingest_flu_rt_bulk_factory: IngestFluRtBulkUseCaseFactory | None = None
+_ingest_today_volume_bulk_factory: IngestTodayVolumeBulkUseCaseFactory | None = None
+_ingest_pred_volume_bulk_factory: IngestPredVolumeBulkUseCaseFactory | None = None
+_ingest_trade_amount_bulk_factory: IngestTradeAmountBulkUseCaseFactory | None = None
+_ingest_volume_sdnin_bulk_factory: IngestVolumeSdninBulkUseCaseFactory | None = None
+# Phase F-4 Step 2 fix G-3 — 5 단건 factory singletons (sync endpoint 1×1 호출)
+_ingest_flu_rt_factory: IngestFluRtUseCaseFactory | None = None
+_ingest_today_volume_factory: IngestTodayVolumeUseCaseFactory | None = None
+_ingest_pred_volume_factory: IngestPredVolumeUseCaseFactory | None = None
+_ingest_trade_amount_factory: IngestTradeAmountUseCaseFactory | None = None
+_ingest_volume_sdnin_factory: IngestVolumeSdninUseCaseFactory | None = None
 
 
 def get_token_manager() -> TokenManager:
@@ -470,8 +551,302 @@ def set_ingest_lending_stock_bulk_factory(
     _ingest_lending_stock_bulk_factory = factory
 
 
+# ----------------------------------------------------------------------------
+# Phase F-4 — 5 ranking endpoint Bulk factory getters / setters / resets
+# ----------------------------------------------------------------------------
+
+
+def get_ingest_flu_rt_bulk_factory() -> IngestFluRtBulkUseCaseFactory:
+    """ka10027 등락률 ranking Bulk factory (Phase F-4). lifespan 에서 set.
+
+    factory 미초기화 시 lazy factory 반환 — body validation 이 dependency 보다
+    먼저 처리되도록 호출 시점에 503 raise.
+    """
+    factory = _ingest_flu_rt_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="flu_rt ranking bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_flu_rt_bulk_factory(factory: IngestFluRtBulkUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — ka10027 ranking bulk 라우터/scheduler 공용."""
+    global _ingest_flu_rt_bulk_factory
+    _ingest_flu_rt_bulk_factory = factory
+
+
+def reset_ingest_flu_rt_bulk_factory() -> None:
+    """lifespan teardown + 테스트 — flu_rt factory 만 리셋."""
+    global _ingest_flu_rt_bulk_factory
+    _ingest_flu_rt_bulk_factory = None
+
+
+def get_ingest_today_volume_bulk_factory() -> IngestTodayVolumeBulkUseCaseFactory:
+    """ka10030 당일 거래량 ranking Bulk factory (Phase F-4).
+
+    factory 미초기화 시 lazy factory 반환 — body validation 이 dependency 보다
+    먼저 처리되도록 호출 시점에 503 raise (F-4 Step 2 fix H-2 통일).
+    """
+    factory = _ingest_today_volume_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="today_volume ranking bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_today_volume_bulk_factory(
+    factory: IngestTodayVolumeBulkUseCaseFactory,
+) -> None:
+    global _ingest_today_volume_bulk_factory
+    _ingest_today_volume_bulk_factory = factory
+
+
+def reset_ingest_today_volume_bulk_factory() -> None:
+    global _ingest_today_volume_bulk_factory
+    _ingest_today_volume_bulk_factory = None
+
+
+def get_ingest_pred_volume_bulk_factory() -> IngestPredVolumeBulkUseCaseFactory:
+    """ka10031 전일 거래량 ranking Bulk factory (Phase F-4).
+
+    factory 미초기화 시 lazy factory 반환 (F-4 Step 2 fix H-2 통일).
+    """
+    factory = _ingest_pred_volume_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="pred_volume ranking bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_pred_volume_bulk_factory(
+    factory: IngestPredVolumeBulkUseCaseFactory,
+) -> None:
+    global _ingest_pred_volume_bulk_factory
+    _ingest_pred_volume_bulk_factory = factory
+
+
+def reset_ingest_pred_volume_bulk_factory() -> None:
+    global _ingest_pred_volume_bulk_factory
+    _ingest_pred_volume_bulk_factory = None
+
+
+def get_ingest_trade_amount_bulk_factory() -> IngestTradeAmountBulkUseCaseFactory:
+    """ka10032 거래대금 ranking Bulk factory (Phase F-4).
+
+    factory 미초기화 시 lazy factory 반환 (F-4 Step 2 fix H-2 통일).
+    """
+    factory = _ingest_trade_amount_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="trade_amount ranking bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_trade_amount_bulk_factory(
+    factory: IngestTradeAmountBulkUseCaseFactory,
+) -> None:
+    global _ingest_trade_amount_bulk_factory
+    _ingest_trade_amount_bulk_factory = factory
+
+
+def reset_ingest_trade_amount_bulk_factory() -> None:
+    global _ingest_trade_amount_bulk_factory
+    _ingest_trade_amount_bulk_factory = None
+
+
+def get_ingest_volume_sdnin_bulk_factory() -> IngestVolumeSdninBulkUseCaseFactory:
+    """ka10023 거래량 급증 ranking Bulk factory (Phase F-4).
+
+    factory 미초기화 시 lazy factory 반환 (F-4 Step 2 fix H-2 통일).
+    """
+    factory = _ingest_volume_sdnin_bulk_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="volume_sdnin ranking bulk UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_volume_sdnin_bulk_factory(
+    factory: IngestVolumeSdninBulkUseCaseFactory,
+) -> None:
+    global _ingest_volume_sdnin_bulk_factory
+    _ingest_volume_sdnin_bulk_factory = factory
+
+
+def reset_ingest_volume_sdnin_bulk_factory() -> None:
+    global _ingest_volume_sdnin_bulk_factory
+    _ingest_volume_sdnin_bulk_factory = None
+
+
+# ----------------------------------------------------------------------------
+# Phase F-4 Step 2 fix G-3 — 5 단건 factory getters / setters / resets
+# router /sync endpoint 가 body 의 mrkt_tp/sort_tp/stex_tp 로 1×1 호출.
+# lazy missing factory 패턴 통일 (H-2).
+# ----------------------------------------------------------------------------
+
+
+def get_ingest_flu_rt_factory() -> IngestFluRtUseCaseFactory:
+    """ka10027 등락률 ranking 단건 factory (Phase F-4 Step 2 fix G-3).
+
+    factory 미초기화 시 lazy factory 반환 (H-2 통일).
+    """
+    factory = _ingest_flu_rt_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="flu_rt ranking single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_flu_rt_factory(factory: IngestFluRtUseCaseFactory) -> None:
+    """lifespan 시작 시 호출 — ka10027 단건 라우터/scheduler 공용."""
+    global _ingest_flu_rt_factory
+    _ingest_flu_rt_factory = factory
+
+
+def reset_ingest_flu_rt_factory() -> None:
+    """lifespan teardown + 테스트 — flu_rt single factory 만 리셋."""
+    global _ingest_flu_rt_factory
+    _ingest_flu_rt_factory = None
+
+
+def get_ingest_today_volume_factory() -> IngestTodayVolumeUseCaseFactory:
+    """ka10030 당일 거래량 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+    factory = _ingest_today_volume_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="today_volume ranking single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_today_volume_factory(factory: IngestTodayVolumeUseCaseFactory) -> None:
+    global _ingest_today_volume_factory
+    _ingest_today_volume_factory = factory
+
+
+def reset_ingest_today_volume_factory() -> None:
+    global _ingest_today_volume_factory
+    _ingest_today_volume_factory = None
+
+
+def get_ingest_pred_volume_factory() -> IngestPredVolumeUseCaseFactory:
+    """ka10031 전일 거래량 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+    factory = _ingest_pred_volume_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="pred_volume ranking single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_pred_volume_factory(factory: IngestPredVolumeUseCaseFactory) -> None:
+    global _ingest_pred_volume_factory
+    _ingest_pred_volume_factory = factory
+
+
+def reset_ingest_pred_volume_factory() -> None:
+    global _ingest_pred_volume_factory
+    _ingest_pred_volume_factory = None
+
+
+def get_ingest_trade_amount_factory() -> IngestTradeAmountUseCaseFactory:
+    """ka10032 거래대금 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+    factory = _ingest_trade_amount_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="trade_amount ranking single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_trade_amount_factory(factory: IngestTradeAmountUseCaseFactory) -> None:
+    global _ingest_trade_amount_factory
+    _ingest_trade_amount_factory = factory
+
+
+def reset_ingest_trade_amount_factory() -> None:
+    global _ingest_trade_amount_factory
+    _ingest_trade_amount_factory = None
+
+
+def get_ingest_volume_sdnin_factory() -> IngestVolumeSdninUseCaseFactory:
+    """ka10023 거래량 급증 ranking 단건 factory (Phase F-4 Step 2 fix G-3)."""
+    factory = _ingest_volume_sdnin_factory
+    if factory is None:
+        @asynccontextmanager
+        async def _missing_factory(_alias: str):  # type: ignore[no-untyped-def]
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="volume_sdnin ranking single UseCase factory 미초기화",
+            )
+            yield  # unreachable
+        return _missing_factory
+    return factory
+
+
+def set_ingest_volume_sdnin_factory(factory: IngestVolumeSdninUseCaseFactory) -> None:
+    global _ingest_volume_sdnin_factory
+    _ingest_volume_sdnin_factory = factory
+
+
+def reset_ingest_volume_sdnin_factory() -> None:
+    global _ingest_volume_sdnin_factory
+    _ingest_volume_sdnin_factory = None
+
+
 def reset_token_manager() -> None:
-    """테스트 전용 — 모든 싱글톤 리셋."""
+    """테스트 전용 — 모든 싱글톤 리셋 (F-4 Step 2 fix H-1: 5 ranking 단건 + 5 Bulk 포함)."""
     global \
         _token_manager_singleton, \
         _revoke_use_case_singleton, \
@@ -488,7 +863,17 @@ def reset_token_manager() -> None:
         _ingest_short_selling_bulk_factory, \
         _ingest_lending_market_factory, \
         _ingest_lending_stock_single_factory, \
-        _ingest_lending_stock_bulk_factory
+        _ingest_lending_stock_bulk_factory, \
+        _ingest_flu_rt_bulk_factory, \
+        _ingest_today_volume_bulk_factory, \
+        _ingest_pred_volume_bulk_factory, \
+        _ingest_trade_amount_bulk_factory, \
+        _ingest_volume_sdnin_bulk_factory, \
+        _ingest_flu_rt_factory, \
+        _ingest_today_volume_factory, \
+        _ingest_pred_volume_factory, \
+        _ingest_trade_amount_factory, \
+        _ingest_volume_sdnin_factory
     _token_manager_singleton = None
     _revoke_use_case_singleton = None
     _sync_sector_factory = None
@@ -505,6 +890,17 @@ def reset_token_manager() -> None:
     _ingest_lending_market_factory = None
     _ingest_lending_stock_single_factory = None
     _ingest_lending_stock_bulk_factory = None
+    # Phase F-4 — 5 ranking Bulk + 5 단건 (H-1)
+    _ingest_flu_rt_bulk_factory = None
+    _ingest_today_volume_bulk_factory = None
+    _ingest_pred_volume_bulk_factory = None
+    _ingest_trade_amount_bulk_factory = None
+    _ingest_volume_sdnin_bulk_factory = None
+    _ingest_flu_rt_factory = None
+    _ingest_today_volume_factory = None
+    _ingest_pred_volume_factory = None
+    _ingest_trade_amount_factory = None
+    _ingest_volume_sdnin_factory = None
 
 
 def reset_sync_sector_factory() -> None:
@@ -594,28 +990,48 @@ def reset_ingest_lending_stock_bulk_factory() -> None:
 __all__ = [
     "IngestDailyFlowUseCaseFactory",
     "IngestDailyOhlcvUseCaseFactory",
+    "IngestFluRtBulkUseCaseFactory",
+    "IngestFluRtUseCaseFactory",
     "IngestLendingMarketUseCaseFactory",
     "IngestLendingStockBulkUseCaseFactory",
     "IngestLendingStockUseCaseFactory",
     "IngestPeriodicOhlcvUseCaseFactory",
+    "IngestPredVolumeBulkUseCaseFactory",
+    "IngestPredVolumeUseCaseFactory",
     "IngestSectorDailyBulkUseCaseFactory",
     "IngestSectorDailySingleUseCaseFactory",
     "IngestShortSellingBulkUseCaseFactory",
     "IngestShortSellingUseCaseFactory",
+    "IngestTodayVolumeBulkUseCaseFactory",
+    "IngestTodayVolumeUseCaseFactory",
+    "IngestTradeAmountBulkUseCaseFactory",
+    "IngestTradeAmountUseCaseFactory",
+    "IngestVolumeSdninBulkUseCaseFactory",
+    "IngestVolumeSdninUseCaseFactory",
     "LookupStockUseCaseFactory",
     "SyncSectorUseCaseFactory",
     "SyncStockFundamentalUseCaseFactory",
     "SyncStockMasterUseCaseFactory",
     "get_ingest_daily_flow_factory",
+    "get_ingest_flu_rt_bulk_factory",
+    "get_ingest_flu_rt_factory",
     "get_ingest_lending_market_factory",
     "get_ingest_lending_stock_bulk_factory",
     "get_ingest_lending_stock_single_factory",
     "get_ingest_ohlcv_factory",
     "get_ingest_periodic_ohlcv_factory",
+    "get_ingest_pred_volume_bulk_factory",
+    "get_ingest_pred_volume_factory",
     "get_ingest_sector_daily_factory",
     "get_ingest_sector_single_factory",
     "get_ingest_short_selling_bulk_factory",
     "get_ingest_short_selling_single_factory",
+    "get_ingest_today_volume_bulk_factory",
+    "get_ingest_today_volume_factory",
+    "get_ingest_trade_amount_bulk_factory",
+    "get_ingest_trade_amount_factory",
+    "get_ingest_volume_sdnin_bulk_factory",
+    "get_ingest_volume_sdnin_factory",
     "get_lookup_stock_factory",
     "get_revoke_use_case",
     "get_settings_dep",
@@ -625,30 +1041,50 @@ __all__ = [
     "get_token_manager",
     "require_admin_key",
     "reset_ingest_daily_flow_factory",
+    "reset_ingest_flu_rt_bulk_factory",
+    "reset_ingest_flu_rt_factory",
     "reset_ingest_lending_market_factory",
     "reset_ingest_lending_stock_bulk_factory",
     "reset_ingest_lending_stock_single_factory",
     "reset_ingest_ohlcv_factory",
     "reset_ingest_periodic_ohlcv_factory",
+    "reset_ingest_pred_volume_bulk_factory",
+    "reset_ingest_pred_volume_factory",
     "reset_ingest_sector_daily_factory",
     "reset_ingest_sector_single_factory",
     "reset_ingest_short_selling_bulk_factory",
     "reset_ingest_short_selling_single_factory",
+    "reset_ingest_today_volume_bulk_factory",
+    "reset_ingest_today_volume_factory",
+    "reset_ingest_trade_amount_bulk_factory",
+    "reset_ingest_trade_amount_factory",
+    "reset_ingest_volume_sdnin_bulk_factory",
+    "reset_ingest_volume_sdnin_factory",
     "reset_lookup_stock_factory",
     "reset_sync_fundamental_factory",
     "reset_sync_sector_factory",
     "reset_sync_stock_factory",
     "reset_token_manager",
     "set_ingest_daily_flow_factory",
+    "set_ingest_flu_rt_bulk_factory",
+    "set_ingest_flu_rt_factory",
     "set_ingest_lending_market_factory",
     "set_ingest_lending_stock_bulk_factory",
     "set_ingest_lending_stock_single_factory",
     "set_ingest_ohlcv_factory",
     "set_ingest_periodic_ohlcv_factory",
+    "set_ingest_pred_volume_bulk_factory",
+    "set_ingest_pred_volume_factory",
     "set_ingest_sector_daily_factory",
     "set_ingest_sector_single_factory",
     "set_ingest_short_selling_bulk_factory",
     "set_ingest_short_selling_single_factory",
+    "set_ingest_today_volume_bulk_factory",
+    "set_ingest_today_volume_factory",
+    "set_ingest_trade_amount_bulk_factory",
+    "set_ingest_trade_amount_factory",
+    "set_ingest_volume_sdnin_bulk_factory",
+    "set_ingest_volume_sdnin_factory",
     "set_lookup_stock_factory",
     "set_revoke_use_case",
     "set_sync_fundamental_factory",

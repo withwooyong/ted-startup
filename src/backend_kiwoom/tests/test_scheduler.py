@@ -400,6 +400,12 @@ async def test_lifespan_startup_and_shutdown_cycle_with_scheduler_enabled(
     monkeypatch.setenv("SCHEDULER_SHORT_SELLING_SYNC_ALIAS", "smoke-test-alias")  # Phase E: short_selling 도 필수
     monkeypatch.setenv("SCHEDULER_LENDING_MARKET_SYNC_ALIAS", "smoke-test-alias")  # Phase E: lending_market 도 필수
     monkeypatch.setenv("SCHEDULER_LENDING_STOCK_SYNC_ALIAS", "smoke-test-alias")  # Phase E: lending_stock 도 필수
+    # F-4 Step 2 fix C-2 — 5 ranking endpoint alias (default _enabled=True 라 필수)
+    monkeypatch.setenv("SCHEDULER_FLU_RT_RANKING_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_TODAY_VOLUME_RANKING_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_PRED_VOLUME_RANKING_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_TRADE_AMOUNT_RANKING_SYNC_ALIAS", "smoke-test-alias")
+    monkeypatch.setenv("SCHEDULER_VOLUME_SDNIN_RANKING_SYNC_ALIAS", "smoke-test-alias")
     monkeypatch.setenv("KIWOOM_CREDENTIAL_MASTER_KEY", valid_key)
 
     from app.config.settings import get_settings

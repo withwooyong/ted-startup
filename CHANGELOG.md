@@ -7,6 +7,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-16] feat(kiwoom): Phase F-4 — 5 ranking endpoint 통합 (ka10027/30/31/32/23 + Migration 018 + ranking_snapshot + JSONB payload + 15 라우터 + 5 cron) (ted-run 풀 파이프라인, Agent tool)
+
+25 endpoint **20/25 (80%)** 도달. 사용자 D-1~D-14 일괄 + G-1/G-2/G-3 추가 확정 (본 chunk 일괄 fix / misfire 21600 통일 / 단건 모드 분리). R1 sonnet 8.0 + opus 5.5 D (CRITICAL 3 + HIGH 5 + MED 6) → fix 10건 → R2 sonnet 9.2 PASS + opus 8.6 B+ CONDITIONAL / inherit 5건. **1424 PASS** (+140) / cov **85.00%** (-1.56%p, 대량 신규 코드 dip) / mypy strict **103 files** / ruff clean. ADR § 48 신규 (9 sub-§). 메모리 정책 update 2건 (추천 정책 진화 + chunk = plan doc + ted-run 명시 호출).
+
+### 변경 사항 (13 production + 4 test 신규 + 11 test 미커밋(Step 0a~0e) + 메타 4종 + ADR + .env.prod = 35+ 파일)
+
+#### Migration / DB
+- `migrations/versions/018_ranking_snapshot.py` 신규 — `kiwoom.ranking_snapshot` 테이블 (UNIQUE 7컬럼 + GIN payload + partial index) + downgrade row-count 가드
+- Migration 번호 정정: plan doc "007" stale → 실제 head 017 → **018**
+
+#### Core (13 production 파일)
+- `app/adapter/out/persistence/models/ranking_snapshot.py` — SQLAlchemy 2.0 Mapped + JSONB + UniqueConstraint + 3 Index
+- `app/adapter/out/persistence/repositories/ranking_snapshot.py` — `upsert_many` (`_chunked_upsert` chunk_size=2000 적용) + `get_at_snapshot` (Optional 필터)
+- `app/adapter/out/kiwoom/rkinfo.py` — KiwoomRkInfoClient 5 fetch + `_paginated_fetch` 공통 helper
+- `app/adapter/out/kiwoom/_records.py` — 7 enum (RankingType / RankingMarketType / RankingExchangeType / FluRtSortType / TodayVolumeSortType / VolumeSdninSortType / VolumeSdninTimeType) + 5 Row + 5 Response (D-9 nested payload)
+- `app/application/dto/ranking.py` — `NormalizedRanking` frozen / `RankingIngestOutcome` / `RankingBulkResult` (`int | None` sentinel, F-3 tuple errors_above_threshold)
+- `app/application/service/ranking_service.py` — 5 단건 + 5 Bulk UseCase + `_persist_common` 통합 + `_empty_bulk_result` (F-3 정착 1:1)
+- `app/adapter/web/routers/rankings.py` — 15 endpoint (5 sync `_invoke_single` 단건 / 5 bulk-sync 매트릭스 / 5 GET snapshot)
+- `app/batch/ranking_jobs.py` — 5 cron `fire_*_sync` + `is_trading_day` 가드 + `errors_above_threshold` logger.error
+- `app/scheduler.py` — 5 RankingScheduler (19:30/35/40/45/50 KST mon-fri, misfire **21600** ADR § 43 통일)
+- `app/adapter/web/_deps.py` — 10 factory (5 단건 + 5 Bulk) + lazy `_missing_factory` 통일 + `reset_token_manager` 추가
+- `app/main.py` — lifespan 10 setter + 5 scheduler 인스턴스 + 17 state.schedulers + fail-fast 5 alias
+- `app/adapter/out/persistence/repositories/stock.py` — `find_by_codes` bulk lookup 메서드 추가
+- `app/config/settings.py` — 10 신규 env (5 alias + 5 enabled)
+
+#### Test (11 파일 / Step 0a~0e 누적)
+- `tests/test_migration_018.py` (9) / `test_ranking_snapshot_repository.py` (14) / `test_stock_repository.py` (+4) / `test_rkinfo_client.py` (25) / `test_records_ranking.py` (16) / `test_ranking_dto.py` (8) / `test_ranking_service.py` (22)
+- `tests/test_rankings_router.py` (15) / `test_ranking_jobs.py` (10) / `test_scheduler_phase_f_4.py` (7) / `tests/integration/test_ranking_snapshot_e2e.py` (8, testcontainers PG16)
+- `tests/test_migration_017_numeric_precision.py` — head 비교 → revision history walk (Migration 018 호환)
+
+#### 운영 환경
+- `.env.prod` — 10 신규 env (`KIWOOM_SCHEDULER_FLU_RT_RANKING_SYNC_{ENABLED,ALIAS}` × 5)
+
+#### 문서 / 메타 (4종)
+- `docs/ADR/ADR-0001-backend-kiwoom-foundation.md` § 48 신규 (9 sub-§)
+- `src/backend_kiwoom/docs/plans/phase-f-4-rankings.md` § 11~15 누적 갱신
+- `src/backend_kiwoom/STATUS.md` (25 endpoint 60% → 80%)
+- `HANDOFF.md` rewrite (본 chunk 단면)
+- `CHANGELOG.md` (본 항목)
+
+#### 메모리 정책 (사용자 정정 2건)
+- `feedback_recommendation_over_question` update — 복잡 결정 게이트는 Recommended 포함
+- `feedback_plan_doc_per_chunk` 신규 — chunk = plan doc + ted-run skill 명시 호출 + 누적 갱신
+- `MEMORY.md` index 갱신 (12 → 13 entries)
+
+---
+
 ## [2026-05-14] refactor(kiwoom): Phase F-3 — R2 inherit 7건 정리 (SkipReason Enum + errors_above_threshold tuple 통일 + empty helper + 단건 sentinel catch) (ted-run 풀 파이프라인)
 
 ADR § 46.8 R2 inherit 7건 전부 해소 + § 47 신규. 사용자 8 확정 D-1~D-8 (권고 default 일괄 채택). 1284 PASS / cov 86.56% (+0.13%p) / mypy 106 files (+1) / R1 HIGH 2 fix → R2 ruff auto-fix → 양쪽 합의 PASS.
