@@ -648,7 +648,7 @@ Step 4 E2E ⚪ 자동 생략 (UI 변경 0).
 - ✅ STATUS.md § 0 / § 1 / § 2 (80% → **92%**) / § 4 / § 5 / § 6 갱신
 - ✅ HANDOFF.md rewrite (Phase G 완료 + 5-18 dry-run + 다음 chunk = inh-1 D-12 → D-2 ka10080 → Phase H)
 - ✅ CHANGELOG.md prepend (2026-05-16 Phase G)
-- ✅ 한글 커밋 — `<this commit>`
+- ✅ 한글 커밋 — `e8c901d`
 - 사용자 push 명시 요청 시 push (글로벌 정책)
 
 ### 15.3 운영 발화 시점

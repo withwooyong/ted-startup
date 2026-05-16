@@ -2,7 +2,7 @@
 
 > Last updated: 2026-05-16 (KST) — **Phase G ted-run 풀 파이프라인 완료** (메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk). 25 endpoint **23/25 (92%)** 도달. ADR § 49 신규 / plan doc § 11~15 누적 / 메타 4종 동시 갱신.
 > Branch: `master`
-> Latest commit: `<this commit>` (Phase G 3 endpoint 통합)
+> Latest commit: `e8c901d` (Phase G 3 endpoint 통합)
 > **본 세션 commit: 1건** (Phase G + 메타 4종 일괄)
 > **미푸시: 1건** (사용자 push 명시 요청 시 push — 글로벌 정책)
 
@@ -35,7 +35,7 @@
 
 | # | Task | Commit | Files |
 |---|------|--------|-------|
-| 1 | Phase G plan doc 신규 (`phase-g-investor-flow.md` 17 결정 게이트 + 10 § / 485줄 → 누적 갱신 후 ~800줄) | `<this commit>` | 1 plan doc |
+| 1 | Phase G plan doc 신규 (`phase-g-investor-flow.md` 17 결정 게이트 + 10 § / 485줄 → 누적 갱신 후 ~800줄) | `e8c901d` | 1 plan doc |
 | 2 | Phase G Step 0b TDD red 14 테스트 파일 / ~185 케이스 (sonnet sub-agent) | (commit 일괄) | 14 test |
 | 3 | Phase G Step 1 구현 22 파일 (신규 16 + 갱신 6) / +~3,900 라인 (opus sub-agent) | 동일 | 22 production |
 | 4 | Phase G Step 2 fix R1 17건 일괄 (G-1 즉시 / 8 파일 +~700/-100) | 동일 | 8 파일 (4 갱신) |
