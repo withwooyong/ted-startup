@@ -4035,3 +4035,5 @@ INFO  [alembic.runtime.migration] Running upgrade 016_short_lending -> 017_ka100
 **MEMORY.md index**: 12 → 13 entries.
 
 **chunk 분할 견적 vs 실측**: plan doc § 5 견적 ~2,300-2,500줄 → 실측 Step 1 ~1,500줄 + Step 2 fix R1 +~570 = ~2,070 라인. `feedback_chunk_split_for_pipelines` 임계 1,500줄 _초과_ 했으나 사용자 G-1(a) 명시 확정 후 본 chunk 일괄 진행.
+
+**Commit**: `4fc78a5` (2026-05-16, 36 files / +9,312 / -217).

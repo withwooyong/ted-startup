@@ -1,10 +1,10 @@
 # Session Handoff
 
-> Last updated: 2026-05-16 (KST) — **Phase F-4 ted-run 풀 파이프라인 완료** (Agent tool 사용, 메모리 정책 미정착 시점). 25 endpoint **20/25 (80%)** 도달. ADR § 48 신규 / plan doc § 11~15 누적 / 메타 4종 갱신. 한글 커밋 + 사용자 push 명시 시 push.
+> Last updated: 2026-05-16 (KST) — **Phase F-4 ted-run 풀 파이프라인 완료 + push finalize** (Agent tool 사용, 메모리 정책 미정착 시점 — 다음 chunk 부터 /ted-run 명시 호출). 25 endpoint **20/25 (80%)** 도달. ADR § 48 신규 / plan doc § 11~15 누적 / 메타 4종 갱신.
 > Branch: `master`
-> Latest commit: `598b3c5` (Phase H plan doc 신규)
-> **본 세션 commit: 1건 (push 완료)** + Phase F-4 마무리 commit 1건 (push 대기)
-> **미커밋 변경**: Phase F-4 의 production 13 파일 + test 11 파일 (Step 0a~0e) + 메타 4종 (STATUS/HANDOFF/CHANGELOG/plan doc) + ADR § 48 + 메모리 3건 (`feedback_recommendation_over_question` update / `feedback_plan_doc_per_chunk` 신규 / MEMORY.md index) + `.env.prod` 10 신규 env
+> Latest commit: `4fc78a5` (Phase F-4 5 ranking endpoint 통합)
+> **본 세션 commit: 2건 + finalize 1건** (`598b3c5` Phase H plan doc + `4fc78a5` Phase F-4 + 본 commit HANDOFF finalize)
+> **미푸시: 0건** (push 완료 시 갱신)
 
 ## Current Status
 
