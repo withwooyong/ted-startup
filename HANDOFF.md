@@ -3,8 +3,8 @@
 > Last updated: 2026-05-16 (KST) — **Phase G ted-run 풀 파이프라인 완료** (메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk). 25 endpoint **23/25 (92%)** 도달. ADR § 49 신규 / plan doc § 11~15 누적 / 메타 4종 동시 갱신.
 > Branch: `master`
 > Latest commit: `e8c901d` (Phase G 3 endpoint 통합)
-> **본 세션 commit: 1건** (Phase G + 메타 4종 일괄)
-> **미푸시: 1건** (사용자 push 명시 요청 시 push — 글로벌 정책)
+> **본 세션 commit: 2건** (`e8c901d` Phase G + `744dabf` finalize)
+> **미푸시: 0건** (push 완료 — `0aabea4..744dabf` master → origin/master)
 
 ## Current Status
 
