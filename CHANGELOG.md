@@ -7,6 +7,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/).
 
 ---
 
+## [2026-05-17] refactor(kiwoom): Phase G inh-5 해소 — `_unwrap_client_rows` 휴리스틱 → 명시 분기 + TypeError raise (type-safety micro-fix)
+
+Phase G R2 inherit 5건 중 inh-5 해소. `investor_flow_service.py:69-99` 의 `_unwrap_client_rows` 헬퍼가 `isinstance(result, tuple) and len == 2` 휴리스틱 + fallback `list(result)` 사용 → silent fail 위험 (dict 입력 시 keys 반환 등). 명시 분기 + 미지원 타입 `TypeError` raise + 디버깅 가시화 docstring.
+
+### 변경 사항
+- `app/application/service/investor_flow_service.py:69-99` — `_unwrap_client_rows`:
+  - tuple 분기: `len != 2` 시 `TypeError`, `rows is None` 시 `[]`, `rows` 가 list 아니면 `TypeError`
+  - list 분기: 그대로 반환
+  - 그 외: `TypeError` (fallback `list(result)` 제거 — silent fail 차단)
+  - docstring 에 Phase G inh-5 / ADR § 49.4 § 49.8 참조 명시 + 3 client 메서드 경로 추가
+- 회귀 0건: pytest **1596 PASS** 유지 / ruff clean / mypy strict PASS
+
+### 영향 범위 (1 파일)
+- production 1 파일 / +~25 라인 / -~7 라인 (순증 ~18 라인)
+- 테스트 변경 0 (Phase G test 14 파일 모두 기존 mock 패턴 그대로 동작)
+
+### Phase G R2 inherit 진척 (5건 → 4건)
+- ✅ inh-5 해소 (본 commit)
+- 🔄 잔여: inh-1 (5-25 D-12 chunk) / inh-2 (Phase H D-11) / inh-3 (Migration 020) / inh-4 (Phase H 품질 모니터)
+
+---
+
 ## [2026-05-16] feat(kiwoom): Phase G — 투자자별 매매 흐름 3 endpoint 통합 (ka10058/10059/10131 + Migration 019 + 3 테이블 + KiwoomForeignClient 신규 + 9 라우터 + 3 cron) (ted-run 풀 파이프라인, **메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk**)
 
 25 endpoint **23/25 (92%)** 도달. 사용자 D-1~D-17 권고 default 일괄 채택. R1 sonnet 5.8 RETRY + opus 적대적 4.5 D (CRITICAL 8 + HIGH 7, 적대적 시뮬레이션 7 PASS + 1 N/A) → fix 17건 (G-1 즉시 일괄 / G-2 misfire 21600 통일 / G-3 단건 모드 분리) → R2 sonnet 9.2 PASS + opus 8.4 B+ CONDITIONAL / inherit 5건 (inh-1 ka10059 트랜잭션 오염 / D-11 임계치 / N-1 NULL distinct / N-2 lookup miss 모니터 / H-5 `_unwrap_client_rows`). **1596 PASS** (+172) / cov **84%** (-1.0%p, 대량 신규 코드 dip) / mypy strict **114 files** (+11) / ruff clean. ADR § 49 신규 (9 sub-§). **본 chunk = backend_kiwoom 최대 chunk** (~4,600 production + 4,829 test 라인).

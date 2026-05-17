@@ -69,16 +69,37 @@ class _StockLookupProtocol(Protocol):
 def _unwrap_client_rows(result: Any) -> list[Any]:
     """Adapter 응답이 ``(rows, used_filters)`` tuple 또는 ``rows`` list — 양쪽 지원.
 
-    운영 코드 (``KiwoomStkInfoClient.fetch_investor_daily_trade_stocks``) 는 tuple 반환.
-    테스트 mock 은 list 직접 반환 (간이성). 본 helper 가 둘 모두 list 로 정규화.
+    운영 코드 (``KiwoomStkInfoClient.fetch_investor_daily_trade_stocks`` /
+    ``KiwoomStkInfoClient.fetch_stock_investor_breakdown`` /
+    ``KiwoomForeignClient.fetch_continuous``) 는 모두 ``tuple[list[...], dict[str, Any]]`` 반환.
+    테스트 mock 은 list 직접 반환 (간이성).
+
+    Phase G inh-5 (ADR § 49.4 / § 49.8) — 휴리스틱 ``isinstance(result, tuple) and len == 2``
+    + fallback ``list(result)`` 가 silent fail 위험 (예: dict 입력 시 keys 반환). 본 helper 는
+    명시 분기 + 미지원 타입은 ``TypeError`` raise — 디버깅 가시화 + 향후 client 시그니처 변경 시
+    조용히 깨지지 않게 가드.
     """
-    if isinstance(result, tuple) and len(result) == 2:
+    if isinstance(result, tuple):
+        if len(result) != 2:
+            raise TypeError(
+                f"Adapter 응답 tuple length 2 기대 (rows, used_filters), "
+                f"실제 length={len(result)}"
+            )
         rows, _used = result
-        return list(rows) if rows is not None else []
+        if rows is None:
+            return []
+        if not isinstance(rows, list):
+            raise TypeError(
+                f"Adapter 응답 tuple[0] (rows) list 기대, "
+                f"실제 type={type(rows).__name__}"
+            )
+        return rows
     if isinstance(result, list):
         return result
-    # fallback — Iterable 등
-    return list(result) if result else []
+    raise TypeError(
+        f"Adapter 응답은 list 또는 (rows, used_filters) tuple 기대, "
+        f"실제 type={type(result).__name__}"
+    )
 
 
 def _resolve_stock_id(value: Any) -> int | None:

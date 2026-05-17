@@ -157,7 +157,7 @@ P3 (선택):
 | ~~**39**~~ | ~~F-4 R2 inherit 5건~~ | ADR § 48.4 / § 48.8 | 🔄 일부 진행 — inh-1 Bulk 트랜잭션 오염 Phase G dry-run 으로 진입 (5-25 별도 chunk) / inh-2~inh-5 Phase F-5 또는 별도 분산 |
 | **40** | 5-17 (월) 19:30 첫 ranking cron 발화 검증 | Phase F-4 운영 검증 | ka10027 → 5분 chain → 19:50 ka10023. 응답 schema / row 수 / lookup miss 비율 / NXT `_NX` 보존 / 23 필드 nested (D-9) 검증. 운영 결정 항목 § 6.6 |
 | **41** | Coverage dip 86.56% → 85.00% → 84% | F-4 + Phase G 누적 | F-4 -1.56%p + Phase G -1.0%p = 누적 -2.56%p. 대량 신규 코드 dip. 운영 1주 후 cron 발화 자연 재평가 |
-| **42** | Phase G R2 inherit 5건 | ADR § 49.4 / § 49.8 | **inh-1** ka10059 Bulk 트랜잭션 오염 (Phase E/F-4 상속, **5-18~5-22 dry-run 후 5-25 (월) 별도 chunk**) / **inh-2** `errors_above_threshold` D-11 임계치 (Phase H) / **inh-3** stock_investor_breakdown UNIQUE NULL distinct (Migration 020 후속) / **inh-4** lookup miss 운영 모니터 (Phase H 데이터 품질) / **inh-5** `_unwrap_client_rows` 휴리스틱 (F-3/F-4 동일, type-safety chunk) |
+| ~~**42**~~ | ~~Phase G R2 inherit 5건~~ | ADR § 49.4 / § 49.8 | 🔄 1건 해소 — **inh-5** `_unwrap_client_rows` 휴리스틱 → Protocol 명시 분기 + `TypeError` raise (2026-05-17 micro-fix, `investor_flow_service.py:69-99`). 잔여 4건: **inh-1** ka10059 Bulk 트랜잭션 오염 (5-18~5-22 dry-run 후 5-25 별도 chunk) / **inh-2** `errors_above_threshold` D-11 임계치 (Phase H) / **inh-3** stock_investor_breakdown UNIQUE NULL distinct (Migration 020 후속) / **inh-4** lookup miss 운영 모니터 (Phase H) |
 | **43** | 5-18 (월) 20:00 첫 Phase G cron 발화 검증 | Phase G 운영 검증 | 20:00 ka10058 → 30분 후 20:30 ka10059 (3000 종목 60분 sync) → 21:00 ka10131. 운영 검증 5건: ka10059 60분 sync 완주율 / inh-1 PG abort 발화 빈도 / 토큰 만료 (D-13) / `netslmt_qty` 부호 / `flu_rt` "+698"→6.98 / `amt_qty_tp` 반대 의미 / `tot_cont_days` 합산 / `_NX` Length=6 |
 
 ---
