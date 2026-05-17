@@ -1,10 +1,10 @@
 # Session Handoff
 
-> Last updated: 2026-05-16 (KST) — **Phase G ted-run 풀 파이프라인 완료** (메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk). 25 endpoint **23/25 (92%)** 도달. ADR § 49 신규 / plan doc § 11~15 누적 / 메타 4종 동시 갱신.
+> Last updated: 2026-05-17 (KST) — **Phase G ted-run 풀 파이프라인 완료 + push 완료** (메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk). 25 endpoint **23/25 (92%)** 도달. ADR § 49 신규 / plan doc § 11~15 누적 / 메타 4종 동시 갱신.
 > Branch: `master`
-> Latest commit: `e8c901d` (Phase G 3 endpoint 통합)
-> **본 세션 commit: 2건** (`e8c901d` Phase G + `744dabf` finalize)
-> **미푸시: 0건** (push 완료 — `0aabea4..744dabf` master → origin/master)
+> Latest commit: `fc6bb88` (HANDOFF push 완료 finalize)
+> **본 세션 commit: 3건** (`e8c901d` Phase G + `744dabf` placeholder finalize + `fc6bb88` push finalize)
+> **미푸시: 0건** (origin/master `0aabea4..fc6bb88` 동기화 완료)
 
 ## Current Status
 
@@ -45,6 +45,8 @@
 | 8 | STATUS.md § 0 / § 1 / § 2 / § 4 / § 5 / § 6 (80% → 92%) | 동일 | STATUS |
 | 9 | HANDOFF.md rewrite (본 문서) | 동일 | HANDOFF |
 | 10 | CHANGELOG.md prepend | 동일 | CHANGELOG |
+| 11 | placeholder `<this commit>` → `e8c901d` 일괄 교체 (4 메타 파일) | `744dabf` | 4 파일 |
+| 12 | push `0aabea4..744dabf` master → origin/master + 미푸시 카운터 finalize | `fc6bb88` | 1 파일 |
 
 ## In Progress / Pending
 
