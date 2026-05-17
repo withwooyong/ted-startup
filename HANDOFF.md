@@ -2,8 +2,8 @@
 
 > Last updated: 2026-05-17 (KST) — **Phase G ted-run 풀 파이프라인 완료 + inh-5 type-safety micro-fix** (메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk). 25 endpoint **23/25 (92%)** 도달. Phase G R2 inherit 5건 → 4건. ADR § 49 신규 / plan doc § 11~15 누적.
 > Branch: `master`
-> Latest commit: `<this commit>` (inh-5 type-safety micro-fix)
-> **본 세션 commit: 5건** (`e8c901d` Phase G + `744dabf` placeholder finalize + `fc6bb88` push finalize + `4f72640` handoff finalize + `<this commit>` inh-5)
+> Latest commit: `8fa17d9` (inh-5 type-safety micro-fix)
+> **본 세션 commit: 5건** (`e8c901d` Phase G + `744dabf` placeholder finalize + `fc6bb88` push finalize + `4f72640` handoff finalize + `8fa17d9` inh-5)
 > **미푸시: 1건** (사용자 push 명시 요청 시 push — 글로벌 정책)
 
 ## Current Status
@@ -45,10 +45,10 @@
 | 8 | STATUS.md § 0 / § 1 / § 2 / § 4 / § 5 / § 6 (80% → 92%) | 동일 | STATUS |
 | 9 | HANDOFF.md rewrite (본 문서) | 동일 | HANDOFF |
 | 10 | CHANGELOG.md prepend | 동일 | CHANGELOG |
-| 11 | placeholder `<this commit>` → `e8c901d` 일괄 교체 (4 메타 파일) | `744dabf` | 4 파일 |
+| 11 | placeholder `8fa17d9` → `e8c901d` 일괄 교체 (4 메타 파일) | `744dabf` | 4 파일 |
 | 12 | push `0aabea4..744dabf` master → origin/master + 미푸시 카운터 finalize | `fc6bb88` | 1 파일 |
 | 13 | /handoff finalize (Last updated 5-17 + 본 세션 3건 명시) | `4f72640` | 1 파일 |
-| 14 | **Phase G inh-5 해소** — `_unwrap_client_rows` 휴리스틱 → Protocol 명시 분기 + TypeError raise (silent fail 차단 / pytest 1596 PASS 유지) | `<this commit>` | 1 파일 (`investor_flow_service.py` +~25/-~7) |
+| 14 | **Phase G inh-5 해소** — `_unwrap_client_rows` 휴리스틱 → Protocol 명시 분기 + TypeError raise (silent fail 차단 / pytest 1596 PASS 유지) | `8fa17d9` | 1 파일 (`investor_flow_service.py` +~25/-~7) |
 
 ## In Progress / Pending
 
