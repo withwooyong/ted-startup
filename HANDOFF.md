@@ -2,9 +2,9 @@
 
 > Last updated: 2026-05-17 (KST) — **Phase G ted-run 풀 파이프라인 완료 + inh-5 type-safety micro-fix** (메모리 정책 `feedback_plan_doc_per_chunk` 정착 첫 chunk). 25 endpoint **23/25 (92%)** 도달. Phase G R2 inherit 5건 → 4건. ADR § 49 신규 / plan doc § 11~15 누적.
 > Branch: `master`
-> Latest commit: `8fa17d9` (inh-5 type-safety micro-fix)
-> **본 세션 commit: 5건** (`e8c901d` Phase G + `744dabf` placeholder finalize + `fc6bb88` push finalize + `4f72640` handoff finalize + `8fa17d9` inh-5)
-> **미푸시: 1건** (사용자 push 명시 요청 시 push — 글로벌 정책)
+> Latest commit: `f35d500` (HANDOFF inh-5 placeholder finalize)
+> **본 세션 commit: 6건** (`e8c901d` Phase G + `744dabf` placeholder finalize + `fc6bb88` push finalize + `4f72640` handoff finalize + `8fa17d9` inh-5 + `f35d500` inh-5 placeholder finalize)
+> **미푸시: 0건** (origin/master `4f72640..f35d500` 동기화 완료)
 
 ## Current Status
 
